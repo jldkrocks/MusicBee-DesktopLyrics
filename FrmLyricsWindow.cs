@@ -141,7 +141,6 @@ namespace MusicBeePlugin
                 }));
             }
             catch (InvalidOperationException) { Interlocked.Exchange(ref _framePending, 0); }
-            catch (ObjectDisposedException) { Interlocked.Exchange(ref _framePending, 0); }
         }
 
         public void UpdateFromSettings(SettingsObj settings)
