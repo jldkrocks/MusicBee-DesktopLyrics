@@ -171,6 +171,15 @@ namespace MusicBeePlugin
                 case NotificationType.PlayStateChanged:
                     UpdatePlayState(_mbApiInterface.Player_GetPlayState());
                     break;
+                case NotificationType.TrackChanged:
+                case NotificationType.NowPlayingArtworkReady:
+                    var artworkView = _frmLyrics as FrmLyricsWindow;
+                    if (artworkView != null && !artworkView.IsDisposed && artworkView.IsHandleCreated)
+                        artworkView.BeginInvoke(new Action(() =>
+                        {
+                            if (!artworkView.IsDisposed) artworkView.RefreshArtwork(true);
+                        }));
+                    break;
                 case NotificationType.NowPlayingLyricsReady:
                     try
                     {

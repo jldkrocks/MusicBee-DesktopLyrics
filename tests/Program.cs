@@ -1,4 +1,7 @@
 using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
 
 namespace MusicBeePlugin
 {
@@ -24,6 +27,30 @@ namespace MusicBeePlugin
             if (lyrics.Entries[3].LyricLine2 != " Translation")
                 throw new Exception("A real translation must remain on the second line.");
             Console.WriteLine("LRC parser checks passed.");
+
+            var imagePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".png");
+            try
+            {
+                using (var image = new Bitmap(48, 48))
+                {
+                    using (var graphics = Graphics.FromImage(image))
+                    {
+                        graphics.Clear(Color.FromArgb(210, 45, 55));
+                        graphics.FillRectangle(Brushes.RoyalBlue, 36, 0, 12, 48);
+                    }
+                    image.Save(imagePath, ImageFormat.Png);
+                }
+                ArtworkPalette palette;
+                if (!ArtworkPalette.TryLoad(imagePath, out palette))
+                    throw new Exception("Album artwork should produce a palette.");
+                if (palette.Left.R <= palette.Left.B || palette.Right.B <= palette.Right.R)
+                    throw new Exception("The palette should reflect both artwork colours.");
+            }
+            finally
+            {
+                File.Delete(imagePath);
+            }
+            Console.WriteLine("Artwork palette checks passed.");
         }
     }
 }

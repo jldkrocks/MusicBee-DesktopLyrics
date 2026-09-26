@@ -10,6 +10,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
+    <Reference Include="System.Drawing" />
+    <Compile Include="..\ArtworkPalette.cs"><Link>ArtworkPalette.cs</Link></Compile>
     <Compile Include="..\LyricParser.cs"><Link>LyricParser.cs</Link></Compile>
     <Compile Include="Program.cs" />
   </ItemGroup>

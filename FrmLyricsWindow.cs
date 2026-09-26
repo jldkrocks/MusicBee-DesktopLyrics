@@ -4,7 +4,9 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Forms;
+using Timer = System.Windows.Forms.Timer;
 
 namespace MusicBeePlugin
 {
@@ -18,12 +20,20 @@ namespace MusicBeePlugin
         private readonly float[] _fft = new float[4096];
         private readonly float[] _bars = new float[BarCount];
         private readonly float[] _levels = new float[BarCount];
+        private readonly float[] _targets = new float[BarCount];
         private readonly Timer _animationTimer;
         private SettingsObj _settings;
         private string _line1 = "", _line2, _nextLine;
         private string _previousLine1, _previousLine2, _previousNextLine;
         private long _transitionStarted;
         private float _gain = 6f;
+        private int _animationFrame;
+        private bool _useArtworkColors;
+        private string _artworkTrackUrl;
+        private int _artworkRequestId;
+        private ArtworkPalette _palette = ArtworkPalette.Default;
+        private ArtworkPalette _paletteFrom, _paletteTo;
+        private long _paletteStarted;
         private bool _loaded;
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
@@ -35,6 +45,7 @@ namespace MusicBeePlugin
         {
             _settings = settings;
             _musicBee = musicBee;
+            _useArtworkColors = settings.UseArtworkColors;
             Text = "Desktop Lyrics";
             FormBorderStyle = FormBorderStyle.SizableToolWindow;
             BackColor = Color.FromArgb(13, 18, 32);
@@ -55,13 +66,20 @@ namespace MusicBeePlugin
                 Location = new Point(workArea.Left + (workArea.Width - Width) / 2,
                                      workArea.Bottom - Height - 70);
 
-            _animationTimer = new Timer { Interval = 33 };
+            _animationTimer = new Timer { Interval = 16 };
             _animationTimer.Tick += (sender, args) =>
             {
-                UpdateSpectrum();
+                if ((_animationFrame++ & 1) == 0) SampleSpectrum();
+                StepSpectrum();
+                AdvancePalette();
                 Invalidate();
             };
-            Shown += (sender, args) => { _loaded = true; _animationTimer.Start(); };
+            Shown += (sender, args) =>
+            {
+                _loaded = true;
+                _animationTimer.Start();
+                RefreshArtwork(true);
+            };
             VisibleChanged += (sender, args) =>
             {
                 if (Visible) _animationTimer.Start();
@@ -93,11 +111,23 @@ namespace MusicBeePlugin
         public void UpdateFromSettings(SettingsObj settings)
         {
             _settings = settings;
+            if (_useArtworkColors != settings.UseArtworkColors)
+            {
+                _useArtworkColors = settings.UseArtworkColors;
+                if (_useArtworkColors) RefreshArtwork(true);
+                else
+                {
+                    Interlocked.Increment(ref _artworkRequestId);
+                    _artworkTrackUrl = null;
+                    SetPalette(ArtworkPalette.Default);
+                }
+            }
             Invalidate();
         }
 
         public void UpdateLyrics(string line1, string line2, string nextLine)
         {
+            RefreshArtwork(false);
             line1 = line1 ?? "";
             if (_line1 == line1 && _line2 == line2 && _nextLine == nextLine) return;
             _previousLine1 = _line1;
@@ -115,6 +145,51 @@ namespace MusicBeePlugin
             UpdateLyrics("", null, null);
         }
 
+        public void RefreshArtwork(bool force)
+        {
+            if (!_useArtworkColors || IsDisposed || !IsHandleCreated) return;
+            string trackUrl;
+            try { trackUrl = _musicBee.NowPlaying_GetFileUrl(); }
+            catch (Exception) { return; }
+            if (!force && trackUrl == _artworkTrackUrl) return;
+            _artworkTrackUrl = trackUrl;
+            var request = Interlocked.Increment(ref _artworkRequestId);
+            ThreadPool.QueueUserWorkItem(state =>
+            {
+                string path = null;
+                try { path = _musicBee.NowPlaying_GetArtwork(); }
+                catch (Exception) { /* Artwork may not be ready yet. */ }
+                ArtworkPalette palette;
+                if (!ArtworkPalette.TryLoad(path, out palette)) palette = ArtworkPalette.Default;
+                if (IsDisposed || !IsHandleCreated) return;
+                try
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        if (request == _artworkRequestId && _useArtworkColors)
+                            SetPalette(palette);
+                    }));
+                }
+                catch (InvalidOperationException) { }
+            });
+        }
+
+        private void SetPalette(ArtworkPalette target)
+        {
+            _paletteFrom = _palette;
+            _paletteTo = target;
+            _paletteStarted = Stopwatch.GetTimestamp();
+        }
+
+        private void AdvancePalette()
+        {
+            if (_paletteStarted == 0) return;
+            var progress = Math.Min(1f, (float)((Stopwatch.GetTimestamp() - _paletteStarted) *
+                1000.0 / Stopwatch.Frequency / 550.0));
+            _palette = ArtworkPalette.Blend(_paletteFrom, _paletteTo, progress);
+            if (progress >= 1f) _paletteStarted = 0;
+        }
+
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
@@ -130,7 +205,7 @@ namespace MusicBeePlugin
             catch (EntryPointNotFoundException) { }
         }
 
-        private void UpdateSpectrum()
+        private void SampleSpectrum()
         {
             var count = 0;
             try
@@ -176,9 +251,16 @@ namespace MusicBeePlugin
                 var level = _levels[bar] * 0.7f;
                 if (bar > 0) level += _levels[bar - 1] * 0.15f;
                 if (bar + 1 < BarCount) level += _levels[bar + 1] * 0.15f;
-                var target = (float)Math.Min(1.0, Math.Sqrt(level * _gain) * 0.92);
-                var speed = target > _bars[bar] ? 0.62f : 0.17f;
-                _bars[bar] += (target - _bars[bar]) * speed;
+                _targets[bar] = (float)Math.Min(1.0, Math.Sqrt(level * _gain) * 0.92);
+            }
+        }
+
+        private void StepSpectrum()
+        {
+            for (var bar = 0; bar < BarCount; bar++)
+            {
+                var speed = _targets[bar] > _bars[bar] ? 0.42f : 0.10f;
+                _bars[bar] += (_targets[bar] - _bars[bar]) * speed;
             }
         }
 
@@ -196,7 +278,7 @@ namespace MusicBeePlugin
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
 
             using (var background = new LinearGradientBrush(bounds,
-                       Color.FromArgb(13, 18, 32), Color.FromArgb(31, 21, 51),
+                       _palette.Left, _palette.Right,
                        LinearGradientMode.Horizontal))
                 g.FillRectangle(background, bounds);
 
@@ -204,8 +286,8 @@ namespace MusicBeePlugin
 
             var scale = (float)Math.Max(0.75, Math.Min(2.6,
                 Math.Sqrt((double)bounds.Width / 760 * (bounds.Height + 28.0) / 230)));
-            var content = new RectangleF(22, 48, Math.Max(1, bounds.Width - 44),
-                                         Math.Max(1, bounds.Height - 60));
+            var content = new RectangleF(22, 20, Math.Max(1, bounds.Width - 44),
+                                         Math.Max(1, bounds.Height - 33));
             var gap = 6f * scale;
             var mainHeight = 58f * scale;
             var subHeight = 38f * scale;
@@ -225,7 +307,7 @@ namespace MusicBeePlugin
             using (var panelPath = RoundedRectangle(new Rectangle(13, (int)(y - 9),
                        bounds.Width - 26, (int)(groupHeight + 18)), 14))
             using (var shade = new SolidBrush(Color.FromArgb(128, 10, 13, 27)))
-            using (var outline = new Pen(Color.FromArgb(44, 180, 180, 235)))
+            using (var outline = new Pen(Color.FromArgb(44, _palette.Border)))
             {
                 g.FillPath(shade, panelPath);
                 g.DrawPath(outline, panelPath);
@@ -272,19 +354,6 @@ namespace MusicBeePlugin
                     (int)(145 + 110 * eased));
             }
 
-            using (var labelFont = new Font(FontFamily.GenericSansSerif, 8f, FontStyle.Bold))
-            using (var labelBrush = new SolidBrush(Color.FromArgb(172, 202, 210, 235)))
-            using (var border = new Pen(Color.FromArgb(55, 116, 191, 237)))
-            using (var dot = new SolidBrush(Color.FromArgb(124, 219, 245)))
-            {
-                g.FillEllipse(dot, 22, 20, 7, 7);
-                g.DrawString("MUSICBEE  /  DESKTOP LYRICS", labelFont, labelBrush, 37, 15);
-                var rightLabel = "LIVE SPECTRUM";
-                var rightWidth = g.MeasureString(rightLabel, labelFont).Width;
-                if (bounds.Width > 500)
-                    g.DrawString(rightLabel, labelFont, labelBrush, bounds.Width - rightWidth - 22, 15);
-                g.DrawLine(border, 20, 40, bounds.Width - 20, 40);
-            }
         }
 
         private static int CountSubLines(string translation, string preview)
@@ -324,11 +393,11 @@ namespace MusicBeePlugin
             var barSpacing = (float)usableWidth / BarCount;
             var barWidth = Math.Max(2, barSpacing - 3);
             var floor = area.Bottom - 10;
-            var maxHeight = Math.Max(1, area.Height - 63);
+            var maxHeight = Math.Max(1, area.Height - 28);
             using (var brush = new LinearGradientBrush(
-                       new Point(0, 45), new Point(0, floor),
-                       Color.FromArgb(124, 135, 110, 242),
-                       Color.FromArgb(165, 57, 193, 221)))
+                       new Point(0, 16), new Point(0, floor),
+                       Color.FromArgb(124, _palette.BarTop),
+                       Color.FromArgb(165, _palette.BarBottom)))
             {
                 for (var i = 0; i < BarCount; i++)
                 {
