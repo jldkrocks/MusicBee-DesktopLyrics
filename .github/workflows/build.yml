@@ -1,0 +1,37 @@
+name: Build Desktop Lyrics
+
+on:
+  push:
+    branches: [codex/next-lyric-preview]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Restore packages
+        run: msbuild DesktopLyrics.sln /t:Restore /p:Configuration=Release '/p:Platform=Any CPU'
+      - name: Build plugin
+        run: msbuild DesktopLyrics.sln /p:Configuration=Release '/p:Platform=Any CPU'
+      - name: Check blank timestamps and translations
+        shell: powershell
+        run: |
+          Add-Type -Path 'bin\Release\mb_DesktopLyrics.dll'
+          $lrc = "[00:09.68] First line`n[00:17.30] `n[00:17.30] Second line`n[00:24.68] `n[00:31.38] Third line`n[00:40.00] Original`n[00:40.00] Translation"
+          $parsed = [MusicBeePlugin.LyricParser]::ParseLyric($lrc)
+          if ($parsed.Entries.Count -ne 4) { throw "Expected 4 timed lyrics, found $($parsed.Entries.Count)" }
+          if ($parsed.Entries[1].LyricLine1 -ne ' Second line' -or $parsed.Entries[1].LyricLine2) { throw 'Empty duplicate timestamp became a translation' }
+          if ($parsed.Entries[2].LyricLine1 -ne ' Third line') { throw 'Empty pause became a lyric' }
+          if ($parsed.Entries[3].LyricLine2 -ne ' Translation') { throw 'Real translation was lost' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DesktopLyrics-1.10.3.0
+          path: |
+            bin/Release/mb_DesktopLyrics.dll
+            pkg/*.zip
+          if-no-files-found: error

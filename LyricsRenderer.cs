@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.Windows.Forms;
 
@@ -12,6 +13,7 @@ namespace MusicBeePlugin
         private const int ShadowOffset = 2;
         private const int BackgroundOffsetH = 10;
         private const int BackgroundOffsetV = 6;
+        private const float PreviewOpacity = 0.55f;
 
         private static readonly StringFormat Format = new StringFormat(StringFormatFlags.NoWrap)
         {
@@ -70,18 +72,54 @@ namespace MusicBeePlugin
             return RenderLyrics(line1, _mainFont, dc);
         }
 
-        public static Bitmap Render2LineLyrics(string line1, string line2, IDeviceContext dc)
+        public static Bitmap Render2LineLyrics(string line1, string line2, bool isPreview, IDeviceContext dc)
         {
             using (Bitmap line1Bitmap = RenderLyrics(line1, _mainFont, dc),
                    line2Bitmap = RenderLyrics(line2, _subFont, dc))
             {
                 var bitmap = new Bitmap(Math.Max(line1Bitmap.Width, line2Bitmap.Width), line1Bitmap.Height + line2Bitmap.Height);
+                bitmap.SetResolution(_dpi, _dpi);
                 using (var g = Graphics.FromImage(bitmap))
                 {
                     g.DrawImage(line1Bitmap, new PointF(0, 0));
-                    g.DrawImage(line2Bitmap, new PointF(0, line1Bitmap.Height * 0.9f)); // TODO: a better approach to reduce line space for a more compact view...
+                    DrawSubLine(g, line2Bitmap, (int)(line1Bitmap.Height * 0.9f), isPreview);
                 }
                 return bitmap;
+            }
+        }
+
+        public static Bitmap Render3LineLyrics(string line1, string translation, string nextLine, IDeviceContext dc)
+        {
+            using (var line1Bitmap = RenderLyrics(line1, _mainFont, dc))
+            using (var translationBitmap = RenderLyrics(translation, _subFont, dc))
+            using (var previewBitmap = RenderLyrics(nextLine, _subFont, dc))
+            {
+                var bitmap = new Bitmap(_width, line1Bitmap.Height + translationBitmap.Height + previewBitmap.Height);
+                bitmap.SetResolution(_dpi, _dpi);
+                using (var g = Graphics.FromImage(bitmap))
+                {
+                    g.DrawImage(line1Bitmap, new PointF(0, 0));
+                    DrawSubLine(g, translationBitmap, (int)(line1Bitmap.Height * 0.9f), false);
+                    DrawSubLine(g, previewBitmap, (int)(line1Bitmap.Height * 0.9f + translationBitmap.Height * 0.9f), true);
+                }
+                return bitmap;
+            }
+        }
+
+        private static void DrawSubLine(Graphics g, Bitmap line, int y, bool isPreview)
+        {
+            if (!isPreview)
+            {
+                g.DrawImage(line, 0, y);
+                return;
+            }
+
+            // Fade the entire rendered line, including its border, shadow and background.
+            using (var attributes = new ImageAttributes())
+            {
+                attributes.SetColorMatrix(new ColorMatrix { Matrix33 = PreviewOpacity });
+                g.DrawImage(line, new Rectangle(0, y, line.Width, line.Height),
+                    0, 0, line.Width, line.Height, GraphicsUnit.Pixel, attributes);
             }
         }
 

@@ -159,6 +159,7 @@ namespace MusicBeePlugin
                 GradientType = 1,
                 AlignmentType = 0,
                 BackgroundOpacity = 40,
+                NextLineWhenNoTranslation = true,
             };
         }
     }

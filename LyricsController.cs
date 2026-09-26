@@ -2,6 +2,8 @@
 {
     public class LyricsController
     {
+        // Keep the legacy setting name for compatibility with saved settings.
+        // A preview is now shown even when the active lyric has a translation.
         public bool NextLineWhenNoTranslation { get; set; }
 
         private readonly Plugin.MusicBeeApiInterface _interface;
@@ -45,28 +47,30 @@
             var nTime = time + _lyrics.Offset;
             var entries = _lyrics.Entries;
 
-            LyricParser.LyricEntry currentEntry = null;
-            LyricParser.LyricEntry nextEntry = null;
+            if (entries.Count == 0 || nTime < entries[0].TimeMs) return null;
 
-            for (var i = 0; i < entries.Count; i++)
+            var currentIndex = entries.Count - 1;
+            for (var i = 1; i < entries.Count; i++)
             {
-                if (entries[i].TimeMs > nTime && i > 0)
+                if (entries[i].TimeMs > nTime)
                 {
-                    currentEntry = entries[i - 1];
-                    nextEntry = entries[i];
+                    currentIndex = i - 1;
                     break;
                 }
             }
 
-            if (currentEntry == null)
+            var currentEntry = entries[currentIndex];
+            string nextLine = null;
+            if (NextLineWhenNoTranslation)
             {
-                if (entries.Count <= 0) return null;
-                currentEntry = entries[entries.Count - 1];
+                for (var i = currentIndex + 1; i < entries.Count; i++)
+                {
+                    if (string.IsNullOrWhiteSpace(entries[i].LyricLine1)) continue;
+                    nextLine = entries[i].LyricLine1;
+                    break;
+                }
             }
-
-            if (_lyrics.HasTranslation || nextEntry == null || !NextLineWhenNoTranslation)
-                return new LyricView(currentEntry.LyricLine1, currentEntry.LyricLine2);
-            return new LyricView(currentEntry.LyricLine1, nextEntry.LyricLine1);
+            return new LyricView(currentEntry.LyricLine1, currentEntry.LyricLine2, nextLine);
         }
 
         public class LyricView
@@ -74,16 +78,18 @@
             // C# version < 8.0, can't use nullable reference feature....
             public string LyricLine1 { get; set; } // Nullable
             public string LyricLine2 { get; set; } // Nullable
+            public string NextLine { get; set; } // Nullable; preview of the next timed entry
 
-            public LyricView(string lyricLine1, string lyricLine2)
+            public LyricView(string lyricLine1, string lyricLine2, string nextLine = null)
             {
                 LyricLine1 = lyricLine1;
                 LyricLine2 = lyricLine2;
+                NextLine = nextLine;
             }
 
             public override string ToString()
             {
-                return $"[LyricView: {LyricLine1}, {LyricLine2}]";
+                return $"[LyricView: {LyricLine1}, {LyricLine2}, {NextLine}]";
             }
         }
     }

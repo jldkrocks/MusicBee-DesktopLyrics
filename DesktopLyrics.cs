@@ -121,6 +121,9 @@ namespace MusicBeePlugin
                             _settings = SettingsObj.GenerateDefault();
                         }
 
+                        LyricParser.PreserveSlash = _settings.PreserveSlash;
+                        _lyricsCtrl.NextLineWhenNoTranslation = _settings.NextLineWhenNoTranslation;
+
                         Application.EnableVisualStyles();
                         Application.SetCompatibleTextRenderingDefault(false);
 
@@ -241,7 +244,7 @@ namespace MusicBeePlugin
             ((Timer) sender).Start();
         }
 
-        private string _line1, _line2;
+        private string _line1, _line2, _nextLine;
         private void UpdateLyrics(bool force = false)
         {
             lock (_lock)
@@ -256,10 +259,11 @@ namespace MusicBeePlugin
                 }
 
                 if (entry == null) return;
-                if (!force && entry.LyricLine1 == _line1 && entry.LyricLine2 == _line2) return;
-                _frmLyrics.BeginInvoke(new Action<string, string>((line1, line2) => _frmLyrics.UpdateLyrics(line1, line2)), entry.LyricLine1, entry.LyricLine2);
+                if (!force && entry.LyricLine1 == _line1 && entry.LyricLine2 == _line2 && entry.NextLine == _nextLine) return;
+                _frmLyrics.BeginInvoke(new Action<string, string, string>((line1, line2, nextLine) => _frmLyrics.UpdateLyrics(line1, line2, nextLine)), entry.LyricLine1, entry.LyricLine2, entry.NextLine);
                 _line1 = entry.LyricLine1;
                 _line2 = entry.LyricLine2;
+                _nextLine = entry.NextLine;
             }
         }
 

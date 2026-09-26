@@ -206,8 +206,7 @@ namespace MusicBeePlugin
             this.checkBoxNextLineWhenNoTranslation.Name = "checkBoxNextLineWhenNoTranslation";
             this.checkBoxNextLineWhenNoTranslation.Size = new System.Drawing.Size(430, 56);
             this.checkBoxNextLineWhenNoTranslation.TabIndex = 10;
-            this.checkBoxNextLineWhenNoTranslation.Text = "Display the next lyric line on the second line when the lyrics have no translatio" +
-    "n\r\n";
+            this.checkBoxNextLineWhenNoTranslation.Text = "Show the next lyric below the current lyric and translation";
             this.checkBoxNextLineWhenNoTranslation.UseVisualStyleBackColor = true;
             this.checkBoxNextLineWhenNoTranslation.CheckedChanged += new System.EventHandler(this.checkBoxNextLineWhenNoTranslation_CheckedChanged);
             // 

@@ -65,12 +65,22 @@ namespace MusicBeePlugin
                 return;
             }
 
+            if (_nextLine != null && _line2 != null)
+            {
+                DrawLyrics3Line(_line1, _line2, _nextLine);
+                return;
+            }
+            if (_nextLine != null)
+            {
+                DrawLyrics2Line(_line1, _nextLine, true);
+                return;
+            }
             if (_line2 == null)
             {
                 DrawLyrics1Line(_line1);
                 return;
             }
-            DrawLyrics2Line(_line1, _line2);
+            DrawLyrics2Line(_line1, _line2, false);
         }
 
         public void Clear()
@@ -78,13 +88,16 @@ namespace MusicBeePlugin
             if (_line1 != "")
                 DrawLyrics1Line("");
             _line1 = "";
+            _line2 = null;
+            _nextLine = null;
         }
 
-        private string _line1, _line2;
-        public void UpdateLyrics(string line1, string line2)
+        private string _line1, _line2, _nextLine;
+        public void UpdateLyrics(string line1, string line2, string nextLine)
         {
             _line1 = line1;
             _line2 = line2;
+            _nextLine = nextLine;
             Redraw();
         }
 
@@ -93,36 +106,39 @@ namespace MusicBeePlugin
             using (var g = CreateGraphics())
             {
                 var bitmap = LyricsRenderer.Render1LineLyrics(lyrics, g);
-
-                if (bitmap == null)
-                    return;
-
-                using (bitmap)
-                {
-                    if (Width != bitmap.Width) Width = bitmap.Width;
-                    if (Height != bitmap.Height) Height = bitmap.Height;
-
-                    GdiplusHelper.SetBitmap(bitmap, 255, Handle, Left, Top, Width, Height);
-                }
+                SetLyricsBitmap(bitmap);
             }
         }
 
-        private void DrawLyrics2Line(string line1, string line2)
+        private void DrawLyrics2Line(string line1, string line2, bool isPreview)
         {
             using (var g = CreateGraphics())
             {
-                var bitmap = LyricsRenderer.Render2LineLyrics(line1, line2, g);
+                var bitmap = LyricsRenderer.Render2LineLyrics(line1, line2, isPreview, g);
 
-                if (bitmap == null)
-                    return;
+                SetLyricsBitmap(bitmap);
+            }
+        }
 
-                using (bitmap)
-                {
-                    if (Width != bitmap.Width) Width = bitmap.Width;
-                    if (Height != bitmap.Height) Height = bitmap.Height;
+        private void DrawLyrics3Line(string line1, string line2, string nextLine)
+        {
+            using (var g = CreateGraphics())
+            {
+                var bitmap = LyricsRenderer.Render3LineLyrics(line1, line2, nextLine, g);
 
-                    GdiplusHelper.SetBitmap(bitmap, 255, Handle, Left, Top, Width, Height);
-                }
+                SetLyricsBitmap(bitmap);
+            }
+        }
+
+        private void SetLyricsBitmap(System.Drawing.Bitmap bitmap)
+        {
+            if (bitmap == null) return;
+            using (bitmap)
+            {
+                if (Width != bitmap.Width) Width = bitmap.Width;
+                if (Height != bitmap.Height) Height = bitmap.Height;
+
+                GdiplusHelper.SetBitmap(bitmap, 255, Handle, Left, Top, Width, Height);
             }
         }
 
