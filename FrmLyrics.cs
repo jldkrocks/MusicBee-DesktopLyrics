@@ -1,11 +1,12 @@
-﻿using System;
+using System;
 using System.Windows.Forms;
 using Unmanaged;
 
 namespace MusicBeePlugin
 {
-    public partial class FrmLyrics : Form
+    public partial class FrmLyrics : Form, IDesktopLyricsView
     {
+        public Form Form => this;
         private SettingsObj _settings;
         public FrmLyrics(SettingsObj settings)
         {

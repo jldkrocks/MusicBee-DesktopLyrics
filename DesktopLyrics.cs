@@ -27,7 +27,8 @@ namespace MusicBeePlugin
         private string SettingsPath2 => Path.Combine(_mbApiInterface.Setting_GetPersistentStoragePath(), SettingsFileName2);
         // Customed
         private volatile SettingsObj _settings;
-        private volatile FrmLyrics _frmLyrics;
+        private volatile IDesktopLyricsView _frmLyrics;
+        private ToolStripMenuItem _visibilityMenuItem;
         private Timer _timer;
         private LyricsController _lyricsCtrl;
         private readonly object _lock = new object();
@@ -60,14 +61,23 @@ namespace MusicBeePlugin
         public bool Configure(IntPtr panelHandle)
         {
             var settingsForm = new FrmSettings(_settings);
-            settingsForm.SettingsChanged += (sender, settings) => _frmLyrics.UpdateFromSettings(settings);
+            settingsForm.SettingsChanged += (sender, settings) =>
+            {
+                var view = _frmLyrics;
+                if (view == null) return;
+                if ((view is FrmLyricsWindow) != settings.CompactWindow)
+                    StartupForm();
+                else
+                    view.UpdateFromSettings(settings);
+            };
             settingsForm.ShowDialog();
             SaveSettings(_settings);
             LyricParser.PreserveSlash = _settings.PreserveSlash;
             _lyricsCtrl.NextLineWhenNoTranslation = _settings.NextLineWhenNoTranslation;
-            _frmLyrics?.Invoke(new Action(() =>
+            var activeView = _frmLyrics;
+            activeView?.Form.Invoke(new Action(() =>
             {
-                _frmLyrics.UpdateFromSettings(_settings);
+                activeView.UpdateFromSettings(_settings);
             }));
             return true;
         }
@@ -86,10 +96,11 @@ namespace MusicBeePlugin
         // ReSharper disable once UnusedParameter.Global
         public void Close(PluginCloseReason reason)
         {
-            _timer.Stop();
-            _frmLyrics?.Invoke(new Action(() =>
+            _timer?.Stop();
+            var view = _frmLyrics;
+            view?.Form.Invoke(new Action(() =>
             {
-                _frmLyrics?.Hide();
+                view.Form.Dispose();
                 _frmLyrics = null;
             }));
             SaveSettings(_settings);
@@ -171,14 +182,15 @@ namespace MusicBeePlugin
         private void UpdatePlayState(PlayState state)
         {
             if (!_settings.AutoHide) return;
-            if (_frmLyrics == null) return;
+            var view = _frmLyrics;
+            if (view == null || view.Form.IsDisposed) return;
             switch (state)
             {
                 case PlayState.Stopped:
-                    _frmLyrics.Visible = false;
+                    view.Form.Visible = false;
                     break;
                 case PlayState.Playing:
-                    _frmLyrics.Visible = true;
+                    view.Form.Visible = true;
                     break;
             }
         }
@@ -187,23 +199,23 @@ namespace MusicBeePlugin
         {
             // MenuItem will only be returned before we construct the handler lambda expression, so we have to use a "slot"
             // (which will be filled after MB_AddMenuItem returns) to hold the menuItem to be referred in the closure.
-            var menuItemSlot = new ToolStripMenuItem[] { null };
-
             var menuItem = (ToolStripMenuItem) _mbApiInterface.MB_AddMenuItem(
                 "mnuView/Desktop Lyrics", "Toggle Desktop Lyrics visibility.",
                 ToggleLyrics);
-            menuItemSlot[0] = menuItem;
+            _visibilityMenuItem = menuItem;
             menuItem.Checked = !_settings.HideOnStartup;
-            return;
 
             void ToggleLyrics(object sender, EventArgs args)
             {
-                var menuItem2 = menuItemSlot[0];
-                if (menuItem2 == null) return; // BUG: multithread race condition
+                var menuItem2 = _visibilityMenuItem;
+                if (menuItem2 == null) return;
 
                 menuItem2.Checked = !menuItem2.Checked;
                 if (!menuItem2.Checked)
-                    _frmLyrics?.Dispose();
+                {
+                    _frmLyrics?.Form.Dispose();
+                    _frmLyrics = null;
+                }
                 else
                     StartupForm();
                 _settings.HideOnStartup = !menuItem2.Checked;
@@ -213,12 +225,23 @@ namespace MusicBeePlugin
 
         private void StartupForm()
         {
-            _frmLyrics?.Dispose();
             var f = (Form)Control.FromHandle(_mbApiInterface.MB_GetWindowHandle());
             f.Invoke(new Action(() =>
             {
-                _frmLyrics = new FrmLyrics(_settings);
-                _frmLyrics.Show();
+                _frmLyrics?.Form.Dispose();
+                var view = _settings.CompactWindow
+                    ? (IDesktopLyricsView)new FrmLyricsWindow(_settings, _mbApiInterface)
+                    : new FrmLyrics(_settings);
+                _frmLyrics = view;
+                view.Form.FormClosed += (sender, args) =>
+                {
+                    if (args.CloseReason != CloseReason.UserClosing || !ReferenceEquals(_frmLyrics, view)) return;
+                    _frmLyrics = null;
+                    if (_visibilityMenuItem != null) _visibilityMenuItem.Checked = false;
+                    _settings.HideOnStartup = true;
+                    SaveSettings(_settings);
+                };
+                view.Form.Show();
                 try
                 {
                     UpdateLyrics(force: true);
@@ -249,18 +272,27 @@ namespace MusicBeePlugin
         {
             lock (_lock)
             {
-                if (_frmLyrics == null) return;
+                var view = _frmLyrics;
+                if (view == null || view.Form.IsDisposed || !view.Form.IsHandleCreated) return;
                 var entry = _lyricsCtrl.UpdateLyrics(!_settings.HideWhenUnavailable);
                 if (entry == null && _line1 != "")
                 {
                     _line1 = "";
-                    _frmLyrics.Clear();
+                    _line2 = null;
+                    _nextLine = null;
+                    view.Form.BeginInvoke(new Action(() =>
+                    {
+                        if (!view.Form.IsDisposed) view.Clear();
+                    }));
                     return;
                 }
 
                 if (entry == null) return;
                 if (!force && entry.LyricLine1 == _line1 && entry.LyricLine2 == _line2 && entry.NextLine == _nextLine) return;
-                _frmLyrics.BeginInvoke(new Action<string, string, string>((line1, line2, nextLine) => _frmLyrics.UpdateLyrics(line1, line2, nextLine)), entry.LyricLine1, entry.LyricLine2, entry.NextLine);
+                view.Form.BeginInvoke(new Action<string, string, string>((line1, line2, nextLine) =>
+                {
+                    if (!view.Form.IsDisposed) view.UpdateLyrics(line1, line2, nextLine);
+                }), entry.LyricLine1, entry.LyricLine2, entry.NextLine);
                 _line1 = entry.LyricLine1;
                 _line2 = entry.LyricLine2;
                 _nextLine = entry.NextLine;

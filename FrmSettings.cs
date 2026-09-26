@@ -13,6 +13,12 @@ namespace MusicBeePlugin
         private Font _font = DefaultFont;
         private readonly SettingsObj _settings;
         private readonly ColorPickerDialog _colorDialog = new ColorPickerDialog();
+        private readonly CheckBox _checkBoxCompactWindow = new CheckBox
+        {
+            AutoSize = true,
+            Text = "Compact lyrics window with audio visualizer",
+            Margin = new Padding(5)
+        };
 
         public event EventHandler<SettingsObj> SettingsChanged;
 
@@ -21,6 +27,17 @@ namespace MusicBeePlugin
             _settings = settings;
             InitializeComponent();
             comboBoxGradientType.SelectedIndex = 0;
+            var layout = (TableLayoutPanel)Controls[0];
+            layout.RowCount++;
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.Controls.Add(_checkBoxCompactWindow, 0, layout.RowCount - 1);
+            layout.SetColumnSpan(_checkBoxCompactWindow, 2);
+            _checkBoxCompactWindow.CheckedChanged += (sender, args) =>
+            {
+                _settings.CompactWindow = _checkBoxCompactWindow.Checked;
+                SettingsChanged?.Invoke(this, _settings);
+            };
+            ClientSize = new Size(ClientSize.Width, ClientSize.Height + 40);
         }
 
         private void Settings_Load(object sender, EventArgs e)
@@ -39,6 +56,7 @@ namespace MusicBeePlugin
                 checkBoxAutoHide.Checked = _settings.AutoHide;
                 checkBoxNextLineWhenNoTranslation.Checked = _settings.NextLineWhenNoTranslation;
                 checkBoxHideWhenUnavailable.Checked = _settings.HideWhenUnavailable;
+                _checkBoxCompactWindow.Checked = _settings.CompactWindow;
             }
             catch (Exception)
             {
@@ -126,6 +144,7 @@ namespace MusicBeePlugin
             _settings.PreserveSlash = checkBoxPreserveSlash.Checked;
             _settings.AutoHide = checkBoxAutoHide.Checked;
             _settings.HideWhenUnavailable = checkBoxHideWhenUnavailable.Checked;
+            _settings.CompactWindow = _checkBoxCompactWindow.Checked;
         }
     }
 
@@ -142,6 +161,11 @@ namespace MusicBeePlugin
         public bool NextLineWhenNoTranslation;
         public bool HideOnStartup;
         public bool HideWhenUnavailable;
+        public bool CompactWindow;
+        public int WindowPosX = -1;
+        public int WindowPosY = -1;
+        public int WindowWidth = 760;
+        public int WindowHeight = 230;
         public int PosY = -1;
         public int PosX = -1;
         [JsonConverter(typeof(FontConverter))]

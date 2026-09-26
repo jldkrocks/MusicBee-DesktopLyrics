@@ -19,6 +19,10 @@ Just install this plugin in the Plugins tab in the Settings or put the DLL file 
 
 Also, lyrics style can be modified in the Plugins tab. And you can hide or show the desktop lyrics in the MusicBee Menu(View->Desktop Lyrics).
 
+## Compact lyrics window
+
+In the Desktop Lyrics plugin settings, enable **Compact lyrics window with audio visualizer** to switch from the transparent desktop overlay to a small, resizable window. Drag its title bar to move it; the window remembers its size and position. The current lyric, optional translation, and faded next lyric appear over spectrum bars driven by MusicBee's audio data. Disable the option to return to the desktop overlay. MusicBee's built-in visualizers open in their own views; this window draws its own bars so the lyrics can stay in front of them.
+
 # Chinese version
 
 ## MusicBee 桌面歌词
@@ -49,4 +53,3 @@ MusicBee 中歌曲关联的歌词必须为 LRC 格式的同步歌词。支持 `o
 ![](https://i.imgur.com/o0aYax7.png)
 
 ![](https://i.imgur.com/KnHdZzI.png)
-
