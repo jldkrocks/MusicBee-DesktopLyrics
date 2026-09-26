@@ -36,6 +36,7 @@ namespace MusicBeePlugin
         private ArtworkPalette _paletteFrom, _paletteTo;
         private long _paletteStarted;
         private bool _loaded;
+        private bool _animationDisposed;
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
@@ -77,6 +78,7 @@ namespace MusicBeePlugin
             };
             VisibleChanged += (sender, args) =>
             {
+                if (_animationDisposed) return;
                 if (Visible && _loaded) StartAnimation();
                 else _animationTimer.Change(Timeout.Infinite, Timeout.Infinite);
             };
@@ -550,7 +552,12 @@ namespace MusicBeePlugin
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) _animationTimer?.Dispose();
+            if (disposing)
+            {
+                _animationDisposed = true;
+                Interlocked.Increment(ref _artworkRequestId);
+                _animationTimer?.Dispose();
+            }
             base.Dispose(disposing);
         }
     }

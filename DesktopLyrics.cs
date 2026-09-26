@@ -64,6 +64,7 @@ namespace MusicBeePlugin
         public bool Configure(IntPtr panelHandle)
         {
             var settingsForm = new FrmSettings(_settings);
+            settingsForm.ShowWindowRequested += (sender, args) => ShowLyricsWindow();
             settingsForm.SettingsChanged += (sender, settings) =>
             {
                 if (_compactMenuItem != null) _compactMenuItem.Checked = settings.CompactWindow;
@@ -106,8 +107,8 @@ namespace MusicBeePlugin
             {
                 _stopHideTimer?.Dispose();
                 _stopHideTimer = null;
-                view.Form.Dispose();
                 _frmLyrics = null;
+                view.Form.Dispose();
             }));
             SaveSettings(_settings);
         }
@@ -154,6 +155,15 @@ namespace MusicBeePlugin
                         {
                             _settings.UseArtworkColors = true;
                             _settings.ArtworkColorsPreferenceSet = true;
+                            SaveSettings(_settings);
+                        }
+
+                        // Older versions saved a click on the window's X as a
+                        // permanent hide. Restore those windows once on upgrade.
+                        if (!_settings.WindowCloseRecoveryApplied)
+                        {
+                            _settings.HideOnStartup = false;
+                            _settings.WindowCloseRecoveryApplied = true;
                             SaveSettings(_settings);
                         }
 
@@ -262,19 +272,17 @@ namespace MusicBeePlugin
 
             void ToggleLyrics(object sender, EventArgs args)
             {
-                var menuItem2 = _visibilityMenuItem;
-                if (menuItem2 == null) return;
-
-                menuItem2.Checked = !menuItem2.Checked;
-                if (!menuItem2.Checked)
-                {
-                    _frmLyrics?.Form.Dispose();
-                    _frmLyrics = null;
-                }
+                var view = _frmLyrics;
+                if (view == null || view.Form.IsDisposed)
+                    ShowLyricsWindow();
                 else
-                    StartupForm();
-                _settings.HideOnStartup = !menuItem2.Checked;
-                SaveSettings(_settings);
+                {
+                    _frmLyrics = null;
+                    view.Form.Dispose();
+                    _visibilityMenuItem.Checked = false;
+                    _settings.HideOnStartup = true;
+                    SaveSettings(_settings);
+                }
             }
 
             void ToggleCompactWindow(object sender, EventArgs args)
@@ -287,12 +295,31 @@ namespace MusicBeePlugin
             }
         }
 
+        private void ShowLyricsWindow()
+        {
+            var view = _frmLyrics;
+            _settings.HideOnStartup = false;
+            if (_visibilityMenuItem != null) _visibilityMenuItem.Checked = true;
+            if (view == null || view.Form.IsDisposed)
+                StartupForm();
+            else
+                view.Form.BeginInvoke(new Action(() =>
+                {
+                    if (!ReferenceEquals(_frmLyrics, view) || view.Form.IsDisposed) return;
+                    view.Form.Show();
+                    view.Form.BringToFront();
+                }));
+            SaveSettings(_settings);
+        }
+
         private void StartupForm()
         {
             var f = (Form)Control.FromHandle(_mbApiInterface.MB_GetWindowHandle());
             f.Invoke(new Action(() =>
             {
-                _frmLyrics?.Form.Dispose();
+                var previous = _frmLyrics;
+                _frmLyrics = null;
+                previous?.Form.Dispose();
                 var view = _settings.CompactWindow
                     ? (IDesktopLyricsView)new FrmLyricsWindow(_settings, _mbApiInterface)
                     : new FrmLyrics(_settings);
@@ -301,9 +328,9 @@ namespace MusicBeePlugin
                 {
                     if (args.CloseReason != CloseReason.UserClosing || !ReferenceEquals(_frmLyrics, view)) return;
                     _frmLyrics = null;
+                    _stopHideTimer?.Stop();
                     if (_visibilityMenuItem != null) _visibilityMenuItem.Checked = false;
-                    _settings.HideOnStartup = true;
-                    SaveSettings(_settings);
+                    // X closes this instance; the next MusicBee launch restores it.
                 };
                 view.Form.Show();
                 try

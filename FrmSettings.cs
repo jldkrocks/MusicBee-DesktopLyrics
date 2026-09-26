@@ -25,8 +25,15 @@ namespace MusicBeePlugin
             Text = "Match window colours to album artwork",
             Margin = new Padding(5)
         };
+        private readonly Button _showWindowButton = new Button
+        {
+            AutoSize = true,
+            Text = "Show lyrics window",
+            Margin = new Padding(5)
+        };
 
         public event EventHandler<SettingsObj> SettingsChanged;
+        public event EventHandler ShowWindowRequested;
 
         public FrmSettings(SettingsObj settings)
         {
@@ -35,15 +42,18 @@ namespace MusicBeePlugin
             comboBoxGradientType.SelectedIndex = 0;
             var layout = (TableLayoutPanel)Controls[0];
             layout.SuspendLayout();
-            layout.RowCount += 2;
+            layout.RowCount += 3;
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             foreach (Control control in layout.Controls)
-                layout.SetRow(control, layout.GetRow(control) + 2);
+                layout.SetRow(control, layout.GetRow(control) + 3);
             layout.Controls.Add(_checkBoxCompactWindow, 0, 0);
             layout.SetColumnSpan(_checkBoxCompactWindow, 2);
             layout.Controls.Add(_checkBoxArtworkColors, 0, 1);
             layout.SetColumnSpan(_checkBoxArtworkColors, 2);
+            layout.Controls.Add(_showWindowButton, 0, 2);
+            layout.SetColumnSpan(_showWindowButton, 2);
             layout.ResumeLayout(true);
             _checkBoxCompactWindow.CheckedChanged += (sender, args) =>
             {
@@ -57,7 +67,8 @@ namespace MusicBeePlugin
                 _settings.ArtworkColorsPreferenceSet = true;
                 SettingsChanged?.Invoke(this, _settings);
             };
-            ClientSize = new Size(ClientSize.Width, ClientSize.Height + 72);
+            _showWindowButton.Click += (sender, args) => ShowWindowRequested?.Invoke(this, EventArgs.Empty);
+            ClientSize = new Size(ClientSize.Width, ClientSize.Height + 112);
             Text = "Desktop Lyrics Settings (v" + GetType().Assembly.GetName().Version + ")";
         }
 
@@ -185,6 +196,7 @@ namespace MusicBeePlugin
         public bool AutoHide;
         public bool NextLineWhenNoTranslation;
         public bool HideOnStartup;
+        public bool WindowCloseRecoveryApplied;
         public bool HideWhenUnavailable;
         public bool CompactWindow;
         public bool CompactWindowPreferenceSet;
@@ -216,6 +228,7 @@ namespace MusicBeePlugin
                 CompactWindowPreferenceSet = true,
                 UseArtworkColors = true,
                 ArtworkColorsPreferenceSet = true,
+                WindowCloseRecoveryApplied = true,
             };
         }
     }
