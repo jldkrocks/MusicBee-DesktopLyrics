@@ -21,7 +21,7 @@ Also, lyrics style can be modified in the Plugins tab. And you can hide or show 
 
 ## Compact lyrics window
 
-The compact visualizer window is enabled by default on upgrade. You can also switch modes with **View → Desktop Lyrics Visualizer Window**, or with the checkbox at the top of Desktop Lyrics plugin settings. The settings title shows the loaded plugin version. Drag the window's title bar to move it; the window remembers its size and position. The current lyric, optional translation, and faded next lyric appear over spectrum bars driven by MusicBee's audio data. Turn the mode off to return to the transparent desktop overlay. MusicBee's built-in visualizers open in their own views; this window draws its own bars so the lyrics can stay in front of them.
+The compact visualizer window is enabled by default on upgrade. You can also switch modes with **View → Desktop Lyrics Visualizer Window**, or with the checkbox at the top of Desktop Lyrics plugin settings. The settings title shows the loaded plugin version. Drag the window's title bar to move it; the window remembers its size and position. Resizing the window scales the lyrics, and lyric changes slide and fade smoothly. The current lyric, optional translation, and faded next lyric appear over spectrum bars driven by MusicBee's audio data. Turn the mode off to return to the transparent desktop overlay. MusicBee's built-in visualizers open in their own views; this window draws its own bars so the lyrics can stay in front of them.
 
 # Chinese version
 
