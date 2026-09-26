@@ -28,21 +28,28 @@ namespace MusicBeePlugin
             InitializeComponent();
             comboBoxGradientType.SelectedIndex = 0;
             var layout = (TableLayoutPanel)Controls[0];
+            layout.SuspendLayout();
             layout.RowCount++;
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.Controls.Add(_checkBoxCompactWindow, 0, layout.RowCount - 1);
+            foreach (Control control in layout.Controls)
+                layout.SetRow(control, layout.GetRow(control) + 1);
+            layout.Controls.Add(_checkBoxCompactWindow, 0, 0);
             layout.SetColumnSpan(_checkBoxCompactWindow, 2);
+            layout.ResumeLayout(true);
             _checkBoxCompactWindow.CheckedChanged += (sender, args) =>
             {
                 _settings.CompactWindow = _checkBoxCompactWindow.Checked;
+                _settings.CompactWindowPreferenceSet = true;
                 SettingsChanged?.Invoke(this, _settings);
             };
             ClientSize = new Size(ClientSize.Width, ClientSize.Height + 40);
+            Text = "Desktop Lyrics Settings (v" + GetType().Assembly.GetName().Version + ")";
         }
 
         private void Settings_Load(object sender, EventArgs e)
         {
             _font = _settings.Font;
+            _checkBoxCompactWindow.Checked = _settings.CompactWindow;
             try
             {
                 btnFont.Text = _font.Name + " "+ _font.Size;
@@ -56,7 +63,6 @@ namespace MusicBeePlugin
                 checkBoxAutoHide.Checked = _settings.AutoHide;
                 checkBoxNextLineWhenNoTranslation.Checked = _settings.NextLineWhenNoTranslation;
                 checkBoxHideWhenUnavailable.Checked = _settings.HideWhenUnavailable;
-                _checkBoxCompactWindow.Checked = _settings.CompactWindow;
             }
             catch (Exception)
             {
@@ -145,6 +151,7 @@ namespace MusicBeePlugin
             _settings.AutoHide = checkBoxAutoHide.Checked;
             _settings.HideWhenUnavailable = checkBoxHideWhenUnavailable.Checked;
             _settings.CompactWindow = _checkBoxCompactWindow.Checked;
+            _settings.CompactWindowPreferenceSet = true;
         }
     }
 
@@ -162,6 +169,7 @@ namespace MusicBeePlugin
         public bool HideOnStartup;
         public bool HideWhenUnavailable;
         public bool CompactWindow;
+        public bool CompactWindowPreferenceSet;
         public int WindowPosX = -1;
         public int WindowPosY = -1;
         public int WindowWidth = 760;
@@ -184,6 +192,8 @@ namespace MusicBeePlugin
                 AlignmentType = 0,
                 BackgroundOpacity = 40,
                 NextLineWhenNoTranslation = true,
+                CompactWindow = true,
+                CompactWindowPreferenceSet = true,
             };
         }
     }

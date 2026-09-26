@@ -29,6 +29,7 @@ namespace MusicBeePlugin
         private volatile SettingsObj _settings;
         private volatile IDesktopLyricsView _frmLyrics;
         private ToolStripMenuItem _visibilityMenuItem;
+        private ToolStripMenuItem _compactMenuItem;
         private Timer _timer;
         private LyricsController _lyricsCtrl;
         private readonly object _lock = new object();
@@ -63,6 +64,7 @@ namespace MusicBeePlugin
             var settingsForm = new FrmSettings(_settings);
             settingsForm.SettingsChanged += (sender, settings) =>
             {
+                if (_compactMenuItem != null) _compactMenuItem.Checked = settings.CompactWindow;
                 var view = _frmLyrics;
                 if (view == null) return;
                 if ((view is FrmLyricsWindow) != settings.CompactWindow)
@@ -132,6 +134,16 @@ namespace MusicBeePlugin
                             _settings = SettingsObj.GenerateDefault();
                         }
 
+                        // Existing installations did not have a display mode preference.
+                        // Switch them to the newly requested window once; subsequent
+                        // choices in Settings or View are respected.
+                        if (!_settings.CompactWindowPreferenceSet)
+                        {
+                            _settings.CompactWindow = true;
+                            _settings.CompactWindowPreferenceSet = true;
+                            SaveSettings(_settings);
+                        }
+
                         LyricParser.PreserveSlash = _settings.PreserveSlash;
                         _lyricsCtrl.NextLineWhenNoTranslation = _settings.NextLineWhenNoTranslation;
 
@@ -197,13 +209,17 @@ namespace MusicBeePlugin
 
         private void StartupMenuItem()
         {
-            // MenuItem will only be returned before we construct the handler lambda expression, so we have to use a "slot"
-            // (which will be filled after MB_AddMenuItem returns) to hold the menuItem to be referred in the closure.
             var menuItem = (ToolStripMenuItem) _mbApiInterface.MB_AddMenuItem(
                 "mnuView/Desktop Lyrics", "Toggle Desktop Lyrics visibility.",
                 ToggleLyrics);
             _visibilityMenuItem = menuItem;
             menuItem.Checked = !_settings.HideOnStartup;
+
+            _compactMenuItem = (ToolStripMenuItem)_mbApiInterface.MB_AddMenuItem(
+                "mnuView/Desktop Lyrics Visualizer Window",
+                "Switch between the compact visualizer window and the desktop overlay.",
+                ToggleCompactWindow);
+            if (_compactMenuItem != null) _compactMenuItem.Checked = _settings.CompactWindow;
 
             void ToggleLyrics(object sender, EventArgs args)
             {
@@ -219,6 +235,15 @@ namespace MusicBeePlugin
                 else
                     StartupForm();
                 _settings.HideOnStartup = !menuItem2.Checked;
+                SaveSettings(_settings);
+            }
+
+            void ToggleCompactWindow(object sender, EventArgs args)
+            {
+                _settings.CompactWindow = !_settings.CompactWindow;
+                _settings.CompactWindowPreferenceSet = true;
+                if (_compactMenuItem != null) _compactMenuItem.Checked = _settings.CompactWindow;
+                if (_frmLyrics != null) StartupForm();
                 SaveSettings(_settings);
             }
         }
