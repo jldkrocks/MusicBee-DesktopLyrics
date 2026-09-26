@@ -148,6 +148,15 @@ namespace MusicBeePlugin
                             SaveSettings(_settings);
                         }
 
+                        // Earlier builds left the artwork feature unchecked. Enable
+                        // it once on upgrade; the checkbox retains later choices.
+                        if (!_settings.ArtworkColorsPreferenceSet)
+                        {
+                            _settings.UseArtworkColors = true;
+                            _settings.ArtworkColorsPreferenceSet = true;
+                            SaveSettings(_settings);
+                        }
+
                         LyricParser.PreserveSlash = _settings.PreserveSlash;
                         _lyricsCtrl.NextLineWhenNoTranslation = _settings.NextLineWhenNoTranslation;
 
@@ -329,7 +338,10 @@ namespace MusicBeePlugin
             {
                 var view = _frmLyrics;
                 if (view == null || view.Form.IsDisposed || !view.Form.IsHandleCreated) return;
-                var entry = _lyricsCtrl.UpdateLyrics(!_settings.HideWhenUnavailable);
+                // The compact window shows only the visualizer when a track has
+                // no lyrics. Keep the title/artist fallback for the old overlay.
+                var entry = _lyricsCtrl.UpdateLyrics(!(view is FrmLyricsWindow) &&
+                    !_settings.HideWhenUnavailable);
                 if (entry == null && _line1 != "")
                 {
                     if (_missingLyricsSinceUtc == DateTime.MinValue)

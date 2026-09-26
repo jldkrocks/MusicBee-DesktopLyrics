@@ -6,7 +6,6 @@ using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
-using Timer = System.Windows.Forms.Timer;
 
 namespace MusicBeePlugin
 {
@@ -21,13 +20,15 @@ namespace MusicBeePlugin
         private readonly float[] _bars = new float[BarCount];
         private readonly float[] _levels = new float[BarCount];
         private readonly float[] _targets = new float[BarCount];
-        private readonly Timer _animationTimer;
+        private readonly System.Threading.Timer _animationTimer;
         private SettingsObj _settings;
         private string _line1 = "", _line2, _nextLine;
         private string _previousLine1, _previousLine2, _previousNextLine;
         private long _transitionStarted;
         private float _gain = 6f;
-        private int _animationFrame;
+        private int _framePending;
+        private long _lastFrameTimestamp;
+        private long _lastSpectrumSample;
         private bool _useArtworkColors;
         private string _artworkTrackUrl;
         private int _artworkRequestId;
@@ -66,24 +67,18 @@ namespace MusicBeePlugin
                 Location = new Point(workArea.Left + (workArea.Width - Width) / 2,
                                      workArea.Bottom - Height - 70);
 
-            _animationTimer = new Timer { Interval = 16 };
-            _animationTimer.Tick += (sender, args) =>
-            {
-                if ((_animationFrame++ & 1) == 0) SampleSpectrum();
-                StepSpectrum();
-                AdvancePalette();
-                Invalidate();
-            };
+            _animationTimer = new System.Threading.Timer(AnimationClockTick, null,
+                Timeout.Infinite, Timeout.Infinite);
             Shown += (sender, args) =>
             {
                 _loaded = true;
-                _animationTimer.Start();
+                StartAnimation();
                 RefreshArtwork(true);
             };
             VisibleChanged += (sender, args) =>
             {
-                if (Visible) _animationTimer.Start();
-                else _animationTimer.Stop();
+                if (Visible && _loaded) StartAnimation();
+                else _animationTimer.Change(Timeout.Infinite, Timeout.Infinite);
             };
             LocationChanged += (sender, args) => SaveBounds();
             SizeChanged += (sender, args) => SaveBounds();
@@ -106,6 +101,47 @@ namespace MusicBeePlugin
             _settings.WindowPosY = Top;
             _settings.WindowWidth = Width;
             _settings.WindowHeight = Height;
+        }
+
+        private void StartAnimation()
+        {
+            _lastFrameTimestamp = 0;
+            _lastSpectrumSample = 0;
+            // An 8 ms target gives the UI up to 120 frames per second. Slow
+            // paints drop frames instead of building up a queue of old frames.
+            _animationTimer.Change(0, 8);
+        }
+
+        private void AnimationClockTick(object state)
+        {
+            if (Interlocked.CompareExchange(ref _framePending, 1, 0) != 0) return;
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        if (IsDisposed || !Visible) return;
+                        var now = Stopwatch.GetTimestamp();
+                        var elapsedMs = _lastFrameTimestamp == 0 ? 8.0 : Math.Min(50.0,
+                            (now - _lastFrameTimestamp) * 1000.0 / Stopwatch.Frequency);
+                        _lastFrameTimestamp = now;
+                        if (_lastSpectrumSample == 0 ||
+                            (now - _lastSpectrumSample) * 1000.0 / Stopwatch.Frequency >= 30)
+                        {
+                            SampleSpectrum();
+                            _lastSpectrumSample = now;
+                        }
+                        StepSpectrum(elapsedMs);
+                        AdvancePalette();
+                        Invalidate();
+                        Update();
+                    }
+                    finally { Interlocked.Exchange(ref _framePending, 0); }
+                }));
+            }
+            catch (InvalidOperationException) { Interlocked.Exchange(ref _framePending, 0); }
+            catch (ObjectDisposedException) { Interlocked.Exchange(ref _framePending, 0); }
         }
 
         public void UpdateFromSettings(SettingsObj settings)
@@ -154,13 +190,51 @@ namespace MusicBeePlugin
             if (!force && trackUrl == _artworkTrackUrl) return;
             _artworkTrackUrl = trackUrl;
             var request = Interlocked.Increment(ref _artworkRequestId);
+
+            // MusicBee's artwork callbacks may use its UI context. Fetch the
+            // source there, then decode and sample the image off the UI thread.
+            byte[] imageData = null;
+            string artworkUrl = null;
+            string artwork = null;
+            try
+            {
+                Plugin.PictureLocations locations;
+                string pictureUrl;
+                byte[] bytes;
+                if (!string.IsNullOrEmpty(trackUrl) && _musicBee.Library_GetArtworkEx != null &&
+                    _musicBee.Library_GetArtworkEx(trackUrl, 0, true,
+                        out locations, out pictureUrl, out bytes))
+                {
+                    imageData = bytes;
+                    artworkUrl = pictureUrl;
+                }
+            }
+            catch (Exception) { /* Some tracks do not belong to the library. */ }
+            if (imageData == null || imageData.Length == 0)
+            {
+                try
+                {
+                    if (_musicBee.NowPlaying_GetArtworkUrl != null)
+                    {
+                        var url = _musicBee.NowPlaying_GetArtworkUrl();
+                        if (!string.IsNullOrWhiteSpace(url)) artworkUrl = url;
+                    }
+                }
+                catch (Exception) { }
+                try
+                {
+                    if (_musicBee.NowPlaying_GetArtwork != null)
+                        artwork = _musicBee.NowPlaying_GetArtwork();
+                }
+                catch (Exception) { }
+            }
             ThreadPool.QueueUserWorkItem(state =>
             {
-                string path = null;
-                try { path = _musicBee.NowPlaying_GetArtwork(); }
-                catch (Exception) { /* Artwork may not be ready yet. */ }
                 ArtworkPalette palette;
-                if (!ArtworkPalette.TryLoad(path, out palette)) palette = ArtworkPalette.Default;
+                if (!ArtworkPalette.TryLoad(imageData, out palette) &&
+                    !ArtworkPalette.TryLoad(artworkUrl, out palette) &&
+                    !ArtworkPalette.TryLoad(artwork, out palette))
+                    palette = ArtworkPalette.Default;
                 if (IsDisposed || !IsHandleCreated) return;
                 try
                 {
@@ -255,12 +329,13 @@ namespace MusicBeePlugin
             }
         }
 
-        private void StepSpectrum()
+        private void StepSpectrum(double elapsedMs)
         {
             for (var bar = 0; bar < BarCount; bar++)
             {
                 var speed = _targets[bar] > _bars[bar] ? 0.42f : 0.10f;
-                _bars[bar] += (_targets[bar] - _bars[bar]) * speed;
+                var fraction = 1 - Math.Pow(1 - speed, elapsedMs / 16.0);
+                _bars[bar] += (float)((_targets[bar] - _bars[bar]) * fraction);
             }
         }
 
@@ -283,6 +358,24 @@ namespace MusicBeePlugin
                 g.FillRectangle(background, bounds);
 
             DrawSpectrum(g, bounds);
+
+            var progress = 1f;
+            if (_transitionStarted != 0)
+            {
+                progress = Math.Min(1f, (float)((Stopwatch.GetTimestamp() - _transitionStarted) *
+                    1000.0 / Stopwatch.Frequency / TransitionMs));
+                if (progress >= 1f)
+                {
+                    _transitionStarted = 0;
+                    _previousLine1 = _previousLine2 = _previousNextLine = null;
+                }
+            }
+            if (string.IsNullOrWhiteSpace(_line1) &&
+                string.IsNullOrWhiteSpace(_line2) &&
+                string.IsNullOrWhiteSpace(_nextLine) &&
+                string.IsNullOrWhiteSpace(_previousLine1) &&
+                string.IsNullOrWhiteSpace(_previousLine2) &&
+                string.IsNullOrWhiteSpace(_previousNextLine)) return;
 
             var scale = (float)Math.Max(0.75, Math.Min(2.6,
                 Math.Sqrt((double)bounds.Width / 760 * (bounds.Height + 28.0) / 230)));
@@ -313,17 +406,6 @@ namespace MusicBeePlugin
                 g.DrawPath(outline, panelPath);
             }
 
-            var progress = 1f;
-            if (_transitionStarted != 0)
-            {
-                progress = Math.Min(1f, (float)((Stopwatch.GetTimestamp() - _transitionStarted) *
-                    1000.0 / Stopwatch.Frequency / TransitionMs));
-                if (progress >= 1f)
-                {
-                    _transitionStarted = 0;
-                    _previousLine1 = _previousLine2 = _previousNextLine = null;
-                }
-            }
             var eased = progress * progress * (3 - 2 * progress);
             var promotePreview = progress < 1f && !string.IsNullOrEmpty(_previousNextLine) &&
                                  _previousNextLine == _line1;

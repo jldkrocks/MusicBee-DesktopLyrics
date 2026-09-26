@@ -45,6 +45,31 @@ namespace MusicBeePlugin
                     throw new Exception("Album artwork should produce a palette.");
                 if (palette.Left.R <= palette.Left.B || palette.Right.B <= palette.Right.R)
                     throw new Exception("The palette should reflect both artwork colours.");
+                var imageBytes = File.ReadAllBytes(imagePath);
+                ArtworkPalette embeddedPalette;
+                if (!ArtworkPalette.TryLoad(imageBytes, out embeddedPalette) ||
+                    embeddedPalette.BarTop.ToArgb() != palette.BarTop.ToArgb())
+                    throw new Exception("Embedded artwork bytes should produce the same palette.");
+                ArtworkPalette urlPalette;
+                if (!ArtworkPalette.TryLoad(new Uri(imagePath).AbsoluteUri, out urlPalette) ||
+                    urlPalette.BarBottom.ToArgb() != palette.BarBottom.ToArgb())
+                    throw new Exception("File URLs should resolve to the artwork.");
+                ArtworkPalette encodedPalette;
+                if (!ArtworkPalette.TryLoad(Convert.ToBase64String(imageBytes), out encodedPalette) ||
+                    encodedPalette.Left.ToArgb() != palette.Left.ToArgb())
+                    throw new Exception("Encoded artwork should produce the same palette.");
+
+                File.Delete(imagePath);
+                using (var neutralImage = new Bitmap(48, 48))
+                {
+                    using (var graphics = Graphics.FromImage(neutralImage))
+                        graphics.Clear(Color.White);
+                    neutralImage.Save(imagePath, ImageFormat.Png);
+                }
+                ArtworkPalette neutralPalette;
+                if (!ArtworkPalette.TryLoad(imagePath, out neutralPalette) ||
+                    neutralPalette.BarTop.R != neutralPalette.BarTop.G)
+                    throw new Exception("Monochrome artwork should produce a neutral palette.");
             }
             finally
             {

@@ -54,6 +54,7 @@ namespace MusicBeePlugin
             _checkBoxArtworkColors.CheckedChanged += (sender, args) =>
             {
                 _settings.UseArtworkColors = _checkBoxArtworkColors.Checked;
+                _settings.ArtworkColorsPreferenceSet = true;
                 SettingsChanged?.Invoke(this, _settings);
             };
             ClientSize = new Size(ClientSize.Width, ClientSize.Height + 72);
@@ -168,6 +169,7 @@ namespace MusicBeePlugin
             _settings.CompactWindow = _checkBoxCompactWindow.Checked;
             _settings.CompactWindowPreferenceSet = true;
             _settings.UseArtworkColors = _checkBoxArtworkColors.Checked;
+            _settings.ArtworkColorsPreferenceSet = true;
         }
     }
 
@@ -187,6 +189,7 @@ namespace MusicBeePlugin
         public bool CompactWindow;
         public bool CompactWindowPreferenceSet;
         public bool UseArtworkColors;
+        public bool ArtworkColorsPreferenceSet;
         public int WindowPosX = -1;
         public int WindowPosY = -1;
         public int WindowWidth = 760;
@@ -211,6 +214,8 @@ namespace MusicBeePlugin
                 NextLineWhenNoTranslation = true,
                 CompactWindow = true,
                 CompactWindowPreferenceSet = true,
+                UseArtworkColors = true,
+                ArtworkColorsPreferenceSet = true,
             };
         }
     }
