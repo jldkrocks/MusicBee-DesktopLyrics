@@ -17,9 +17,13 @@ namespace MusicBeePlugin
                 PartyAnimation.ReadBpm("unknown") != 0 ||
                 PartyAnimation.FrameAt(140, 0) != 1 ||
                 PartyAnimation.FrameAt(1680, 0) != 0 ||
-                PartyAnimation.FrameAt(750, 120) != 6 ||
-                PartyAnimation.FrameAt(1500, 120) != 0)
-                throw new Exception("Party frames must loop at native speed or on song beats.");
+                PartyAnimation.FrameAt(750, 120) != 4 ||
+                PartyAnimation.FrameAt(2000, 120) != 0 ||
+                PartyAnimation.FrameAt(1000, 80) != 4 ||
+                PartyAnimation.FrameAt(1000, 160) != 8 ||
+                Math.Abs(PartyAnimation.LoopDurationMs(80) - 3000) > 0.001 ||
+                Math.Abs(PartyAnimation.LoopDurationMs(160) - 1500) > 0.001)
+                throw new Exception("Party dancers must have a visibly different four-beat speed per song.");
 
             var workArea = new Rectangle(0, 0, 1920, 1040);
             var monitors = new[] { new Rectangle(-1920, 0, 1920, 1040),

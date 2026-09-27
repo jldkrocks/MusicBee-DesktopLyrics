@@ -36,10 +36,10 @@ namespace MusicBeePlugin
             var nativeLoopMs = FrameCount * FrameDurationMs;
             if (bpm >= 40 && bpm <= 240)
             {
-                // Preserve the dance's rough speed while each complete loop
-                // starts on a beat. Playback position also handles seeking.
-                var beats = Math.Max(1, (int)Math.Round(nativeLoopMs * bpm / 60000d));
-                return beats * 60000d / bpm;
+                // A fixed four-beat phrase makes the actual song tempo change
+                // the dancer's speed. Rounding the beat count to preserve the
+                // native speed made very different BPMs look almost identical.
+                return 4 * 60000d / bpm;
             }
             return nativeLoopMs;
         }

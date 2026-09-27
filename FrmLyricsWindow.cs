@@ -59,6 +59,7 @@ namespace MusicBeePlugin
         private PartyDancerWindow _leftDancer, _rightDancer;
         private readonly PartyBeatTracker _partyBeat = new PartyBeatTracker();
         private double _partyBpm;
+        private int _partySpectrumMisses;
         private long _lastPartyUpdate;
         private Rectangle _partyLayoutWindow, _leftPartyBounds, _rightPartyBounds;
         private Size _partyLayoutClientSize;
@@ -529,6 +530,7 @@ namespace MusicBeePlugin
                 }
                 catch (Exception) { _partyBpm = 0; }
                 _partyBeat.Reset();
+                _partySpectrumMisses = 0;
                 _lastPartyUpdate = 0;
             }
             if (trackChanged && !string.IsNullOrWhiteSpace(trackUrl))
@@ -728,6 +730,10 @@ namespace MusicBeePlugin
 
             var validCount = Math.Min(Math.Max(0, count), _fft.Length);
             var upperBin = Math.Min(validCount / 2, 1024);
+            if (_settings.PartyMode && _partyBpm == 0 && _partyBeat.Bpm == 0 &&
+                _playState == Plugin.PlayState.Playing)
+                _partySpectrumMisses = upperBin > 8 ? 0 :
+                    Math.Min(30, _partySpectrumMisses + 1);
             if (_settings.PartyMode && _partyBpm == 0 && _partyBeat.Bpm == 0 &&
                 upperBin > 8 &&
                 _playState == Plugin.PlayState.Playing)
@@ -1543,9 +1549,12 @@ namespace MusicBeePlugin
 
         private void DrawPartyButton(Graphics g, Rectangle bounds)
         {
+            // Leave a gap before the centred transport controls at the
+            // smallest supported window width.
+            var partyWidth = Math.Min(105, Math.Max(65, bounds.Width / 2 - 116));
             _partyButton = new Rectangle(16, bounds.Bottom -
-                (_settings.TransparentCanvas ? (bounds.Height < 260 ? 50 : 62) : 40),
-                65, 30);
+                (_settings.TransparentCanvas ? (bounds.Height < 260 ? 50 : 62) : 42),
+                partyWidth, 38);
             using (var path = RoundedRectangle(_partyButton, 12))
             using (var shade = new SolidBrush(Color.FromArgb(
                        _settings.TransparentCanvas ? 255 : _settings.PartyMode ? 175 :
@@ -1554,6 +1563,7 @@ namespace MusicBeePlugin
                        _settings.PartyMode ? 220 : 115,
                        _settings.TransparentCanvas ? Color.White : _palette.Border)))
             using (var font = new Font("Segoe UI", 8.3f, FontStyle.Bold, GraphicsUnit.Point))
+            using (var smallFont = new Font("Segoe UI", 7f, FontStyle.Regular, GraphicsUnit.Point))
             using (var brush = new SolidBrush(Color.FromArgb(242, Color.White)))
             using (var format = new StringFormat
                    { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
@@ -1563,7 +1573,17 @@ namespace MusicBeePlugin
                 g.FillPath(shade, path);
                 if (!_settings.TransparentCanvas) g.DrawPath(border, path);
                 g.SmoothingMode = smoothing;
-                g.DrawString("PARTY", font, brush, _partyButton, format);
+                if (_settings.PartyMode)
+                {
+                    g.DrawString("PARTY", font, brush, new Rectangle(
+                        _partyButton.Left, _partyButton.Top + 2, _partyButton.Width, 17), format);
+                    var tempo = _partyBpm > 0 ? "TAG " + Math.Round(_partyBpm) + " BPM" :
+                        _partyBeat.Bpm > 0 ? "AUTO " + Math.Round(_partyBeat.Bpm) + " BPM" :
+                        _partySpectrumMisses >= 30 ? "NO SIGNAL" : "LISTENING...";
+                    g.DrawString(tempo, smallFont, brush, new Rectangle(
+                        _partyButton.Left, _partyButton.Top + 18, _partyButton.Width, 16), format);
+                }
+                else g.DrawString("PARTY", font, brush, _partyButton, format);
             }
         }
 
