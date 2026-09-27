@@ -167,6 +167,10 @@ namespace MusicBeePlugin
             controller.CancelPreview(currentTrack);
             if (controller.UpdateLyrics(false)?.LyricLine1 != " Adjusted")
                 throw new Exception("Saved timings must remain visible if MusicBee caches old lyrics.");
+            playback.Library_GetFileTag = (url, field) => url == "track.mp3" ?
+                "[00:53.27] New tag\n[00:54.00] Later" : null;
+            if (controller.UpdateLyrics(false)?.LyricLine1 != " New tag")
+                throw new Exception("A newly saved MusicBee Lyrics tag must appear without switching songs.");
             currentTrack = "different.mp3";
             if (controller.UpdateLyrics(false)?.LyricLine1 != " Original")
                 throw new Exception("Saved lyric preview must not leak to a different song.");
@@ -250,6 +254,19 @@ namespace MusicBeePlugin
                 QueueNavigation.TryPlayQueuedTrack(upcoming, previous[2], out queueError))
                 throw new Exception("A played track must be clickable while current is not replayed.");
             Console.WriteLine("Queue history checks passed.");
+
+            history.Observe("first.mp3", "First", "Artist");
+            var timeline = history.Timeline(new[]
+            {
+                new UpcomingQueue.Track { FileUrl = "second.mp3", Offset = 1 },
+                new UpcomingQueue.Track { FileUrl = "second.mp3", Offset = 2 },
+                new UpcomingQueue.Track { FileUrl = "fourth.mp3", Offset = 3 }
+            });
+            if (timeline.Count != 4 || timeline[0].FileUrl != "third.mp3" ||
+                timeline[1].FileUrl != "first.mp3" ||
+                timeline[2].FileUrl != "second.mp3" || timeline[2].Offset != 1 ||
+                timeline[3].FileUrl != "fourth.mp3")
+                throw new Exception("Clicking around must not duplicate played or upcoming songs.");
 
             var searchJson = "[{\"id\":1,\"trackName\":\"Anytime Anywhere\",\"artistName\":\"milet\",\"duration\":50," +
                 "\"syncedLyrics\":\"[00:01.00] Short\"},{\"id\":2,\"trackName\":\"Anytime Anywhere\"," +

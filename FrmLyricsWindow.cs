@@ -53,7 +53,7 @@ namespace MusicBeePlugin
         private Plugin.PlayState _playState = Plugin.PlayState.Undefined;
         private long _lastPlayStateCheck;
         private Rectangle _previousButton, _playButton, _nextButton, _menuButton,
-            _timingButton, _lrcButton, _backgroundButton;
+            _timingButton, _lrcButton, _backgroundButton, _resizeGrip;
         private string _hoverButton;
         private long _queueNoticeStarted;
         private string _queueNoticeText = "That's the end of the queue ♪";
@@ -66,6 +66,7 @@ namespace MusicBeePlugin
         private Rectangle _queueCard, _queueUpButton, _queueDownButton;
         private int _queueScroll, _queueVisibleCount;
         private bool _queueExhausted;
+        private int _lastFutureOffset;
         private string _hoverQueue;
         private readonly List<TextGeometry> _textGeometries = new List<TextGeometry>();
         private static readonly Color ClearKey = Color.Fuchsia;
@@ -89,6 +90,13 @@ namespace MusicBeePlugin
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr window, int message,
+            IntPtr wParam, IntPtr lParam);
 
         public Form Form => this;
         public bool IsAtEndOfQueue => _queueEnded;
@@ -174,14 +182,19 @@ namespace MusicBeePlugin
 
         private void ApplyTransparency()
         {
-            // Color-key transparency keeps the ordinary, resizable title bar.
-            // The cards are painted opaque in this mode so they do not blend
-            // against the key colour and develop purple fringes.
+            // A borderless colour-key canvas keeps only the drawn UI visible.
+            // The visible cards must be fully opaque so their edges do not
+            // blend with the key colour and acquire purple fringes.
+            var clientSize = ClientSize;
+            FormBorderStyle = _settings.TransparentCanvas ? FormBorderStyle.None :
+                FormBorderStyle.SizableToolWindow;
+            ClientSize = clientSize;
             TransparencyKey = _settings.TransparentCanvas ? ClearKey : Color.Empty;
             BackColor = _settings.TransparentCanvas ? ClearKey : Color.FromArgb(13, 18, 32);
             _backgroundCache?.Dispose();
             _backgroundCache = null;
             Invalidate();
+            if (_loaded && Visible) StartAnimation();
         }
 
         private bool IsVisibleOnAnyScreen()
@@ -302,6 +315,8 @@ namespace MusicBeePlugin
                 BeginInvoke(new Action(OpenLrcLibPicker)));
             menu.Items.Add("More settings…", null, (sender, args) =>
                 BeginInvoke(new Action(() => _openSettings?.Invoke())));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Close lyrics window", null, (sender, args) => Close());
             return menu;
         }
 
@@ -385,6 +400,7 @@ namespace MusicBeePlugin
             if (trackChanged)
             {
                 _queueTracks.Clear();
+                _lastFutureOffset = 0;
             }
             if (trackChanged && !string.IsNullOrWhiteSpace(trackUrl))
             {
@@ -490,12 +506,11 @@ namespace MusicBeePlugin
         public void RefreshQueue()
         {
             if (IsDisposed || !IsHandleCreated) return;
-            var previousCount = _queueTracks.FindAll(track => track.Offset > 0).Count;
-            var requested = Math.Max(12, Math.Min(96, previousCount));
+            var requested = Math.Max(12, Math.Min(96, _lastFutureOffset));
             var future = UpcomingQueue.Read(_musicBee, 1, requested);
+            _lastFutureOffset = future.Count == 0 ? 0 : future[future.Count - 1].Offset;
             _queueExhausted = future.Count < requested;
-            _queueTracks = _history.Snapshot();
-            _queueTracks.AddRange(future);
+            _queueTracks = _history.Timeline(future);
             _queueScroll = Math.Max(0, Math.Min(_queueScroll,
                 Math.Max(0, _queueTracks.Count - _queueVisibleCount)));
             _lastQueueCheck = Stopwatch.GetTimestamp();
@@ -504,20 +519,22 @@ namespace MusicBeePlugin
 
         private void LoadMoreQueue()
         {
-            if (_queueExhausted || _queueTracks.FindAll(track => track.Offset > 0).Count >= 96) return;
-            var first = _queueTracks.Count == 0 ? 1 :
-                _queueTracks[_queueTracks.Count - 1].Offset + 1;
+            if (_queueExhausted || _lastFutureOffset >= 96) return;
+            var first = _lastFutureOffset + 1;
             var count = Math.Min(12, 97 - first);
             if (count <= 0) { _queueExhausted = true; return; }
             var more = UpcomingQueue.Read(_musicBee, first, count);
             foreach (var track in more)
             {
+                _lastFutureOffset = track.Offset;
                 if (_queueTracks.Exists(existing => existing.Offset > 0 &&
                     existing.Index == track.Index))
                 {
                     _queueExhausted = true;
                     break;
                 }
+                if (_queueTracks.Exists(existing => string.Equals(existing.FileUrl,
+                    track.FileUrl, StringComparison.OrdinalIgnoreCase))) continue;
                 _queueTracks.Add(track);
             }
             if (more.Count < count) _queueExhausted = true;
@@ -722,22 +739,27 @@ namespace MusicBeePlugin
             var card = new Rectangle(bounds.Right - sideMargin + 13,
                 Math.Max(top, (bounds.Height - height) / 2), sideMargin - 27, height);
             _queueCard = card;
+            var accent = _settings.TransparentCanvas ?
+                Color.FromArgb(186, 198, 215) : _palette.Border;
             using (var path = RoundedRectangle(card, 12))
             using (var shade = new SolidBrush(Color.FromArgb(
-                       _settings.TransparentCanvas ? 232 : 71, 10, 13, 25)))
-            using (var border = new Pen(Color.FromArgb(43, _palette.Border)))
+                       _settings.TransparentCanvas ? 255 : 71, 10, 13, 25)))
+            using (var border = new Pen(Color.FromArgb(43, accent)))
             using (var heading = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Point))
             using (var titleFont = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point))
             using (var artistFont = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point))
-            using (var headingBrush = new SolidBrush(Color.FromArgb(171, _palette.Border)))
+            using (var headingBrush = new SolidBrush(Color.FromArgb(171, accent)))
             using (var titleBrush = new SolidBrush(Color.FromArgb(214, 235, 238, 246)))
             using (var artistBrush = new SolidBrush(Color.FromArgb(131, 207, 214, 230)))
-            using (var separator = new Pen(Color.FromArgb(32, _palette.Border)))
+            using (var separator = new Pen(Color.FromArgb(32, accent)))
             using (var format = new StringFormat(StringFormatFlags.NoWrap)
                    { Trimming = StringTrimming.EllipsisCharacter })
             {
+                var smoothing = g.SmoothingMode;
+                if (_settings.TransparentCanvas) g.SmoothingMode = SmoothingMode.None;
                 g.FillPath(shade, path);
-                g.DrawPath(border, path);
+                if (!_settings.TransparentCanvas) g.DrawPath(border, path);
+                g.SmoothingMode = smoothing;
                 g.DrawString("QUEUE", heading, headingBrush,
                     new RectangleF(card.Left + 14, card.Top + 14, card.Width - 28, 19), format);
 
@@ -771,10 +793,10 @@ namespace MusicBeePlugin
                     var hit = new Rectangle(card.Left + 5, y - 2, card.Width - 16, 51);
                     _queueHits.Add(new QueueHit { Area = hit, Track = track });
                     if (track.Offset == 0)
-                        using (var playing = new SolidBrush(Color.FromArgb(58, _palette.Border)))
+                        using (var playing = new SolidBrush(Color.FromArgb(58, accent)))
                             g.FillRectangle(playing, hit);
                     if (_hoverQueue == track.Offset.ToString())
-                        using (var highlight = new SolidBrush(Color.FromArgb(34, _palette.Border)))
+                        using (var highlight = new SolidBrush(Color.FromArgb(34, accent)))
                             g.FillRectangle(highlight, hit);
                     g.DrawString(track.Offset == 0 ? "▶  " + track.Title : track.Title,
                         titleFont, titleBrush,
@@ -794,8 +816,8 @@ namespace MusicBeePlugin
                     var maxScroll = _queueTracks.Count - visible;
                     var thumbTop = rail.Top + (rail.Height - thumbHeight) *
                         _queueScroll / maxScroll;
-                    using (var railBrush = new SolidBrush(Color.FromArgb(32, _palette.Border)))
-                    using (var thumb = new SolidBrush(Color.FromArgb(139, _palette.Border)))
+                    using (var railBrush = new SolidBrush(Color.FromArgb(32, accent)))
+                    using (var thumb = new SolidBrush(Color.FromArgb(139, accent)))
                     {
                         g.FillRectangle(railBrush, rail);
                         g.FillRectangle(thumb, rail.Left, thumbTop, rail.Width, thumbHeight);
@@ -870,12 +892,20 @@ namespace MusicBeePlugin
             var eased = progress * progress * (3 - 2 * progress);
             var promotePreview = progress < 1f && !string.IsNullOrEmpty(_previousNextLine) &&
                                  _previousNextLine == _line1;
-            if (progress < 1f)
-                DrawLyricPanel(g, content, panelLeft, panelWidth, mainHeight, subHeight, gap,
-                    _previousLine1, _previousLine2, _previousNextLine,
-                    1 - eased, -18f * scale * eased);
-            DrawLyricPanel(g, content, panelLeft, panelWidth, mainHeight, subHeight, gap,
-                _line1, _line2, _nextLine, eased, 18f * scale * (1 - eased));
+            if (_settings.TransparentCanvas)
+                DrawTransparentLyricPanel(g, content, panelLeft, panelWidth,
+                    mainHeight, subHeight, gap, scale, progress, eased);
+            else
+            {
+                if (progress < 1f)
+                    DrawLyricPanel(g, content, panelLeft, panelWidth,
+                        mainHeight, subHeight, gap, _previousLine1,
+                        _previousLine2, _previousNextLine,
+                        1 - eased, -18f * scale * eased);
+                DrawLyricPanel(g, content, panelLeft, panelWidth, mainHeight,
+                    subHeight, gap, _line1, _line2, _nextLine,
+                    eased, 18f * scale * (1 - eased));
+            }
             if (progress < 1f)
                 DrawLyricGroup(g, content, mainHeight, subHeight, gap, scale,
                     _previousLine1, _previousLine2, _previousNextLine,
@@ -905,10 +935,59 @@ namespace MusicBeePlugin
             DrawQueueNotice(g, content);
             DrawSongTitle(g, bounds);
             DrawTransport(g, bounds);
-            DrawTimingButton(g, bounds);
-            DrawLrcButton(g, bounds);
+            if (_settings.TransparentCanvas)
+                _timingButton = _lrcButton = Rectangle.Empty;
+            else
+            {
+                DrawTimingButton(g, bounds);
+                DrawLrcButton(g, bounds);
+            }
             DrawBackgroundButton(g, bounds);
             DrawMenuButton(g, bounds);
+            DrawResizeGrip(g, bounds);
+        }
+
+        private void DrawTransparentLyricPanel(Graphics g, RectangleF content,
+            int left, int width, float mainHeight, float subHeight, float gap,
+            float scale, float progress, float eased)
+        {
+            var hasOld = progress < 1f &&
+                (!string.IsNullOrWhiteSpace(_previousLine1) ||
+                 !string.IsNullOrWhiteSpace(_previousLine2) ||
+                 !string.IsNullOrWhiteSpace(_previousNextLine));
+            var hasNew = !string.IsNullOrWhiteSpace(_line1) ||
+                !string.IsNullOrWhiteSpace(_line2) ||
+                !string.IsNullOrWhiteSpace(_nextLine);
+            if (!hasOld && !hasNew) return;
+            var top = float.MaxValue;
+            var bottom = float.MinValue;
+            if (hasOld)
+            {
+                var height = mainHeight + CountSubLines(_previousLine2,
+                    _previousNextLine) * (subHeight + gap);
+                var y = content.Top + (content.Height - height) / 2 - 18f * scale * eased;
+                top = Math.Min(top, y);
+                bottom = Math.Max(bottom, y + height);
+            }
+            if (hasNew)
+            {
+                var height = mainHeight + CountSubLines(_line2, _nextLine) *
+                    (subHeight + gap);
+                var y = content.Top + (content.Height - height) / 2 +
+                    18f * scale * (1 - eased);
+                top = Math.Min(top, y);
+                bottom = Math.Max(bottom, y + height);
+            }
+            var card = new Rectangle(left, (int)Math.Floor(top - 10), width,
+                Math.Max(29, (int)Math.Ceiling(bottom - top + 20)));
+            using (var path = RoundedRectangle(card, 14))
+            using (var shade = new SolidBrush(Color.FromArgb(255, 13, 17, 28)))
+            {
+                var smoothing = g.SmoothingMode;
+                g.SmoothingMode = SmoothingMode.None;
+                g.FillPath(shade, path);
+                g.SmoothingMode = smoothing;
+            }
         }
 
         private void DrawLyricPanel(Graphics g, RectangleF content, int left, int width,
@@ -921,8 +1000,7 @@ namespace MusicBeePlugin
             var top = content.Top + (content.Height - height) / 2 + offsetY;
             using (var path = RoundedRectangle(new Rectangle(left, (int)(top - 9),
                        width, Math.Max(29, (int)(height + 18))), 14))
-            using (var shade = new SolidBrush(Color.FromArgb(
-                       (int)((_settings.TransparentCanvas ? 232 : 128) * opacity), 10, 13, 27)))
+            using (var shade = new SolidBrush(Color.FromArgb((int)(128 * opacity), 10, 13, 27)))
             using (var outline = new Pen(Color.FromArgb((int)(56 * opacity), _palette.Border)))
             {
                 g.FillPath(shade, path);
@@ -934,8 +1012,11 @@ namespace MusicBeePlugin
         {
             var rect = Rectangle.Round(area);
             using (var path = RoundedRectangle(rect, 10))
-            using (var background = new SolidBrush(Color.FromArgb(115, 9, 12, 22)))
+            using (var background = new SolidBrush(Color.FromArgb(
+                       _settings.TransparentCanvas ? 255 : 115, 9, 12, 22)))
             {
+                var smoothing = g.SmoothingMode;
+                if (_settings.TransparentCanvas) g.SmoothingMode = SmoothingMode.None;
                 g.FillPath(background, path);
                 if (_albumArtwork != null)
                 {
@@ -949,16 +1030,19 @@ namespace MusicBeePlugin
                     var middle = new PointF(rect.Left + rect.Width / 2f,
                         rect.Top + rect.Height / 2f);
                     var radius = Math.Min(rect.Width, rect.Height) * 0.27f;
-                    using (var line = new Pen(Color.FromArgb(80, _palette.Border), 2f))
-                    using (var centre = new SolidBrush(Color.FromArgb(90, _palette.Border)))
+                    var accent = _settings.TransparentCanvas ? Color.White : _palette.Border;
+                    using (var line = new Pen(Color.FromArgb(80, accent), 2f))
+                    using (var centre = new SolidBrush(Color.FromArgb(90, accent)))
                     {
                         g.DrawEllipse(line, middle.X - radius, middle.Y - radius,
                             radius * 2, radius * 2);
                         g.FillEllipse(centre, middle.X - 4, middle.Y - 4, 8, 8);
                     }
                 }
-                using (var border = new Pen(Color.FromArgb(110, _palette.Border)))
-                    g.DrawPath(border, path);
+                if (!_settings.TransparentCanvas)
+                    using (var border = new Pen(Color.FromArgb(110, _palette.Border)))
+                        g.DrawPath(border, path);
+                g.SmoothingMode = smoothing;
             }
         }
 
@@ -967,11 +1051,19 @@ namespace MusicBeePlugin
             if (!_settings.ShowSongTitle || string.IsNullOrWhiteSpace(_songTitle)) return;
             var text = _songTitle.Trim();
             if (!string.IsNullOrWhiteSpace(_songArtist)) text += "  ·  " + _songArtist.Trim();
-            var titleArea = new RectangleF(120, 7, Math.Max(1, bounds.Width - 365), 29);
+            var titleArea = _settings.TransparentCanvas ?
+                new RectangleF(Math.Max(8, bounds.Width / 2f - 230), 7,
+                    Math.Min(460, Math.Max(1, bounds.Width - 160)), 29) :
+                new RectangleF(120, 7, Math.Max(1, bounds.Width - 365), 29);
             if (_settings.TransparentCanvas)
                 using (var path = RoundedRectangle(Rectangle.Round(titleArea), 10))
-                using (var shade = new SolidBrush(Color.FromArgb(240, 13, 17, 28)))
+                using (var shade = new SolidBrush(Color.FromArgb(255, 13, 17, 28)))
+                {
+                    var smoothing = g.SmoothingMode;
+                    g.SmoothingMode = SmoothingMode.None;
                     g.FillPath(shade, path);
+                    g.SmoothingMode = smoothing;
+                }
             using (var font = new Font("Segoe UI", 10.5f, FontStyle.Regular, GraphicsUnit.Point))
             using (var brush = new SolidBrush(Color.FromArgb(185, 234, 235, 242)))
             using (var format = new StringFormat(StringFormatFlags.NoWrap)
@@ -1009,8 +1101,10 @@ namespace MusicBeePlugin
             var notice = new Rectangle((int)((ClientSize.Width - width) / 2f),
                 (int)(content.Top + (content.Height - 40f) / 2f), (int)width, 40);
             using (var path = RoundedRectangle(notice, 19))
-            using (var background = new SolidBrush(Color.FromArgb((int)(230 * fade), 19, 23, 39)))
-            using (var border = new Pen(Color.FromArgb((int)(140 * fade), _palette.Border)))
+            using (var background = new SolidBrush(Color.FromArgb(
+                       _settings.TransparentCanvas ? 255 : (int)(230 * fade), 19, 23, 39)))
+            using (var border = new Pen(Color.FromArgb((int)(140 * fade),
+                       _settings.TransparentCanvas ? Color.LightGray : _palette.Border)))
             using (var font = new Font("Segoe UI", 11f, FontStyle.Regular, GraphicsUnit.Point))
             using (var text = new SolidBrush(Color.FromArgb((int)(240 * fade), 245, 245, 250)))
             using (var format = new StringFormat(StringFormatFlags.NoWrap)
@@ -1020,8 +1114,11 @@ namespace MusicBeePlugin
                        Trimming = StringTrimming.EllipsisCharacter
                    })
             {
+                var smoothing = g.SmoothingMode;
+                if (_settings.TransparentCanvas) g.SmoothingMode = SmoothingMode.None;
                 g.FillPath(background, path);
-                g.DrawPath(border, path);
+                if (!_settings.TransparentCanvas) g.DrawPath(border, path);
+                g.SmoothingMode = smoothing;
                 g.DrawString(_queueNoticeText, font, text, notice, format);
             }
         }
@@ -1037,8 +1134,13 @@ namespace MusicBeePlugin
             _nextButton = new Rectangle(center + 36, y + 2, 34, 34);
             using (var path = RoundedRectangle(new Rectangle(center - 92, y - 5, 184, 49), 22))
             using (var shade = new SolidBrush(Color.FromArgb(
-                       _settings.TransparentCanvas ? 235 : 93, 8, 11, 23)))
+                       _settings.TransparentCanvas ? 255 : 93, 8, 11, 23)))
+            {
+                var smoothing = g.SmoothingMode;
+                if (_settings.TransparentCanvas) g.SmoothingMode = SmoothingMode.None;
                 g.FillPath(shade, path);
+                g.SmoothingMode = smoothing;
+            }
 
             DrawControlButton(g, _previousButton, "previous");
             DrawControlButton(g, _playButton, "play");
@@ -1049,6 +1151,7 @@ namespace MusicBeePlugin
         {
             var hovered = _hoverButton == action;
             using (var background = new SolidBrush(Color.FromArgb(hovered ? 118 : 65,
+                       _settings.TransparentCanvas ? Color.FromArgb(167, 185, 206) :
                        _palette.Border)))
             using (var symbol = new SolidBrush(Color.FromArgb(hovered ? 255 : 215,
                        Color.White)))
@@ -1111,11 +1214,14 @@ namespace MusicBeePlugin
             _menuButton = new Rectangle(bounds.Right - 38, 7, 29, 29);
             using (var path = RoundedRectangle(_menuButton, 8))
             using (var shade = new SolidBrush(Color.FromArgb(
-                       _settings.TransparentCanvas ? 235 :
+                       _settings.TransparentCanvas ? 255 :
                        _hoverButton == "menu" ? 99 : 54, 14, 18, 32)))
             using (var pen = new Pen(Color.FromArgb(175, 226, 228, 237), 1.6f))
             {
+                var smoothing = g.SmoothingMode;
+                if (_settings.TransparentCanvas) g.SmoothingMode = SmoothingMode.None;
                 g.FillPath(shade, path);
+                g.SmoothingMode = smoothing;
                 var left = _menuButton.Left + 7;
                 for (var i = 0; i < 3; i++)
                 {
@@ -1168,19 +1274,40 @@ namespace MusicBeePlugin
 
         private void DrawBackgroundButton(Graphics g, Rectangle bounds)
         {
-            _backgroundButton = new Rectangle(bounds.Right - 238, 7, 32, 29);
+            _backgroundButton = new Rectangle(bounds.Right -
+                (_settings.TransparentCanvas ? 78 : 238), 7, 32, 29);
             using (var path = RoundedRectangle(_backgroundButton, 8))
             using (var shade = new SolidBrush(Color.FromArgb(
-                       _settings.TransparentCanvas ? 235 : 72, 20, 38, 58)))
-            using (var border = new Pen(Color.FromArgb(150, _palette.Border)))
+                       _settings.TransparentCanvas ? 255 : 72, 20, 38, 58)))
+            using (var border = new Pen(Color.FromArgb(150,
+                       _settings.TransparentCanvas ? Color.LightGray : _palette.Border)))
             using (var font = new Font("Segoe UI", 8f, FontStyle.Bold))
             using (var brush = new SolidBrush(Color.White))
             using (var format = new StringFormat
                    { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
             {
+                var smoothing = g.SmoothingMode;
+                if (_settings.TransparentCanvas) g.SmoothingMode = SmoothingMode.None;
                 g.FillPath(shade, path);
-                g.DrawPath(border, path);
+                if (!_settings.TransparentCanvas) g.DrawPath(border, path);
+                g.SmoothingMode = smoothing;
                 g.DrawString("BG", font, brush, _backgroundButton, format);
+            }
+        }
+
+        private void DrawResizeGrip(Graphics g, Rectangle bounds)
+        {
+            _resizeGrip = Rectangle.Empty;
+            if (!_settings.TransparentCanvas) return;
+            _resizeGrip = new Rectangle(bounds.Right - 27, bounds.Bottom - 27, 20, 20);
+            using (var background = new SolidBrush(Color.FromArgb(255, 13, 17, 28)))
+            using (var pen = new Pen(Color.FromArgb(142, 170, 182, 199), 1.2f))
+            {
+                g.FillRectangle(background, _resizeGrip);
+                for (var i = 0; i < 3; i++)
+                    g.DrawLine(pen, _resizeGrip.Right - 5 - i * 5,
+                        _resizeGrip.Bottom - 4,
+                        _resizeGrip.Right - 4, _resizeGrip.Bottom - 5 - i * 5);
             }
         }
 
@@ -1303,6 +1430,11 @@ namespace MusicBeePlugin
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            if (_settings.TransparentCanvas && _resizeGrip.Contains(e.Location))
+            {
+                Cursor = Cursors.SizeNWSE;
+                return;
+            }
             string queueHit = null;
             foreach (var queueRow in _queueHits)
                 if (queueRow.Area.Contains(e.Location))
@@ -1325,6 +1457,31 @@ namespace MusicBeePlugin
             _hoverQueue = queueHit;
             Cursor = hit == null ? Cursors.Default : Cursors.Hand;
             Invalidate();
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            base.WndProc(ref message);
+            if (message.Msg == 0x84 && _settings != null &&
+                _settings.TransparentCanvas &&
+                _resizeGrip.Contains(PointToClient(System.Windows.Forms.Cursor.Position)))
+                message.Result = new IntPtr(17); // HTBOTTOMRIGHT
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (!_settings.TransparentCanvas || e.Button != MouseButtons.Left ||
+                _resizeGrip.Contains(e.Location) || _queueCard.Contains(e.Location) ||
+                _menuButton.Contains(e.Location) ||
+                _backgroundButton.Contains(e.Location) ||
+                _previousButton.Contains(e.Location) ||
+                _playButton.Contains(e.Location) ||
+                _nextButton.Contains(e.Location)) return;
+            // The title bar is hidden, so the title, artwork and lyric card
+            // act as drag surfaces in the borderless layout.
+            ReleaseCapture();
+            SendMessage(Handle, 0xA1, new IntPtr(2), IntPtr.Zero); // HTCAPTION
         }
 
         protected override void OnMouseLeave(EventArgs e)

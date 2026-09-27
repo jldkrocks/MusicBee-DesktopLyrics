@@ -28,7 +28,7 @@ namespace MusicBeePlugin
     {
         private const string Endpoint = "https://lrclib.net/api/search?q=";
         private const string ClientName =
-            "DesktopLyrics/1.15.0 (https://github.com/jldkrocks/MusicBee-DesktopLyrics)";
+            "DesktopLyrics/1.15.1 (https://github.com/jldkrocks/MusicBee-DesktopLyrics)";
         private static readonly SemaphoreSlim Requests = new SemaphoreSlim(1, 1);
         private static DateTime _nextRequestUtc = DateTime.MinValue;
 

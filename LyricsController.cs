@@ -41,18 +41,37 @@ namespace MusicBeePlugin
         public LyricView UpdateLyrics(bool useGeneratedWhenUnavailable)
         {
             // TODO passively change?
+            var currentUrl = _interface.NowPlaying_GetFileUrl?.Invoke();
             if (_editedTrackUrl != null &&
-                _interface.NowPlaying_GetFileUrl() != _editedTrackUrl)
+                currentUrl != _editedTrackUrl)
             {
                 _editedTrackUrl = _editedLyrics = null;
                 _editedLyricsSaved = false;
                 _lastLyrics = null;
                 _lyrics = null;
             }
+            string taggedLyrics = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(currentUrl))
+                    taggedLyrics = _interface.Library_GetFileTag?.Invoke(currentUrl,
+                        Plugin.MetaDataType.Lyrics);
+            }
+            catch (System.Exception) { /* Streams may have no writable library tag. */ }
+            // MusicBee may keep NowPlaying_GetLyrics cached until another song
+            // starts. A new tag saved in its editor must take precedence.
+            if (_editedLyricsSaved && _editedTrackUrl == currentUrl &&
+                !string.IsNullOrWhiteSpace(taggedLyrics) && taggedLyrics != _editedLyrics)
+            {
+                _editedTrackUrl = _editedLyrics = null;
+                _editedLyricsSaved = false;
+            }
             var hasLyrics = _interface.NowPlaying_GetFileTag(Plugin.MetaDataType.HasLyrics) ?? "";
-            if (_editedTrackUrl != null || hasLyrics.StartsWith("Y") || hasLyrics.Length == 0)
+            if (_editedTrackUrl != null || !string.IsNullOrWhiteSpace(taggedLyrics) ||
+                hasLyrics.StartsWith("Y") || hasLyrics.Length == 0)
             {
                 var lyrics = _editedTrackUrl != null ? _editedLyrics :
+                    !string.IsNullOrWhiteSpace(taggedLyrics) ? taggedLyrics :
                     _interface.NowPlaying_GetLyrics();
                 if (lyrics != _lastLyrics)
                 {
