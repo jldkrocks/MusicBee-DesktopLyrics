@@ -151,8 +151,8 @@ namespace MusicBeePlugin
             };
             _save = MakeButton("Save timing", 104);
             _save.Click += SaveClicked;
-            var cancel = MakeButton("Cancel", 72);
-            cancel.Click += (sender, args) => Close();
+            var cancelButton = MakeButton("Cancel", 72);
+            cancelButton.Click += (sender, args) => Close();
             var reset = MakeButton("Reset", 72);
             reset.Click += (sender, args) =>
             {
@@ -161,7 +161,7 @@ namespace MusicBeePlugin
                 RefreshRows();
             };
             actions.Controls.Add(_save);
-            actions.Controls.Add(cancel);
+            actions.Controls.Add(cancelButton);
             actions.Controls.Add(reset);
             footer.Controls.Add(actions, 1, 0);
             root.Controls.Add(footer, 0, 4);
