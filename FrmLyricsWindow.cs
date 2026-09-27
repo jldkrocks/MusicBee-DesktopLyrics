@@ -10,14 +10,14 @@ using System.Windows.Forms;
 
 namespace MusicBeePlugin
 {
-    // A regular, movable and resizable window. The original transparent desktop
-    // overlay remains available when CompactWindow is disabled.
+    // A movable and resizable window with optional transparent canvas.
     internal sealed class FrmLyricsWindow : Form, IDesktopLyricsView
     {
         private const int BarCount = 48;
         private const float TransitionMs = 320f;
         private const float QueueNoticeMs = 3200f;
         private readonly Plugin.MusicBeeApiInterface _musicBee;
+        private readonly PlaybackHistory _history;
         private readonly Action<SettingsObj> _settingsChanged;
         private readonly Action _openSettings;
         private readonly Action<string, string> _previewTiming, _savedTiming;
@@ -27,13 +27,12 @@ namespace MusicBeePlugin
         private readonly float[] _bars = new float[BarCount];
         private readonly float[] _levels = new float[BarCount];
         private readonly float[] _targets = new float[BarCount];
-        private readonly System.Threading.Timer _animationTimer;
+        private readonly System.Windows.Forms.Timer _animationTimer;
         private SettingsObj _settings;
         private string _line1 = "", _line2, _nextLine;
         private string _previousLine1, _previousLine2, _previousNextLine;
         private long _transitionStarted;
         private float _gain = 6f;
-        private int _framePending;
         private long _lastFrameTimestamp;
         private long _lastPaintRequest;
         private long _lastSpectrumSample;
@@ -54,12 +53,13 @@ namespace MusicBeePlugin
         private Plugin.PlayState _playState = Plugin.PlayState.Undefined;
         private long _lastPlayStateCheck;
         private Rectangle _previousButton, _playButton, _nextButton, _menuButton,
-            _timingButton, _lrcButton;
+            _timingButton, _lrcButton, _backgroundButton;
         private string _hoverButton;
         private long _queueNoticeStarted;
         private string _queueNoticeText = "That's the end of the queue ♪";
         private bool _queueEnded;
         private FrmTimingEditor _timingEditor;
+        private FrmTimingCreator _timingCreator;
         private FrmLrcLibPicker _lrcPicker;
         private List<UpcomingQueue.Track> _queueTracks = new List<UpcomingQueue.Track>();
         private readonly List<QueueHit> _queueHits = new List<QueueHit>();
@@ -68,6 +68,7 @@ namespace MusicBeePlugin
         private bool _queueExhausted;
         private string _hoverQueue;
         private readonly List<TextGeometry> _textGeometries = new List<TextGeometry>();
+        private static readonly Color ClearKey = Color.Fuchsia;
 
         private sealed class QueueHit
         {
@@ -96,12 +97,14 @@ namespace MusicBeePlugin
                 Stopwatch.Frequency < QueueNoticeMs;
 
         public FrmLyricsWindow(SettingsObj settings, Plugin.MusicBeeApiInterface musicBee,
+            PlaybackHistory history,
             Action<SettingsObj> settingsChanged, Action openSettings,
             Action<string, string> previewTiming, Action<string> cancelTiming,
             Action<string, string> savedTiming)
         {
             _settings = settings;
             _musicBee = musicBee;
+            _history = history;
             _settingsChanged = settingsChanged;
             _openSettings = openSettings;
             _previewTiming = previewTiming;
@@ -130,8 +133,9 @@ namespace MusicBeePlugin
                 Location = new Point(workArea.Left + (workArea.Width - Width) / 2,
                                      workArea.Bottom - Height - 70);
 
-            _animationTimer = new System.Threading.Timer(AnimationClockTick, null,
-                Timeout.Infinite, Timeout.Infinite);
+            _animationTimer = new System.Windows.Forms.Timer { Interval = 8 };
+            _animationTimer.Tick += AnimationClockTick;
+            ApplyTransparency();
             Shown += (sender, args) =>
             {
                 _loaded = true;
@@ -143,7 +147,7 @@ namespace MusicBeePlugin
             {
                 if (_animationDisposed) return;
                 if (Visible && _loaded) StartAnimation();
-                else _animationTimer.Change(Timeout.Infinite, Timeout.Infinite);
+                else _animationTimer.Stop();
             };
             LocationChanged += (sender, args) => SaveBounds();
             SizeChanged += (sender, args) => SaveBounds();
@@ -156,6 +160,28 @@ namespace MusicBeePlugin
                 _movingOrResizing = false;
                 Invalidate();
             };
+            Resize += (sender, args) =>
+            {
+                // Size changes can outpace posted timer callbacks in the native
+                // sizing loop; paint the new complete client area immediately.
+                if (_loaded && _movingOrResizing && WindowState == FormWindowState.Normal)
+                {
+                    Invalidate();
+                    Update();
+                }
+            };
+        }
+
+        private void ApplyTransparency()
+        {
+            // Color-key transparency keeps the ordinary, resizable title bar.
+            // The cards are painted opaque in this mode so they do not blend
+            // against the key colour and develop purple fringes.
+            TransparencyKey = _settings.TransparentCanvas ? ClearKey : Color.Empty;
+            BackColor = _settings.TransparentCanvas ? ClearKey : Color.FromArgb(13, 18, 32);
+            _backgroundCache?.Dispose();
+            _backgroundCache = null;
+            Invalidate();
         }
 
         private bool IsVisibleOnAnyScreen()
@@ -184,65 +210,57 @@ namespace MusicBeePlugin
             _lastSpectrumSample = 0;
             // An 8 ms target gives the UI up to 120 frames per second. Slow
             // paints drop frames instead of building up a queue of old frames.
-            _animationTimer.Change(0, 8);
+            _animationTimer.Start();
         }
 
-        private void AnimationClockTick(object state)
+        private void AnimationClockTick(object sender, EventArgs args)
         {
-            if (Interlocked.CompareExchange(ref _framePending, 1, 0) != 0) return;
-            try
+            if (IsDisposed || !Visible) return;
+            var now = Stopwatch.GetTimestamp();
+            var elapsedMs = _lastFrameTimestamp == 0 ? 8.0 : Math.Min(50.0,
+                (now - _lastFrameTimestamp) * 1000.0 / Stopwatch.Frequency);
+            _lastFrameTimestamp = now;
+            if (_lastSpectrumSample == 0 ||
+                (now - _lastSpectrumSample) * 1000.0 / Stopwatch.Frequency >= 30)
             {
-                BeginInvoke(new Action(() =>
-                {
-                    try
-                    {
-                        if (IsDisposed || !Visible) return;
-                        var now = Stopwatch.GetTimestamp();
-                        var elapsedMs = _lastFrameTimestamp == 0 ? 8.0 : Math.Min(50.0,
-                            (now - _lastFrameTimestamp) * 1000.0 / Stopwatch.Frequency);
-                        _lastFrameTimestamp = now;
-                        if (_lastSpectrumSample == 0 ||
-                            (now - _lastSpectrumSample) * 1000.0 / Stopwatch.Frequency >= 30)
-                        {
-                            if (_settings.ShowVisualizer) SampleSpectrum();
-                            _lastSpectrumSample = now;
-                        }
-                        if (_lastPlayStateCheck == 0 ||
-                            (now - _lastPlayStateCheck) * 1000.0 / Stopwatch.Frequency >= 100)
-                        {
-                            RefreshPlayState();
-                            _lastPlayStateCheck = now;
-                        }
-                        if (_settings.ShowSongQueue &&
-                            (_lastQueueCheck == 0 ||
-                             (now - _lastQueueCheck) * 1000.0 / Stopwatch.Frequency >= 12000))
-                            RefreshQueue();
-                        StepSpectrum(elapsedMs);
-                        AdvancePalette();
-                        // Keep transitions and live audio smooth, but do not
-                        // repaint a paused, static window 120 times a second.
-                        if (!_movingOrResizing && _playState != Plugin.PlayState.Playing &&
-                            _transitionStarted == 0 && _paletteStarted == 0 &&
-                            !HasQueueNotice && _lastPaintRequest != 0 &&
-                            (now - _lastPaintRequest) * 1000.0 / Stopwatch.Frequency < 40)
-                            return;
-                        if (_movingOrResizing && _lastPaintRequest != 0 &&
-                            (now - _lastPaintRequest) * 1000.0 / Stopwatch.Frequency < 16)
-                            return;
-                        _lastPaintRequest = now;
-                        Invalidate();
-                        if (_movingOrResizing) Update();
-                    }
-                    finally { Interlocked.Exchange(ref _framePending, 0); }
-                }));
+                if (_settings.ShowVisualizer && !_settings.TransparentCanvas) SampleSpectrum();
+                _lastSpectrumSample = now;
             }
-            catch (InvalidOperationException) { Interlocked.Exchange(ref _framePending, 0); }
+            if (_lastPlayStateCheck == 0 ||
+                (now - _lastPlayStateCheck) * 1000.0 / Stopwatch.Frequency >= 100)
+            {
+                RefreshPlayState();
+                _lastPlayStateCheck = now;
+            }
+            if (_settings.ShowSongQueue &&
+                (_lastQueueCheck == 0 ||
+                 (now - _lastQueueCheck) * 1000.0 / Stopwatch.Frequency >= 12000))
+                RefreshQueue();
+            StepSpectrum(elapsedMs);
+            AdvancePalette();
+            var barsMoving = false;
+            if (_settings.ShowVisualizer && !_settings.TransparentCanvas)
+                for (var i = 0; i < BarCount; i++)
+                    if (_bars[i] > 0.003f || _targets[i] > 0.003f)
+                    { barsMoving = true; break; }
+            // Keep the fade to zero at full speed, even after pausing.
+            if (!_movingOrResizing && _playState != Plugin.PlayState.Playing &&
+                !barsMoving && _transitionStarted == 0 && _paletteStarted == 0 &&
+                !HasQueueNotice && _lastPaintRequest != 0 &&
+                (now - _lastPaintRequest) * 1000.0 / Stopwatch.Frequency < 40)
+                return;
+            _lastPaintRequest = now;
+            Invalidate();
+            if (_movingOrResizing) Update();
         }
 
         public void UpdateFromSettings(SettingsObj settings)
         {
+            var transparentChanged = _settings.TransparentCanvas != settings.TransparentCanvas ||
+                TransparencyKey != (settings.TransparentCanvas ? ClearKey : Color.Empty);
             _settings = settings;
             ClearTextGeometries();
+            if (transparentChanged) ApplyTransparency();
             if (_useArtworkColors != settings.UseArtworkColors)
             {
                 _useArtworkColors = settings.UseArtworkColors;
@@ -269,7 +287,9 @@ namespace MusicBeePlugin
                 value => _settings.ShowTransportControls = value);
             AddToggle(menu, "Show visualizer", () => _settings.ShowVisualizer,
                 value => _settings.ShowVisualizer = value);
-            AddToggle(menu, "Show upcoming songs", () => _settings.ShowSongQueue,
+            AddToggle(menu, "Transparent background", () => _settings.TransparentCanvas,
+                value => _settings.TransparentCanvas = value);
+            AddToggle(menu, "Show queue and history", () => _settings.ShowSongQueue,
                 value => _settings.ShowSongQueue = value);
             AddToggle(menu, "Match album artwork colours", () => _settings.UseArtworkColors,
                 value => _settings.UseArtworkColors = value);
@@ -278,7 +298,7 @@ namespace MusicBeePlugin
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Edit lyric timing…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenTimingEditor)));
-            menu.Items.Add("Find timed lyrics on LRCLIB…", null, (sender, args) =>
+            menu.Items.Add("Find lyrics on LRCLIB…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenLrcLibPicker)));
             menu.Items.Add("More settings…", null, (sender, args) =>
                 BeginInvoke(new Action(() => _openSettings?.Invoke())));
@@ -293,7 +313,9 @@ namespace MusicBeePlugin
             item.Click += (sender, args) =>
             {
                 var wasShowingArt = _settings.ShowAlbumArt;
+                var wasTransparent = _settings.TransparentCanvas;
                 setter(!getter());
+                if (wasTransparent != _settings.TransparentCanvas) ApplyTransparency();
                 UpdateFromSettings(_settings);
                 if (wasShowingArt != _settings.ShowAlbumArt) RefreshArtwork(true);
                 if (_settings.ShowSongQueue) RefreshQueue();
@@ -353,15 +375,16 @@ namespace MusicBeePlugin
             if (_timingEditor != null && !_timingEditor.IsDisposed &&
                 trackUrl != _timingEditor.TrackUrl)
                 _timingEditor.TrackChanged();
+            if (_timingCreator != null && !_timingCreator.IsDisposed &&
+                trackUrl != _timingCreator.TrackUrl)
+                _timingCreator.TrackChanged();
             if (_lrcPicker != null && !_lrcPicker.IsDisposed &&
                 trackUrl != _lrcPicker.TrackUrl)
                 _lrcPicker.TrackChanged();
             _artworkTrackUrl = trackUrl;
             if (trackChanged)
             {
-                _queueScroll = 0;
                 _queueTracks.Clear();
-                RefreshQueue();
             }
             if (trackChanged && !string.IsNullOrWhiteSpace(trackUrl))
             {
@@ -375,6 +398,11 @@ namespace MusicBeePlugin
                 _songArtist = _musicBee.NowPlaying_GetFileTag(Plugin.MetaDataType.Artist) ?? "";
             }
             catch (Exception) { _songTitle = _songArtist = ""; }
+            if (_history.Observe(trackUrl, _songTitle, _songArtist) || trackChanged)
+            {
+                _queueScroll = Math.Max(0, _history.Snapshot().Count - 2);
+                RefreshQueue();
+            }
             RefreshPlayState();
             if (trackChanged || (!_settings.ShowAlbumArt && !_useArtworkColors))
             {
@@ -462,10 +490,12 @@ namespace MusicBeePlugin
         public void RefreshQueue()
         {
             if (IsDisposed || !IsHandleCreated) return;
-            var previousCount = _queueTracks.Count;
-            _queueTracks = UpcomingQueue.Read(_musicBee, 1,
-                Math.Max(12, Math.Min(96, previousCount)));
-            _queueExhausted = _queueTracks.Count < Math.Max(12, Math.Min(96, previousCount));
+            var previousCount = _queueTracks.FindAll(track => track.Offset > 0).Count;
+            var requested = Math.Max(12, Math.Min(96, previousCount));
+            var future = UpcomingQueue.Read(_musicBee, 1, requested);
+            _queueExhausted = future.Count < requested;
+            _queueTracks = _history.Snapshot();
+            _queueTracks.AddRange(future);
             _queueScroll = Math.Max(0, Math.Min(_queueScroll,
                 Math.Max(0, _queueTracks.Count - _queueVisibleCount)));
             _lastQueueCheck = Stopwatch.GetTimestamp();
@@ -474,7 +504,7 @@ namespace MusicBeePlugin
 
         private void LoadMoreQueue()
         {
-            if (_queueExhausted || _queueTracks.Count >= 96) return;
+            if (_queueExhausted || _queueTracks.FindAll(track => track.Offset > 0).Count >= 96) return;
             var first = _queueTracks.Count == 0 ? 1 :
                 _queueTracks[_queueTracks.Count - 1].Offset + 1;
             var count = Math.Min(12, 97 - first);
@@ -482,7 +512,8 @@ namespace MusicBeePlugin
             var more = UpcomingQueue.Read(_musicBee, first, count);
             foreach (var track in more)
             {
-                if (_queueTracks.Exists(existing => existing.Index == track.Index))
+                if (_queueTracks.Exists(existing => existing.Offset > 0 &&
+                    existing.Index == track.Index))
                 {
                     _queueExhausted = true;
                     break;
@@ -601,10 +632,12 @@ namespace MusicBeePlugin
 
         private void DrawBackground(Graphics g, Rectangle bounds)
         {
+            if (_settings.TransparentCanvas) return;
             // The gradient and soft radial lights do not change between
             // tracks. Keep a rendered surface for the 120 Hz animation loop.
             if (_movingOrResizing && _backgroundCache != null)
             {
+                g.InterpolationMode = InterpolationMode.Low;
                 g.DrawImage(_backgroundCache, bounds);
                 return;
             }
@@ -690,7 +723,8 @@ namespace MusicBeePlugin
                 Math.Max(top, (bounds.Height - height) / 2), sideMargin - 27, height);
             _queueCard = card;
             using (var path = RoundedRectangle(card, 12))
-            using (var shade = new SolidBrush(Color.FromArgb(71, 10, 13, 25)))
+            using (var shade = new SolidBrush(Color.FromArgb(
+                       _settings.TransparentCanvas ? 232 : 71, 10, 13, 25)))
             using (var border = new Pen(Color.FromArgb(43, _palette.Border)))
             using (var heading = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Point))
             using (var titleFont = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point))
@@ -704,7 +738,7 @@ namespace MusicBeePlugin
             {
                 g.FillPath(shade, path);
                 g.DrawPath(border, path);
-                g.DrawString("UP NEXT", heading, headingBrush,
+                g.DrawString("QUEUE", heading, headingBrush,
                     new RectangleF(card.Left + 14, card.Top + 14, card.Width - 28, 19), format);
 
                 if (_queueTracks.Count == 0)
@@ -736,10 +770,14 @@ namespace MusicBeePlugin
                     var track = _queueTracks[index];
                     var hit = new Rectangle(card.Left + 5, y - 2, card.Width - 16, 51);
                     _queueHits.Add(new QueueHit { Area = hit, Track = track });
+                    if (track.Offset == 0)
+                        using (var playing = new SolidBrush(Color.FromArgb(58, _palette.Border)))
+                            g.FillRectangle(playing, hit);
                     if (_hoverQueue == track.Offset.ToString())
                         using (var highlight = new SolidBrush(Color.FromArgb(34, _palette.Border)))
                             g.FillRectangle(highlight, hit);
-                    g.DrawString(track.Title, titleFont, titleBrush,
+                    g.DrawString(track.Offset == 0 ? "▶  " + track.Title : track.Title,
+                        titleFont, titleBrush,
                         new RectangleF(card.Left + 14, y, card.Width - 34, 25), format);
                     if (!string.IsNullOrWhiteSpace(track.Artist))
                         g.DrawString(track.Artist, artistFont, artistBrush,
@@ -769,6 +807,9 @@ namespace MusicBeePlugin
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
+            // Clear the entire double buffer before every frame. A sizing
+            // operation can expose new pixels beyond the last WM_PAINT region.
+            g.Clear(_settings.TransparentCanvas ? ClearKey : BackColor);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             var bounds = ClientRectangle;
@@ -776,7 +817,8 @@ namespace MusicBeePlugin
 
             DrawBackground(g, bounds);
 
-            if (_settings.ShowVisualizer) DrawSpectrum(g, bounds);
+            if (_settings.ShowVisualizer && !_settings.TransparentCanvas)
+                DrawSpectrum(g, bounds);
 
             var topInset = _settings.ShowSongTitle ? 43f : 18f;
             var bottomInset = _settings.ShowTransportControls ? 58f : 15f;
@@ -865,6 +907,7 @@ namespace MusicBeePlugin
             DrawTransport(g, bounds);
             DrawTimingButton(g, bounds);
             DrawLrcButton(g, bounds);
+            DrawBackgroundButton(g, bounds);
             DrawMenuButton(g, bounds);
         }
 
@@ -878,7 +921,8 @@ namespace MusicBeePlugin
             var top = content.Top + (content.Height - height) / 2 + offsetY;
             using (var path = RoundedRectangle(new Rectangle(left, (int)(top - 9),
                        width, Math.Max(29, (int)(height + 18))), 14))
-            using (var shade = new SolidBrush(Color.FromArgb((int)(128 * opacity), 10, 13, 27)))
+            using (var shade = new SolidBrush(Color.FromArgb(
+                       (int)((_settings.TransparentCanvas ? 232 : 128) * opacity), 10, 13, 27)))
             using (var outline = new Pen(Color.FromArgb((int)(56 * opacity), _palette.Border)))
             {
                 g.FillPath(shade, path);
@@ -923,6 +967,11 @@ namespace MusicBeePlugin
             if (!_settings.ShowSongTitle || string.IsNullOrWhiteSpace(_songTitle)) return;
             var text = _songTitle.Trim();
             if (!string.IsNullOrWhiteSpace(_songArtist)) text += "  ·  " + _songArtist.Trim();
+            var titleArea = new RectangleF(120, 7, Math.Max(1, bounds.Width - 365), 29);
+            if (_settings.TransparentCanvas)
+                using (var path = RoundedRectangle(Rectangle.Round(titleArea), 10))
+                using (var shade = new SolidBrush(Color.FromArgb(240, 13, 17, 28)))
+                    g.FillPath(shade, path);
             using (var font = new Font("Segoe UI", 10.5f, FontStyle.Regular, GraphicsUnit.Point))
             using (var brush = new SolidBrush(Color.FromArgb(185, 234, 235, 242)))
             using (var format = new StringFormat(StringFormatFlags.NoWrap)
@@ -931,8 +980,7 @@ namespace MusicBeePlugin
                        LineAlignment = StringAlignment.Center,
                        Trimming = StringTrimming.EllipsisCharacter
                    })
-                g.DrawString(text, font, brush,
-                    new RectangleF(120, 7, Math.Max(1, bounds.Width - 330), 29), format);
+                g.DrawString(text, font, brush, titleArea, format);
         }
 
         public void ShowEndOfQueue()
@@ -988,7 +1036,8 @@ namespace MusicBeePlugin
             _playButton = new Rectangle(center - 19, y, 38, 38);
             _nextButton = new Rectangle(center + 36, y + 2, 34, 34);
             using (var path = RoundedRectangle(new Rectangle(center - 92, y - 5, 184, 49), 22))
-            using (var shade = new SolidBrush(Color.FromArgb(93, 8, 11, 23)))
+            using (var shade = new SolidBrush(Color.FromArgb(
+                       _settings.TransparentCanvas ? 235 : 93, 8, 11, 23)))
                 g.FillPath(shade, path);
 
             DrawControlButton(g, _previousButton, "previous");
@@ -1062,6 +1111,7 @@ namespace MusicBeePlugin
             _menuButton = new Rectangle(bounds.Right - 38, 7, 29, 29);
             using (var path = RoundedRectangle(_menuButton, 8))
             using (var shade = new SolidBrush(Color.FromArgb(
+                       _settings.TransparentCanvas ? 235 :
                        _hoverButton == "menu" ? 99 : 54, 14, 18, 32)))
             using (var pen = new Pen(Color.FromArgb(175, 226, 228, 237), 1.6f))
             {
@@ -1080,7 +1130,7 @@ namespace MusicBeePlugin
             _timingButton = new Rectangle(bounds.Right - 116, 7, 70, 29);
             var active = _timingEditor != null && !_timingEditor.IsDisposed;
             using (var path = RoundedRectangle(_timingButton, 8))
-            using (var shade = new SolidBrush(Color.FromArgb(active ? 150 :
+            using (var shade = new SolidBrush(Color.FromArgb(_settings.TransparentCanvas ? 235 : active ? 150 :
                        _hoverButton == "timing" ? 100 : 54, 20, 38, 58)))
             using (var pen = new Pen(Color.FromArgb(active ? 220 : 135, _palette.Border)))
             using (var font = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Point))
@@ -1102,7 +1152,7 @@ namespace MusicBeePlugin
             _lrcButton = new Rectangle(bounds.Right - 198, 7, 74, 29);
             var active = _lrcPicker != null && !_lrcPicker.IsDisposed;
             using (var path = RoundedRectangle(_lrcButton, 8))
-            using (var shade = new SolidBrush(Color.FromArgb(active ? 150 :
+            using (var shade = new SolidBrush(Color.FromArgb(_settings.TransparentCanvas ? 235 : active ? 150 :
                        _hoverButton == "lrclib" ? 100 : 54, 20, 38, 58)))
             using (var pen = new Pen(Color.FromArgb(active ? 220 : 135, _palette.Border)))
             using (var font = new Font("Segoe UI", 8.5f, FontStyle.Bold))
@@ -1113,6 +1163,24 @@ namespace MusicBeePlugin
                 g.FillPath(shade, path);
                 g.DrawPath(pen, path);
                 g.DrawString("LRCLIB", font, brush, _lrcButton, format);
+            }
+        }
+
+        private void DrawBackgroundButton(Graphics g, Rectangle bounds)
+        {
+            _backgroundButton = new Rectangle(bounds.Right - 238, 7, 32, 29);
+            using (var path = RoundedRectangle(_backgroundButton, 8))
+            using (var shade = new SolidBrush(Color.FromArgb(
+                       _settings.TransparentCanvas ? 235 : 72, 20, 38, 58)))
+            using (var border = new Pen(Color.FromArgb(150, _palette.Border)))
+            using (var font = new Font("Segoe UI", 8f, FontStyle.Bold))
+            using (var brush = new SolidBrush(Color.White))
+            using (var format = new StringFormat
+                   { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+            {
+                g.FillPath(shade, path);
+                g.DrawPath(border, path);
+                g.DrawString("BG", font, brush, _backgroundButton, format);
             }
         }
 
@@ -1166,6 +1234,11 @@ namespace MusicBeePlugin
 
         private void OpenTimingEditor()
         {
+            if (_timingCreator != null && !_timingCreator.IsDisposed)
+            {
+                _timingCreator.BringToFront();
+                return;
+            }
             if (_timingEditor != null && !_timingEditor.IsDisposed)
             {
                 _timingEditor.BringToFront();
@@ -1188,8 +1261,23 @@ namespace MusicBeePlugin
                 LrcTimingDocument document;
                 if (!LrcTimingDocument.TryCreate(source, out document))
                 {
-                    MessageBox.Show(this, "This song needs timestamped lyrics in MusicBee's Lyrics field before timing can be edited.",
-                        "Edit lyric timing", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    UntimedTimingDocument plain;
+                    if (!UntimedTimingDocument.TryCreate(source, out plain))
+                    {
+                        MessageBox.Show(this, "Add plain lyrics to this song's MusicBee Lyrics field (or import a plain LRCLIB result) first.",
+                            "Create lyric timing", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                    var creator = new FrmTimingCreator(_musicBee, trackUrl, _songTitle,
+                        tag, plain, _previewTiming, _cancelTiming, _savedTiming);
+                    _timingCreator = creator;
+                    creator.FormClosed += (sender, args) =>
+                    {
+                        if (ReferenceEquals(_timingCreator, creator)) _timingCreator = null;
+                        if (!IsDisposed) Invalidate();
+                    };
+                    creator.Show(this);
+                    Invalidate();
                     return;
                 }
                 editor = new FrmTimingEditor(_musicBee, trackUrl, _songTitle,
@@ -1223,6 +1311,7 @@ namespace MusicBeePlugin
                     break;
                 }
             var hit = _menuButton.Contains(e.Location) ? "menu" :
+                _backgroundButton.Contains(e.Location) ? "background" :
                 _timingButton.Contains(e.Location) ? "timing" :
                 _lrcButton.Contains(e.Location) ? "lrclib" :
                 _previousButton.Contains(e.Location) ? "previous" :
@@ -1277,6 +1366,13 @@ namespace MusicBeePlugin
             {
                 _flyoutMenu.Show(this, new Point(_menuButton.Right, _menuButton.Bottom),
                     ToolStripDropDownDirection.BelowLeft);
+                return;
+            }
+            if (_backgroundButton.Contains(e.Location))
+            {
+                _settings.TransparentCanvas = !_settings.TransparentCanvas;
+                ApplyTransparency();
+                _settingsChanged?.Invoke(_settings);
                 return;
             }
             if (_timingButton.Contains(e.Location))
@@ -1394,15 +1490,23 @@ namespace MusicBeePlugin
         {
             var selected = _settings.Font ?? SystemFonts.DefaultFont;
             var family = selected.FontFamily.Name;
+            // Text shaping is the expensive part of dragging the sizing edge.
+            // Reuse a path for nearby sizes while the native resize loop runs.
+            var width = _movingOrResizing ? (float)Math.Max(8,
+                Math.Round(area.Width / 8f) * 8) : area.Width;
+            var height = _movingOrResizing ? (float)Math.Max(4,
+                Math.Round(area.Height / 4f) * 4) : area.Height;
+            var points = _movingOrResizing ?
+                (float)(Math.Round(desiredPoints * 2) / 2) : desiredPoints;
             foreach (var cached in _textGeometries)
                 if (cached.Text == lyric && cached.FontFamily == family &&
                     cached.FontStyle == selected.Style &&
-                    cached.DesiredPoints == desiredPoints &&
-                    cached.Width == area.Width && cached.Height == area.Height &&
+                    cached.DesiredPoints == points &&
+                    cached.Width == width && cached.Height == height &&
                     cached.DpiY == g.DpiY)
                     return cached;
 
-            var size = Math.Max(10f, Math.Min(desiredPoints, area.Height * 0.74f));
+            var size = Math.Max(10f, Math.Min(points, height * 0.74f));
             using (var format = new StringFormat(StringFormatFlags.NoWrap)
                    {
                        Alignment = StringAlignment.Center,
@@ -1412,9 +1516,9 @@ namespace MusicBeePlugin
             {
                 Font fitted = new Font(selected.FontFamily, size, selected.Style, GraphicsUnit.Point);
                 var measuredWidth = g.MeasureString(lyric, fitted).Width;
-                if (measuredWidth > area.Width - 8)
+                if (measuredWidth > width - 8)
                 {
-                    size = Math.Max(10f, size * (area.Width - 8) / measuredWidth);
+                    size = Math.Max(10f, size * (width - 8) / measuredWidth);
                     fitted.Dispose();
                     fitted = new Font(selected.FontFamily, size, selected.Style, GraphicsUnit.Point);
                 }
@@ -1423,7 +1527,7 @@ namespace MusicBeePlugin
                     var path = new GraphicsPath();
                     path.AddString(lyric, fitted.FontFamily, (int)fitted.Style,
                         fitted.SizeInPoints * g.DpiY / 72f,
-                        new RectangleF(0, 0, area.Width, area.Height), format);
+                        new RectangleF(0, 0, width, height), format);
                     if (path.PointCount == 0)
                     {
                         path.Dispose();
@@ -1432,7 +1536,7 @@ namespace MusicBeePlugin
                     var geometry = new TextGeometry
                     {
                         Text = lyric, FontFamily = family, FontStyle = selected.Style,
-                        DesiredPoints = desiredPoints, Width = area.Width, Height = area.Height,
+                        DesiredPoints = points, Width = width, Height = height,
                         DpiY = g.DpiY, FittedPoints = size, Path = path,
                         Bounds = path.GetBounds()
                     };
@@ -1494,6 +1598,8 @@ namespace MusicBeePlugin
                 ClearTextGeometries();
                 if (_timingEditor != null && !_timingEditor.IsDisposed)
                     _timingEditor.ForceClose();
+                if (_timingCreator != null && !_timingCreator.IsDisposed)
+                    _timingCreator.ForceClose();
                 if (_lrcPicker != null && !_lrcPicker.IsDisposed)
                     _lrcPicker.Close();
                 _flyoutMenu?.Dispose();

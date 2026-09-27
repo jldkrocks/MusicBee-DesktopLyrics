@@ -109,12 +109,15 @@
     <Compile Include="GdiplusPInvoke.cs" />
     <Compile Include="FrmLyricsWindow.cs" />
     <Compile Include="FrmTimingEditor.cs" />
+    <Compile Include="FrmTimingCreator.cs" />
     <Compile Include="IDesktopLyricsView.cs" />
     <Compile Include="LyricParser.cs" />
     <Compile Include="LrcTimingDocument.cs" />
+    <Compile Include="UntimedTimingDocument.cs" />
     <Compile Include="TimingTagStore.cs" />
     <Compile Include="QueueNavigation.cs" />
     <Compile Include="UpcomingQueue.cs" />
+    <Compile Include="PlaybackHistory.cs" />
     <Compile Include="LrcLibClient.cs" />
     <Compile Include="ImportedLyricsTagStore.cs" />
     <Compile Include="FrmLrcLibPicker.cs" />

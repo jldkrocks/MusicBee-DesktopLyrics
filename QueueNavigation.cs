@@ -7,8 +7,8 @@ namespace MusicBeePlugin
         {
             error = null;
             if (track == null || string.IsNullOrWhiteSpace(track.FileUrl) ||
-                musicBee.NowPlayingList_GetNextIndex == null ||
-                musicBee.NowPlayingList_GetListFileUrl == null ||
+                (track.Offset > 0 && (musicBee.NowPlayingList_GetNextIndex == null ||
+                                      musicBee.NowPlayingList_GetListFileUrl == null)) ||
                 musicBee.NowPlayingList_PlayNow == null)
             {
                 error = "This song cannot be played from the queue.";
@@ -16,8 +16,14 @@ namespace MusicBeePlugin
             }
             try
             {
-                if (musicBee.NowPlayingList_GetNextIndex(track.Offset) != track.Index ||
-                    musicBee.NowPlayingList_GetListFileUrl(track.Index) != track.FileUrl)
+                if (track.Offset == 0)
+                {
+                    error = "This song is already playing.";
+                    return false;
+                }
+                if (track.Offset > 0 &&
+                    (musicBee.NowPlayingList_GetNextIndex(track.Offset) != track.Index ||
+                     musicBee.NowPlayingList_GetListFileUrl(track.Index) != track.FileUrl))
                 {
                     error = "The queue changed. Try that song again.";
                     return false;

@@ -54,6 +54,25 @@ namespace MusicBeePlugin
                 throw new Exception("Cancel/reset must restore the original LRC exactly.");
             Console.WriteLine("Timing edit checks passed.");
 
+            const string plainSource = "[ar:Someone]\r\nFirst line\r\n\r\nSecond line";
+            UntimedTimingDocument plain;
+            if (!UntimedTimingDocument.TryCreate(plainSource, out plain) ||
+                plain.Entries.Count != 2 || plain.IsComplete ||
+                UntimedTimingDocument.TryCreate(editable, out plain))
+                throw new Exception("Creation mode must only accept untimed lyric lines.");
+            UntimedTimingDocument.TryCreate(plainSource, out plain);
+            if (!plain.Stamp(0, 1000) || plain.Stamp(1, 900) ||
+                !plain.Stamp(1, 2200) || !plain.Adjust(1, -100) ||
+                !plain.IsComplete || plain.ShiftAll(100) != 100 ||
+                plain.BuildLyrics() != "[ar:Someone]\r\n[00:01.10] First line\r\n\r\n[00:02.20] Second line")
+                throw new Exception("New timings must be ordered and preserve plain lyrics and spacing.");
+            if (LyricParser.ParseLyric(plain.BuildLyrics())?.Entries.Count != 2)
+                throw new Exception("The completed document must be valid timed lyrics.");
+            plain.Reset();
+            if (plain.IsDirty || plain.IsComplete || plain.BuildLyrics() != plainSource)
+                throw new Exception("Reset must leave the original plain lyrics intact.");
+            Console.WriteLine("Untimed lyric creation checks passed.");
+
             var backupRoot = Path.Combine(Path.GetTempPath(), "LyricsTiming-" + Guid.NewGuid());
             try
             {
@@ -216,6 +235,22 @@ namespace MusicBeePlugin
                 throw new Exception("MusicBee cannot address the second copy of a queued file.");
             Console.WriteLine("Upcoming queue checks passed.");
 
+            var history = new PlaybackHistory();
+            history.Observe("first.mp3", "First", "Artist");
+            history.Observe("second.mp3", "Second", "Artist");
+            history.Observe("third.mp3", "Third", "Artist");
+            var previous = history.Snapshot();
+            if (previous.Count != 3 || previous[0].Offset != -2 ||
+                previous[1].Offset != -1 || previous[2].Offset != 0 ||
+                history.Observe("third.mp3", "Third", "Artist"))
+                throw new Exception("The queue must retain play history around the current track.");
+            upcoming.NowPlaying_GetFileUrl = () => "third.mp3";
+            if (!QueueNavigation.TryPlayQueuedTrack(upcoming, previous[0], out queueError) ||
+                played != "first.mp3" ||
+                QueueNavigation.TryPlayQueuedTrack(upcoming, previous[2], out queueError))
+                throw new Exception("A played track must be clickable while current is not replayed.");
+            Console.WriteLine("Queue history checks passed.");
+
             var searchJson = "[{\"id\":1,\"trackName\":\"Anytime Anywhere\",\"artistName\":\"milet\",\"duration\":50," +
                 "\"syncedLyrics\":\"[00:01.00] Short\"},{\"id\":2,\"trackName\":\"Anytime Anywhere\"," +
                 "\"artistName\":\"milet\",\"duration\":230,\"syncedLyrics\":\"[00:01.00] Correct\"}," +
@@ -248,10 +283,14 @@ namespace MusicBeePlugin
                     "[00:02.00] Wrong", out importError) ||
                 importedTag != records[0].SyncedLyrics)
                 throw new Exception("Import must not overwrite a tag changed since search opened.");
+            if (!ImportedLyricsTagStore.Save(importApi, "track.mp3", importedTag,
+                    records[2].PlainLyrics, out importError) ||
+                importedTag != records[2].PlainLyrics)
+                throw new Exception("Plain LRCLIB lyrics must be saved for later timing: " + importError);
             importApi.Library_CommitTagsToFile = url => false;
             if (ImportedLyricsTagStore.Save(importApi, "track.mp3", importedTag,
                     "[00:02.00] Failed", out importError) ||
-                importedTag != records[0].SyncedLyrics)
+                importedTag != records[2].PlainLyrics)
                 throw new Exception("A failed MusicBee commit must restore the old Lyrics field.");
             using (var picker = new FrmLrcLibPicker(importApi, "track.mp3",
                 "Anytime Anywhere", "milet", 230000, importedTag, (url, text) => { }))

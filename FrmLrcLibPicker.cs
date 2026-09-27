@@ -31,7 +31,7 @@ namespace MusicBeePlugin
             _durationMs = durationMs;
             _lyricsSaved = lyricsSaved;
 
-            Text = "Find timed lyrics on LRCLIB";
+            Text = "Find lyrics on LRCLIB";
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.SizableToolWindow;
             ShowInTaskbar = false;
@@ -59,7 +59,7 @@ namespace MusicBeePlugin
             root.Controls.Add(new Label
             {
                 Dock = DockStyle.Fill, AutoEllipsis = true,
-                Text = "Find timed lyrics  ·  " + title + " — " + artist +
+                Text = "Find lyrics  ·  " + title + " — " + artist +
                     (_durationMs > 0 ? "  (" + FormatDuration(_durationMs / 1000.0) + ")" : ""),
                 Font = new Font("Segoe UI", 13f, FontStyle.Bold),
                 ForeColor = Color.White, TextAlign = ContentAlignment.MiddleLeft
@@ -93,7 +93,7 @@ namespace MusicBeePlugin
             root.Controls.Add(new Label
             {
                 Dock = DockStyle.Fill, AutoEllipsis = true,
-                Text = "Select a result by duration. Only results with timed lyrics can be imported; the search sends title and artist to LRCLIB.",
+                Text = "Select a result by duration. Plain lyrics can be saved and timed later with the TIMING editor.",
                 ForeColor = Color.FromArgb(178, 187, 206),
                 TextAlign = ContentAlignment.MiddleLeft
             }, 0, 2);
@@ -140,7 +140,7 @@ namespace MusicBeePlugin
             previewPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             previewPanel.Controls.Add(new Label
             {
-                Dock = DockStyle.Fill, Text = "TIMED LYRIC PREVIEW",
+                Dock = DockStyle.Fill, Text = "LYRIC PREVIEW",
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(155, 183, 218)
             }, 0, 0);
@@ -266,15 +266,21 @@ namespace MusicBeePlugin
             _preview.Text = record == null ? "" : record.HasTimedLyrics ?
                 record.SyncedLyrics : record.Instrumental ?
                 "This result is marked instrumental." :
-                "This result has no timestamps. Try another version.\r\n\r\n" +
+                "Plain lyrics — use TIMING after importing to add timestamps.\r\n\r\n" +
                 (record.PlainLyrics ?? "");
-            _import.Enabled = !_trackChanged && record != null && record.HasTimedLyrics;
+            _import.Enabled = !_trackChanged && record != null &&
+                (record.HasTimedLyrics || !record.Instrumental &&
+                 !string.IsNullOrWhiteSpace(record.PlainLyrics));
+            _import.Text = record != null && !record.HasTimedLyrics ?
+                "Save plain lyrics" : "Save to MusicBee";
         }
 
         private void ImportClicked(object sender, EventArgs args)
         {
             var record = _results.CurrentRow?.Tag as LrcLibRecord;
-            if (record == null || !record.HasTimedLyrics || _trackChanged) return;
+            if (record == null || _trackChanged ||
+                !record.HasTimedLyrics && (record.Instrumental ||
+                string.IsNullOrWhiteSpace(record.PlainLyrics))) return;
             try
             {
                 if (_musicBee.NowPlaying_GetFileUrl() != _trackUrl)
@@ -286,7 +292,8 @@ namespace MusicBeePlugin
                     Math.Abs(record.Duration - _durationMs / 1000.0) : 0;
                 if (!string.IsNullOrWhiteSpace(_expectedTag) || difference > 5)
                 {
-                    var message = "Save the selected timed lyrics to this song's MusicBee Lyrics field?";
+                    var message = "Save the selected " + (record.HasTimedLyrics ?
+                        "timed" : "plain") + " lyrics to this song's MusicBee Lyrics field?";
                     if (!string.IsNullOrWhiteSpace(_expectedTag))
                         message += "\n\nThis replaces the lyrics already in that field.";
                     if (difference > 5)
@@ -298,14 +305,15 @@ namespace MusicBeePlugin
                 }
                 _import.Enabled = false;
                 string error;
+                var lyrics = record.HasTimedLyrics ? record.SyncedLyrics : record.PlainLyrics;
                 if (!ImportedLyricsTagStore.Save(_musicBee, _trackUrl, _expectedTag,
-                    record.SyncedLyrics, out error))
+                    lyrics, out error))
                 {
                     _status.Text = error;
                     _import.Enabled = true;
                     return;
                 }
-                try { _lyricsSaved?.Invoke(_trackUrl, record.SyncedLyrics); }
+                try { _lyricsSaved?.Invoke(_trackUrl, lyrics); }
                 catch (Exception) { /* MusicBee already saved the tag. */ }
                 Close();
             }

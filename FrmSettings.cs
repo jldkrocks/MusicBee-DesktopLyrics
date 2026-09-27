@@ -13,12 +13,6 @@ namespace MusicBeePlugin
         private Font _font = DefaultFont;
         private readonly SettingsObj _settings;
         private readonly ColorPickerDialog _colorDialog = new ColorPickerDialog();
-        private readonly CheckBox _checkBoxCompactWindow = new CheckBox
-        {
-            AutoSize = true,
-            Text = "Compact lyrics window with audio visualizer",
-            Margin = new Padding(5)
-        };
         private readonly CheckBox _checkBoxArtworkColors = new CheckBox
         {
             AutoSize = true,
@@ -42,25 +36,16 @@ namespace MusicBeePlugin
             comboBoxGradientType.SelectedIndex = 0;
             var layout = (TableLayoutPanel)Controls[0];
             layout.SuspendLayout();
-            layout.RowCount += 3;
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowCount += 2;
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             foreach (Control control in layout.Controls)
-                layout.SetRow(control, layout.GetRow(control) + 3);
-            layout.Controls.Add(_checkBoxCompactWindow, 0, 0);
-            layout.SetColumnSpan(_checkBoxCompactWindow, 2);
-            layout.Controls.Add(_checkBoxArtworkColors, 0, 1);
+                layout.SetRow(control, layout.GetRow(control) + 2);
+            layout.Controls.Add(_checkBoxArtworkColors, 0, 0);
             layout.SetColumnSpan(_checkBoxArtworkColors, 2);
-            layout.Controls.Add(_showWindowButton, 0, 2);
+            layout.Controls.Add(_showWindowButton, 0, 1);
             layout.SetColumnSpan(_showWindowButton, 2);
             layout.ResumeLayout(true);
-            _checkBoxCompactWindow.CheckedChanged += (sender, args) =>
-            {
-                _settings.CompactWindow = _checkBoxCompactWindow.Checked;
-                _settings.CompactWindowPreferenceSet = true;
-                SettingsChanged?.Invoke(this, _settings);
-            };
             _checkBoxArtworkColors.CheckedChanged += (sender, args) =>
             {
                 _settings.UseArtworkColors = _checkBoxArtworkColors.Checked;
@@ -68,14 +53,13 @@ namespace MusicBeePlugin
                 SettingsChanged?.Invoke(this, _settings);
             };
             _showWindowButton.Click += (sender, args) => ShowWindowRequested?.Invoke(this, EventArgs.Empty);
-            ClientSize = new Size(ClientSize.Width, ClientSize.Height + 112);
+            ClientSize = new Size(ClientSize.Width, ClientSize.Height + 76);
             Text = "Desktop Lyrics Settings (v" + GetType().Assembly.GetName().Version + ")";
         }
 
         private void Settings_Load(object sender, EventArgs e)
         {
             _font = _settings.Font;
-            _checkBoxCompactWindow.Checked = _settings.CompactWindow;
             _checkBoxArtworkColors.Checked = _settings.UseArtworkColors;
             try
             {
@@ -177,8 +161,6 @@ namespace MusicBeePlugin
             _settings.PreserveSlash = checkBoxPreserveSlash.Checked;
             _settings.AutoHide = checkBoxAutoHide.Checked;
             _settings.HideWhenUnavailable = checkBoxHideWhenUnavailable.Checked;
-            _settings.CompactWindow = _checkBoxCompactWindow.Checked;
-            _settings.CompactWindowPreferenceSet = true;
             _settings.UseArtworkColors = _checkBoxArtworkColors.Checked;
             _settings.ArtworkColorsPreferenceSet = true;
         }
@@ -206,6 +188,7 @@ namespace MusicBeePlugin
         public bool ShowSongTitle;
         public bool ShowAlbumArt;
         public bool ShowVisualizer;
+        public bool TransparentCanvas;
         public bool ShowSongQueue;
         public bool SongQueuePreferenceSet;
         public bool WindowFeaturesPreferenceSet;

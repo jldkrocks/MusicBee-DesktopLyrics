@@ -5,13 +5,15 @@ namespace MusicBeePlugin
     internal static class ImportedLyricsTagStore
     {
         public static bool Save(Plugin.MusicBeeApiInterface musicBee, string trackUrl,
-            string expectedTag, string syncedLyrics, out string error)
+            string expectedTag, string lyrics, out string error)
         {
             error = null;
             LrcTimingDocument document;
-            if (!LrcTimingDocument.TryCreate(syncedLyrics, out document))
+            UntimedTimingDocument plain;
+            if (!LrcTimingDocument.TryCreate(lyrics, out document) &&
+                !UntimedTimingDocument.TryCreate(lyrics, out plain))
             {
-                error = "That LRCLIB result has no usable timestamps.";
+                error = "That LRCLIB result has no usable lyrics.";
                 return false;
             }
             if (string.IsNullOrWhiteSpace(trackUrl) ||
@@ -38,9 +40,9 @@ namespace MusicBeePlugin
                     error = "MusicBee's Lyrics field changed. Reopen LRCLIB before replacing it.";
                     return false;
                 }
-                if (currentTag == syncedLyrics) return true;
+                if (currentTag == lyrics) return true;
                 if (!musicBee.Library_SetFileTag(trackUrl, Plugin.MetaDataType.Lyrics,
-                    syncedLyrics))
+                    lyrics))
                 {
                     error = "MusicBee rejected the Lyrics field for this song.";
                     return false;

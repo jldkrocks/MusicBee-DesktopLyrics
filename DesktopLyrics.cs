@@ -29,7 +29,7 @@ namespace MusicBeePlugin
         private volatile SettingsObj _settings;
         private volatile IDesktopLyricsView _frmLyrics;
         private ToolStripMenuItem _visibilityMenuItem;
-        private ToolStripMenuItem _compactMenuItem;
+        private readonly PlaybackHistory _history = new PlaybackHistory();
         private Timer _timer;
         private System.Windows.Forms.Timer _stopHideTimer;
         private LyricsController _lyricsCtrl;
@@ -68,13 +68,9 @@ namespace MusicBeePlugin
             settingsForm.ShowWindowRequested += (sender, args) => ShowLyricsWindow();
             settingsForm.SettingsChanged += (sender, settings) =>
             {
-                if (_compactMenuItem != null) _compactMenuItem.Checked = settings.CompactWindow;
                 var view = _frmLyrics;
                 if (view == null) return;
-                if ((view is FrmLyricsWindow) != settings.CompactWindow)
-                    StartupForm();
-                else
-                    view.UpdateFromSettings(settings);
+                view.UpdateFromSettings(settings);
             };
             settingsForm.ShowDialog();
             SaveSettings(_settings);
@@ -210,6 +206,14 @@ namespace MusicBeePlugin
                     catch (Exception e) { _mbApiInterface.MB_Trace(e.ToString()); }
                     break;
                 case NotificationType.TrackChanged:
+                    try
+                    {
+                        _history.Observe(_mbApiInterface.NowPlaying_GetFileUrl(),
+                            _mbApiInterface.NowPlaying_GetFileTag(MetaDataType.TrackTitle),
+                            _mbApiInterface.NowPlaying_GetFileTag(MetaDataType.Artist));
+                    }
+                    catch (Exception) { /* MusicBee can change tracks mid-query. */ }
+                    goto case NotificationType.NowPlayingArtworkReady;
                 case NotificationType.NowPlayingArtworkReady:
                     var artworkView = _frmLyrics as FrmLyricsWindow;
                     if (artworkView != null && !artworkView.IsDisposed && artworkView.IsHandleCreated)
@@ -312,14 +316,19 @@ namespace MusicBeePlugin
             _visibilityMenuItem = menuItem;
             menuItem.Checked = !_settings.HideOnStartup;
 
-            _compactMenuItem = (ToolStripMenuItem)_mbApiInterface.MB_AddMenuItem(
-                "mnuView/Desktop Lyrics Visualizer Window",
-                "Switch between the compact visualizer window and the desktop overlay.",
-                ToggleCompactWindow);
-            if (_compactMenuItem != null) _compactMenuItem.Checked = _settings.CompactWindow;
+            // Registered commands appear in MusicBee's Hotkeys and toolbar
+            // command chooser, including the dialog in the user's screenshot.
+            _mbApiInterface.MB_RegisterCommand?.Invoke(
+                "View: Toggle Desktop Lyrics Window", ToggleLyrics);
 
             void ToggleLyrics(object sender, EventArgs args)
             {
+                var main = Control.FromHandle(_mbApiInterface.MB_GetWindowHandle());
+                if (main != null && main.InvokeRequired)
+                {
+                    main.BeginInvoke(new Action(() => ToggleLyrics(sender, args)));
+                    return;
+                }
                 var view = _frmLyrics;
                 if (view == null || view.Form.IsDisposed)
                     ShowLyricsWindow();
@@ -333,14 +342,6 @@ namespace MusicBeePlugin
                 }
             }
 
-            void ToggleCompactWindow(object sender, EventArgs args)
-            {
-                _settings.CompactWindow = !_settings.CompactWindow;
-                _settings.CompactWindowPreferenceSet = true;
-                if (_compactMenuItem != null) _compactMenuItem.Checked = _settings.CompactWindow;
-                if (_frmLyrics != null) StartupForm();
-                SaveSettings(_settings);
-            }
         }
 
         private void ShowLyricsWindow()
@@ -368,11 +369,10 @@ namespace MusicBeePlugin
                 var previous = _frmLyrics;
                 _frmLyrics = null;
                 previous?.Form.Dispose();
-                var view = _settings.CompactWindow
-                    ? (IDesktopLyricsView)new FrmLyricsWindow(_settings, _mbApiInterface,
-                        WindowSettingsChanged, () => Configure(IntPtr.Zero),
-                        PreviewTimingLyrics, CancelTimingPreview, TimingLyricsSaved)
-                    : new FrmLyrics(_settings);
+                var view = (IDesktopLyricsView)new FrmLyricsWindow(_settings,
+                    _mbApiInterface, _history, WindowSettingsChanged,
+                    () => Configure(IntPtr.Zero), PreviewTimingLyrics,
+                    CancelTimingPreview, TimingLyricsSaved);
                 _frmLyrics = view;
                 view.Form.FormClosed += (sender, args) =>
                 {
