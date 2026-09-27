@@ -284,13 +284,13 @@ namespace MusicBeePlugin
                 importedTag != records[0].SyncedLyrics)
                 throw new Exception("Import must not overwrite a tag changed since search opened.");
             if (!ImportedLyricsTagStore.Save(importApi, "track.mp3", importedTag,
-                    records[2].PlainLyrics, out importError) ||
-                importedTag != records[2].PlainLyrics)
+                    records[1].PlainLyrics, out importError) ||
+                importedTag != records[1].PlainLyrics)
                 throw new Exception("Plain LRCLIB lyrics must be saved for later timing: " + importError);
             importApi.Library_CommitTagsToFile = url => false;
             if (ImportedLyricsTagStore.Save(importApi, "track.mp3", importedTag,
                     "[00:02.00] Failed", out importError) ||
-                importedTag != records[2].PlainLyrics)
+                importedTag != records[1].PlainLyrics)
                 throw new Exception("A failed MusicBee commit must restore the old Lyrics field.");
             using (var picker = new FrmLrcLibPicker(importApi, "track.mp3",
                 "Anytime Anywhere", "milet", 230000, importedTag, (url, text) => { }))
