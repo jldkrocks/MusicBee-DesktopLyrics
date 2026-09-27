@@ -31,14 +31,14 @@ The cover scales with window height, and the lyric panel and song title are cent
 
 Play a song with timed romaji in MusicBee's Lyrics field, open the lyrics window's flyout menu, and choose **Add English meaning from Genius…**. The importer guides you through four steps:
 
-1. Click **Open Genius search**. In your browser, choose an English translation for the correct song and copy the lyric text.
-2. Paste the English text into the importer. If the line breaks differ, you can also paste the corresponding Genius romaji into the optional box; that helps the importer match phrases to your timed romaji. Paste the translation page's URL in **Source URL** if you want to keep its source with the saved result.
+1. Click **Open Genius search**. The search uses only the song title and artist. Choose an English translation if one exists; otherwise copy the song's romaji and translate it line by line yourself, for example in ChatGPT.
+2. Paste the English text into the importer. If the line breaks differ, you can also paste the corresponding Genius romaji into the optional box; that helps the importer match phrases to your timed romaji. **Source URL** is optional: it saves the page link with this song and shows it again when you reopen the importer. It does not download lyrics.
 3. Click **Align and review**. Compare each English line with the MusicBee lyric and timestamp. Edit the English cells directly. **Repeat previous English here** handles one English phrase spanning two timed lines; **Join next English here** handles two English phrases spanning one timed line. Highlighted pairs and the empty/extra counts flag places to check.
 4. Click **Save English**. The English appears above the active romaji immediately. The flyout's **Show English / translation** switch hides or restores it. Reopen the importer to replace or remove it.
 
 The plugin opens Genius in your browser; **you choose and copy the translation**. It does not retrieve full lyrics from Genius's API, scrape the page, or translate them automatically. The alignment uses your existing MusicBee timestamps and needs your review, especially when a translation paraphrases or combines lines. The English is saved per song in `DesktopLyrics-English` under MusicBee's plugin storage, separately from its Lyrics tag. Timing-only edits keep the English; changes to the romaji lines require you to review and import it again. The feature also works without a Genius page if you have an English translation from another source.
 
-Existing bilingual LRC in MusicBee still works: a romaji line and English line at the **same timestamp** are displayed together, with the English smaller. A separately imported English line takes precedence when present. A repeated English phrase is shown once, even if its punctuation or casing differs. English sits above the centred current lyric and the upcoming line remains below it; only an extremely short lyric area hides the upcoming line to keep the active lyric legible.
+Existing bilingual LRC in MusicBee still works: a romaji line and English line at the **same timestamp** are displayed together, with the English smaller. A separately imported English line takes precedence when present. Repeated English phrases are shown once even if punctuation, casing, or a small spelling difference varies; short phrases still require an exact match. English sits above the centred current lyric and the upcoming line remains below it; only an extremely short lyric area hides the upcoming line to keep the active lyric legible.
 
 At the end of the playing queue, the Next button leaves the window open and shows a brief message. The message also appears when MusicBee signals the queue has ended; it clears when another song starts.
 
@@ -50,7 +50,7 @@ Both editors preview edits in the lyric window and write the completed LRC to th
 
 ### Find timed lyrics on LRCLIB
 
-Click **LRCLIB** beside TIMING. The picker searches for the current song and sorts results by closeness to its duration. Inspect the preview before saving. Timed results can be used immediately; a plain result can be saved to MusicBee's Lyrics tag and stamped later with **TIMING**. The picker asks before replacing existing lyrics or choosing a version with a substantially different duration. No separate `.lrc` file is created. The search sends title and artist to LRCLIB, uses an identifying User-Agent, and respects its retry limit.
+Click **LRCLIB** beside TIMING. The picker searches for the current song and sorts results by closeness to its duration. Inspect the preview before saving. Timed results can be used immediately; a plain result can be saved to MusicBee's Lyrics tag and stamped later with **TIMING**. Results with no duration show an unknown length rather than breaking the search, and the picker asks you to check them before saving. The picker also asks before replacing existing lyrics or choosing a version with a substantially different duration. No separate `.lrc` file is created. The search sends title and artist to LRCLIB, uses an identifying User-Agent, and respects its retry limit.
 
 # Chinese version
 

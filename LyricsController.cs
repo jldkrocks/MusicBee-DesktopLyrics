@@ -193,7 +193,31 @@ namespace MusicBeePlugin
             if (string.IsNullOrWhiteSpace(current) ||
                 string.IsNullOrWhiteSpace(english)) return false;
             var left = ComparableText(current);
-            return left.Length > 0 && left == ComparableText(english);
+            var right = ComparableText(english);
+            if (left.Length == 0 || right.Length == 0) return false;
+            if (left == right) return true;
+            // A sung English phrase can differ by one word ending or a typo
+            // from the pasted meaning. Keep short phrases exact so a small
+            // difference in a short translation is still visible.
+            if (left.Length < 20 || right.Length < 20 ||
+                left.Length > 240 || right.Length > 240) return false;
+            var allowedChanges = Math.Max(1, Math.Max(left.Length, right.Length) / 12);
+            if (Math.Abs(left.Length - right.Length) > allowedChanges) return false;
+            var previous = new int[right.Length + 1];
+            var currentRow = new int[right.Length + 1];
+            for (var j = 0; j <= right.Length; j++) previous[j] = j;
+            for (var i = 1; i <= left.Length; i++)
+            {
+                currentRow[0] = i;
+                for (var j = 1; j <= right.Length; j++)
+                    currentRow[j] = Math.Min(Math.Min(currentRow[j - 1] + 1,
+                        previous[j] + 1), previous[j - 1] +
+                        (left[i - 1] == right[j - 1] ? 0 : 1));
+                var swap = previous;
+                previous = currentRow;
+                currentRow = swap;
+            }
+            return previous[right.Length] <= allowedChanges;
         }
 
         private static string ComparableText(string text)

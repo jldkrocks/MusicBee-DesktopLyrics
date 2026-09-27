@@ -226,11 +226,13 @@ namespace MusicBeePlugin
                 records = LrcLibClient.SortByDuration(records, _durationMs);
                 foreach (var record in records)
                 {
-                    var difference = _durationMs <= 0 || record.Duration <= 0 ? "—" :
-                        Math.Abs(record.Duration - _durationMs / 1000.0) < 0.5 ? "Exact" :
-                        (record.Duration > _durationMs / 1000.0 ? "+" : "−") +
-                        FormatDuration(Math.Abs(record.Duration - _durationMs / 1000.0));
-                    var index = _results.Rows.Add(FormatDuration(record.Duration), difference,
+                    var length = record.DurationSeconds;
+                    var difference = _durationMs <= 0 || length <= 0 ? "—" :
+                        Math.Abs(length - _durationMs / 1000.0) < 0.5 ? "Exact" :
+                        (length > _durationMs / 1000.0 ? "+" : "−") +
+                        FormatDuration(Math.Abs(length - _durationMs / 1000.0));
+                    var index = _results.Rows.Add(length <= 0 ? "—" :
+                        FormatDuration(length), difference,
                         record.TrackName, record.ArtistName, record.AlbumName,
                         record.HasTimedLyrics ? "Timed" : "Plain");
                     _results.Rows[index].Tag = record;
@@ -288,9 +290,12 @@ namespace MusicBeePlugin
                     TrackChanged();
                     return;
                 }
-                var difference = _durationMs > 0 ?
-                    Math.Abs(record.Duration - _durationMs / 1000.0) : 0;
-                if (!string.IsNullOrWhiteSpace(_expectedTag) || difference > 5)
+                var length = record.DurationSeconds;
+                var difference = _durationMs > 0 && length > 0 ?
+                    Math.Abs(length - _durationMs / 1000.0) : 0;
+                var unknownLength = _durationMs > 0 && length <= 0;
+                if (!string.IsNullOrWhiteSpace(_expectedTag) || difference > 5 ||
+                    unknownLength)
                 {
                     var message = "Save the selected " + (record.HasTimedLyrics ?
                         "timed" : "plain") + " lyrics to this song's MusicBee Lyrics field?";
@@ -299,6 +304,8 @@ namespace MusicBeePlugin
                     if (difference > 5)
                         message += "\n\nThe LRCLIB result differs from this song by " +
                             FormatDuration(difference) + ". Check that it is the right version.";
+                    if (unknownLength)
+                        message += "\n\nThis LRCLIB result has no duration. Check the title and preview carefully.";
                     if (MessageBox.Show(this, message, "Save LRCLIB lyrics",
                             MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                         return;

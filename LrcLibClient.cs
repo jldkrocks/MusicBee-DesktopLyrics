@@ -17,7 +17,10 @@ namespace MusicBeePlugin
         public string TrackName { get; set; }
         public string ArtistName { get; set; }
         public string AlbumName { get; set; }
-        public double Duration { get; set; }
+        public double? Duration { get; set; }
+        public double DurationSeconds => Duration.HasValue &&
+            !double.IsNaN(Duration.Value) && !double.IsInfinity(Duration.Value) &&
+            Duration.Value > 0 ? Duration.Value : 0;
         public bool Instrumental { get; set; }
         public string PlainLyrics { get; set; }
         public string SyncedLyrics { get; set; }
@@ -28,7 +31,7 @@ namespace MusicBeePlugin
     {
         private const string Endpoint = "https://lrclib.net/api/search?q=";
         private const string ClientName =
-            "DesktopLyrics/1.15.1 (https://github.com/jldkrocks/MusicBee-DesktopLyrics)";
+            "DesktopLyrics/1.15.6 (https://github.com/jldkrocks/MusicBee-DesktopLyrics)";
         private static readonly SemaphoreSlim Requests = new SemaphoreSlim(1, 1);
         private static DateTime _nextRequestUtc = DateTime.MinValue;
 
@@ -120,8 +123,9 @@ namespace MusicBeePlugin
             int durationMs)
         {
             var seconds = durationMs > 0 ? durationMs / 1000.0 : 0;
-            return records.OrderBy(record => seconds <= 0 || record.Duration <= 0 ?
-                    double.MaxValue : Math.Abs(record.Duration - seconds))
+            return records.Where(record => record != null)
+                .OrderBy(record => seconds <= 0 || record.DurationSeconds <= 0 ?
+                    double.MaxValue : Math.Abs(record.DurationSeconds - seconds))
                 .ThenBy(record => record.HasTimedLyrics ? 0 : 1).ToList();
         }
 

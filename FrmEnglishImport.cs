@@ -35,8 +35,7 @@ namespace MusicBeePlugin
             _lyrics = lyrics;
             _saved = saved;
             _signature = EnglishTranslationStore.Signature(lyrics);
-            _searchUrl = "https://genius.com/search?q=" +
-                Uri.EscapeDataString((artist + " " + title + " English translation").Trim());
+            _searchUrl = BuildGeniusSearchUrl(title, artist);
 
             Text = "Add English meaning · " + title;
             StartPosition = FormStartPosition.CenterParent;
@@ -46,21 +45,23 @@ namespace MusicBeePlugin
             BackColor = Color.FromArgb(20, 24, 37);
             ForeColor = Color.FromArgb(236, 238, 247);
             Font = new Font("Segoe UI", 9.5f);
-            MinimumSize = new Size(770, 570);
+            MinimumSize = new Size(830, 640);
             Size = new Size(1060, 790);
 
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, Padding = new Padding(16, 12, 16, 12),
-                ColumnCount = 1, RowCount = 8
+                ColumnCount = 1, RowCount = 10
             };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 37));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 39));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 27));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 140));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 114));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 136));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 108));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
             Controls.Add(root);
@@ -80,42 +81,44 @@ namespace MusicBeePlugin
             first.Controls.Add(new Label
             {
                 AutoSize = true, Margin = new Padding(12, 8, 0, 0),
-                Text = "Choose the English translation page and copy its lyric text."
+                Text = "Choose English, or copy the romaji and translate it in ChatGPT."
             });
             root.Controls.Add(first, 0, 1);
 
             root.Controls.Add(new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "2  Paste English lyrics here (section headings like [Verse 1] are fine):",
+                Text = "2  Paste English from Genius or your own translation (section headings are fine):",
                 ForeColor = Color.FromArgb(174, 204, 230)
             }, 0, 2);
             _english = InputBox();
             root.Controls.Add(_english, 0, 3);
 
-            var optional = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3,
+            var optional = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2,
                 ColumnCount = 1, Padding = new Padding(0, 5, 0, 0) };
             optional.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            optional.RowStyles.Add(new RowStyle(SizeType.Absolute, 23));
+            optional.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             optional.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            optional.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
             optional.Controls.Add(new Label
             {
-                Dock = DockStyle.Fill, Text = "Optional: paste Genius's romaji too if its line breaks differ from MusicBee's.",
+                Dock = DockStyle.Fill, Text = "Optional: paste Genius's romaji to match different line breaks.",
                 ForeColor = Color.FromArgb(174, 204, 230)
             }, 0, 0);
             _romaji = InputBox();
             optional.Controls.Add(_romaji, 0, 1);
-            var source = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
-            source.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
-            source.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            source.Controls.Add(new Label { Text = "Source URL:", Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
-            _sourceUrl = new TextBox { Dock = DockStyle.Fill, Text = "",
-                BackColor = Color.FromArgb(31, 36, 53), ForeColor = Color.White };
-            source.Controls.Add(_sourceUrl, 1, 0);
-            optional.Controls.Add(source, 0, 2);
             root.Controls.Add(optional, 0, 4);
+
+            root.Controls.Add(new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "Optional source URL: save the page link with this song so you can find it again. It does not fetch lyrics.",
+                ForeColor = Color.FromArgb(174, 204, 230),
+                TextAlign = ContentAlignment.MiddleLeft
+            }, 0, 5);
+            _sourceUrl = new TextBox { Dock = DockStyle.Fill, Text = "",
+                Margin = new Padding(3, 0, 3, 5),
+                BackColor = Color.FromArgb(31, 36, 53), ForeColor = Color.White };
+            root.Controls.Add(_sourceUrl, 0, 6);
 
             var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
             var align = MakeButton("3  Align and review", 170);
@@ -127,7 +130,7 @@ namespace MusicBeePlugin
             var join = MakeButton("Join next English here", 194);
             join.Click += (sender, args) => ChangeSelected(false);
             actions.Controls.Add(join);
-            root.Controls.Add(actions, 0, 5);
+            root.Controls.Add(actions, 0, 7);
 
             _pairs = new DataGridView
             {
@@ -172,7 +175,7 @@ namespace MusicBeePlugin
                     Convert.ToString(_pairs.Rows[args.RowIndex].Cells[2].Value));
                 UpdateStatus();
             };
-            root.Controls.Add(_pairs, 0, 6);
+            root.Controls.Add(_pairs, 0, 8);
 
             var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3,
                 Padding = new Padding(0, 7, 0, 0) };
@@ -191,14 +194,21 @@ namespace MusicBeePlugin
             _save.Enabled = false;
             _save.Click += (sender, args) => Save();
             footer.Controls.Add(_save, 2, 0);
-            root.Controls.Add(footer, 0, 7);
+            root.Controls.Add(footer, 0, 9);
 
             var existing = _store.Load(_trackUrl, _lyrics);
             _remove.Enabled = existing != null;
             if (existing != null)
             {
+                _sourceUrl.Text = _store.LoadSourceUrl(_trackUrl, _lyrics) ?? "";
                 _status.Text = "Saved English is active. Paste again to replace it, or remove it.";
             }
+        }
+
+        internal static string BuildGeniusSearchUrl(string title, string artist)
+        {
+            return "https://genius.com/search?q=" +
+                Uri.EscapeDataString(((title ?? "") + " " + (artist ?? "")).Trim());
         }
 
         public void TrackChanged()
@@ -238,7 +248,7 @@ namespace MusicBeePlugin
             if (_trackChanged) return;
             if (string.IsNullOrWhiteSpace(_english.Text))
             {
-                _status.Text = "Copy the English lyric text from Genius and paste it above first.";
+                _status.Text = "Paste English from Genius or your own translation above first.";
                 return;
             }
             _document = new EnglishImportDocument(_lyrics, _english.Text, _romaji.Text);

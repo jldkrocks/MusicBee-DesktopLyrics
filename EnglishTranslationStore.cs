@@ -30,6 +30,16 @@ namespace MusicBeePlugin
 
         public string[] Load(string trackUrl, IList<LyricParser.LyricEntry> lyrics)
         {
+            return Read(trackUrl, lyrics)?.Lines.ToArray();
+        }
+
+        public string LoadSourceUrl(string trackUrl, IList<LyricParser.LyricEntry> lyrics)
+        {
+            return Read(trackUrl, lyrics)?.SourceUrl;
+        }
+
+        private SavedEnglish Read(string trackUrl, IList<LyricParser.LyricEntry> lyrics)
+        {
             if (string.IsNullOrWhiteSpace(trackUrl) || lyrics == null) return null;
             try
             {
@@ -40,7 +50,7 @@ namespace MusicBeePlugin
                     saved.LyricSignature != Signature(lyrics) ||
                     saved.Lines == null || saved.Lines.Count != lyrics.Count)
                     return null;
-                return saved.Lines.ToArray();
+                return saved;
             }
             catch (Exception) { return null; } // Corrupt or inaccessible cache.
         }

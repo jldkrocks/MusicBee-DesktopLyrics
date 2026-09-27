@@ -105,8 +105,15 @@ namespace MusicBeePlugin
                     "https://genius.com/example");
                 var saved = store.Load("romaji.mp3", romaji);
                 if (saved == null || saved[1] != "Moonlight" ||
-                    store.Load("another.mp3", romaji) != null)
+                    store.Load("another.mp3", romaji) != null ||
+                    store.LoadSourceUrl("romaji.mp3", romaji) !=
+                        "https://genius.com/example")
                     throw new Exception("Saved English must belong only to its song.");
+                var geniusQuery = FrmEnglishImport.BuildGeniusSearchUrl(
+                    "Black Rover", "Vickeblanka");
+                if (Uri.UnescapeDataString(new Uri(geniusQuery).Query.Substring(3)) !=
+                    "Black Rover Vickeblanka")
+                    throw new Exception("Genius search must use the song and artist without forcing a translation result.");
                 var shifted = LyricParser.ParseLyric(romajiLrc.Replace("[00:09.00]",
                     "[00:10.00]")).Entries;
                 if (store.Load("romaji.mp3", shifted)?[1] != "Moonlight")
@@ -161,6 +168,19 @@ namespace MusicBeePlugin
                 if (repeatedEnglish?.LyricLine2 != null ||
                     repeatedEnglish.NextLine?.Trim() != "Nankai mo Play")
                     throw new Exception("An English chorus must not display itself twice or hide the next lyric.");
+                store.Save("mixed.mp3", mixedEntries,
+                    new[] { "Back up, gets far of the sky / Black rover",
+                        "Play it again and again" }, "");
+                mixedController.InvalidateImportedEnglish();
+                if (mixedController.UpdateLyrics(false)?.LyricLine2 != null)
+                    throw new Exception("A near-identical English line must not repeat the sung English.");
+                store.Save("mixed.mp3", mixedEntries,
+                    new[] { "A different meaning for the next day",
+                        "Play it again and again" }, "");
+                mixedController.InvalidateImportedEnglish();
+                if (mixedController.UpdateLyrics(false)?.LyricLine2 !=
+                    "A different meaning for the next day")
+                    throw new Exception("A distinct long translation must remain visible.");
                 mixedPosition = 2500;
                 if (mixedController.UpdateLyrics(false)?.LyricLine2 !=
                     "Play it again and again")
@@ -457,6 +477,15 @@ namespace MusicBeePlugin
             if (records.Count != 3 || records[0].Id != 2 || !records[0].HasTimedLyrics ||
                 records[1].HasTimedLyrics || LrcLibClient.RetryDelay("12").TotalSeconds != 12)
                 throw new Exception("LRCLIB results must show the matching timed version first and honor Retry-After.");
+            var missingDurationJson = "[{\"id\":4,\"trackName\":\"Boku no Sensou\"," +
+                "\"duration\":null,\"syncedLyrics\":\"[00:01.00] Missing length\"}," +
+                "{\"id\":5,\"duration\":280,\"syncedLyrics\":\"[00:01.00] Known length\"}]";
+            var nullableResults = LrcLibClient.SortByDuration(
+                LrcLibClient.ParseResults(missingDurationJson), 280000);
+            if (nullableResults.Count != 2 || nullableResults[0].Id != 5 ||
+                nullableResults[1].Id != 4 || nullableResults[1].DurationSeconds != 0 ||
+                !nullableResults[1].HasTimedLyrics)
+                throw new Exception("LRCLIB must keep usable results when a record has null duration.");
             var importedTag = "[00:01.00] Previous";
             var importApi = new Plugin.MusicBeeApiInterface
             {
