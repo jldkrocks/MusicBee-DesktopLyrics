@@ -110,6 +110,7 @@
     <Compile Include="FrmLyricsWindow.cs" />
     <Compile Include="IDesktopLyricsView.cs" />
     <Compile Include="LyricParser.cs" />
+    <Compile Include="QueueNavigation.cs" />
     <Compile Include="LyricsController.cs" />
     <Compile Include="LyricsRenderer.cs" />
     <Compile Include="MusicBeeInterface.cs" />

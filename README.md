@@ -29,6 +29,8 @@ The window can show a small song title at the top, cover art beside the lyrics, 
 
 The cover scales with the window height, and the lyric panel is centred above the playback controls. The plugin settings' lyric colour, border colour, and single/two/three-colour gradient choices also apply to text in this window. Artwork colour matching affects the window background and spectrum independently.
 
+At the end of the playing queue, the Next button leaves the window open and shows a brief message. The message also appears when MusicBee signals the queue has ended; it clears when another song starts.
+
 # Chinese version
 
 ## MusicBee 桌面歌词

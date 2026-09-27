@@ -11,8 +11,12 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
     <Compile Include="..\ArtworkPalette.cs"><Link>ArtworkPalette.cs</Link></Compile>
     <Compile Include="..\LyricParser.cs"><Link>LyricParser.cs</Link></Compile>
+    <Compile Include="..\LyricsController.cs"><Link>LyricsController.cs</Link></Compile>
+    <Compile Include="..\MusicBeeInterface.cs"><Link>MusicBeeInterface.cs</Link></Compile>
+    <Compile Include="..\QueueNavigation.cs"><Link>QueueNavigation.cs</Link></Compile>
     <Compile Include="Program.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

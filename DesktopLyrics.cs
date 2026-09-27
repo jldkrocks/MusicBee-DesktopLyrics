@@ -199,16 +199,27 @@ namespace MusicBeePlugin
                     }
                     break;
                 case NotificationType.PlayStateChanged:
-                    UpdatePlayState(_mbApiInterface.Player_GetPlayState());
+                    try { UpdatePlayState(_mbApiInterface.Player_GetPlayState()); }
+                    catch (Exception e) { _mbApiInterface.MB_Trace(e.ToString()); }
                     break;
                 case NotificationType.TrackChanged:
                 case NotificationType.NowPlayingArtworkReady:
                     var artworkView = _frmLyrics as FrmLyricsWindow;
                     if (artworkView != null && !artworkView.IsDisposed && artworkView.IsHandleCreated)
-                        artworkView.BeginInvoke(new Action(() =>
+                        try { artworkView.BeginInvoke(new Action(() =>
                         {
                             if (!artworkView.IsDisposed) artworkView.RefreshArtwork(true);
-                        }));
+                        })); }
+                        catch (InvalidOperationException) { /* Window closed during a track change. */ }
+                    break;
+                case NotificationType.NowPlayingListEnded:
+                    var endedView = _frmLyrics as FrmLyricsWindow;
+                    if (endedView != null && !endedView.IsDisposed && endedView.IsHandleCreated)
+                        try { endedView.BeginInvoke(new Action(() =>
+                        {
+                            if (!endedView.IsDisposed) endedView.ShowEndOfQueue();
+                        })); }
+                        catch (InvalidOperationException) { /* Window closed as the queue ended. */ }
                     break;
                 case NotificationType.NowPlayingLyricsReady:
                     try
@@ -251,9 +262,15 @@ namespace MusicBeePlugin
                         {
                             _stopHideTimer.Stop();
                             var active = _frmLyrics;
-                            if (_settings.AutoHide && active != null &&
-                                _mbApiInterface.Player_GetPlayState() == PlayState.Stopped)
-                                active.Form.Hide();
+                            try
+                            {
+                                if (_settings.AutoHide && active != null &&
+                                    !active.Form.IsDisposed &&
+                                    _mbApiInterface.Player_GetPlayState() == PlayState.Stopped &&
+                                    !(active is FrmLyricsWindow compact && compact.IsAtEndOfQueue))
+                                    active.Form.Hide();
+                            }
+                            catch (Exception e) { _mbApiInterface.MB_Trace(e.ToString()); }
                         };
                     }
                     _stopHideTimer.Stop();

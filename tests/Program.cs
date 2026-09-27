@@ -28,6 +28,34 @@ namespace MusicBeePlugin
                 throw new Exception("A real translation must remain on the second line.");
             Console.WriteLine("LRC parser checks passed.");
 
+            var noTrack = new Plugin.MusicBeeApiInterface
+            {
+                NowPlaying_GetFileTag = field => null,
+                NowPlaying_GetLyrics = () => null
+            };
+            if (new LyricsController(noTrack).UpdateLyrics(false) != null)
+                throw new Exception("No current track must not produce lyrics.");
+
+            var nextCalls = 0;
+            var atEnd = new Plugin.MusicBeeApiInterface
+            {
+                Player_GetButtonEnabled = button => true,
+                NowPlayingList_IsAnyFollowingTracks = () => false,
+                Player_GetRepeat = () => Plugin.RepeatMode.None,
+                Player_GetAutoDjEnabled = () => false,
+                Player_PlayNextTrack = () => { nextCalls++; return true; }
+            };
+            if (QueueNavigation.TryPlayNext(atEnd) || QueueNavigation.TryPlayNext(atEnd) ||
+                nextCalls != 0)
+                throw new Exception("Repeated Next at the end must not call MusicBee.");
+            atEnd.NowPlayingList_IsAnyFollowingTracks = () => true;
+            if (!QueueNavigation.TryPlayNext(atEnd) || nextCalls != 1)
+                throw new Exception("Next must still advance when tracks remain.");
+            atEnd.Player_GetButtonEnabled = button => false;
+            if (QueueNavigation.TryPlayNext(atEnd) || nextCalls != 1)
+                throw new Exception("A disabled Next button must not advance.");
+            Console.WriteLine("End-of-queue checks passed.");
+
             var imagePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".png");
             try
             {

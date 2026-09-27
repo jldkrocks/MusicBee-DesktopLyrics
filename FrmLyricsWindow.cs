@@ -15,6 +15,7 @@ namespace MusicBeePlugin
     {
         private const int BarCount = 48;
         private const float TransitionMs = 320f;
+        private const float QueueNoticeMs = 3200f;
         private readonly Plugin.MusicBeeApiInterface _musicBee;
         private readonly Action<SettingsObj> _settingsChanged;
         private readonly Action _openSettings;
@@ -46,11 +47,16 @@ namespace MusicBeePlugin
         private long _lastPlayStateCheck;
         private Rectangle _previousButton, _playButton, _nextButton, _menuButton;
         private string _hoverButton;
+        private long _queueNoticeStarted;
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
 
         public Form Form => this;
+        public bool IsAtEndOfQueue => _queueNoticeStarted != 0;
+        public bool HasQueueNotice => _queueNoticeStarted != 0 &&
+            (Stopwatch.GetTimestamp() - _queueNoticeStarted) * 1000.0 /
+                Stopwatch.Frequency < QueueNoticeMs;
 
         public FrmLyricsWindow(SettingsObj settings, Plugin.MusicBeeApiInterface musicBee,
             Action<SettingsObj> settingsChanged, Action openSettings)
@@ -269,6 +275,8 @@ namespace MusicBeePlugin
             var trackChanged = trackUrl != _artworkTrackUrl;
             if (!force && !trackChanged) return;
             _artworkTrackUrl = trackUrl;
+            if (trackChanged && !string.IsNullOrWhiteSpace(trackUrl))
+                _queueNoticeStarted = 0;
             var request = Interlocked.Increment(ref _artworkRequestId);
             try
             {
@@ -553,6 +561,7 @@ namespace MusicBeePlugin
                 DrawLine(g, _line1, traveling, fontSize * (0.63f + 0.37f * eased),
                     (int)(145 + 110 * eased));
             }
+            DrawQueueNotice(g, content);
             DrawSongTitle(g, bounds);
             DrawTransport(g, bounds);
             DrawMenuButton(g, bounds);
@@ -623,6 +632,39 @@ namespace MusicBeePlugin
                    })
                 g.DrawString(text, font, brush,
                     new RectangleF(45, 7, Math.Max(1, bounds.Width - 90), 29), format);
+        }
+
+        public void ShowEndOfQueue()
+        {
+            _queueNoticeStarted = Stopwatch.GetTimestamp();
+            Invalidate();
+        }
+
+        private void DrawQueueNotice(Graphics g, RectangleF content)
+        {
+            if (!HasQueueNotice) return;
+            var elapsed = (float)((Stopwatch.GetTimestamp() - _queueNoticeStarted) *
+                1000.0 / Stopwatch.Frequency);
+            var fade = Math.Max(0f, Math.Min(1f, (QueueNoticeMs - elapsed) / 450f));
+            var width = Math.Min(360f, Math.Max(50f, content.Width - 12f));
+            var notice = new Rectangle((int)((ClientSize.Width - width) / 2f),
+                (int)(content.Top + (content.Height - 40f) / 2f), (int)width, 40);
+            using (var path = RoundedRectangle(notice, 19))
+            using (var background = new SolidBrush(Color.FromArgb((int)(230 * fade), 19, 23, 39)))
+            using (var border = new Pen(Color.FromArgb((int)(140 * fade), _palette.Border)))
+            using (var font = new Font("Segoe UI", 11f, FontStyle.Regular, GraphicsUnit.Point))
+            using (var text = new SolidBrush(Color.FromArgb((int)(240 * fade), 245, 245, 250)))
+            using (var format = new StringFormat(StringFormatFlags.NoWrap)
+                   {
+                       Alignment = StringAlignment.Center,
+                       LineAlignment = StringAlignment.Center,
+                       Trimming = StringTrimming.EllipsisCharacter
+                   })
+            {
+                g.FillPath(background, path);
+                g.DrawPath(border, path);
+                g.DrawString("That's the end of the queue ♪", font, text, notice, format);
+            }
         }
 
         private void DrawTransport(Graphics g, Rectangle bounds)
@@ -756,9 +798,20 @@ namespace MusicBeePlugin
             {
                 if (_previousButton.Contains(e.Location)) _musicBee.Player_PlayPreviousTrack();
                 else if (_playButton.Contains(e.Location)) _musicBee.Player_PlayPause();
-                else if (_nextButton.Contains(e.Location)) _musicBee.Player_PlayNextTrack();
+                else if (_nextButton.Contains(e.Location))
+                {
+                    if (QueueNavigation.TryPlayNext(_musicBee))
+                        _queueNoticeStarted = 0;
+                    else
+                        ShowEndOfQueue();
+                }
             }
-            catch (Exception) { /* MusicBee may be closing or changing tracks. */ }
+            catch (Exception)
+            {
+                // MusicBee may be closing or changing tracks between the queue
+                // check and the action; leave the window usable either way.
+                if (_nextButton.Contains(e.Location)) ShowEndOfQueue();
+            }
             RefreshPlayState();
             Invalidate();
         }

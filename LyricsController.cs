@@ -1,4 +1,4 @@
-﻿namespace MusicBeePlugin
+namespace MusicBeePlugin
 {
     public class LyricsController
     {
@@ -17,7 +17,7 @@
         public LyricView UpdateLyrics(bool useGeneratedWhenUnavailable)
         {
             // TODO passively change?
-            var hasLyrics = _interface.NowPlaying_GetFileTag(Plugin.MetaDataType.HasLyrics);
+            var hasLyrics = _interface.NowPlaying_GetFileTag(Plugin.MetaDataType.HasLyrics) ?? "";
             if (hasLyrics.StartsWith("Y")  || hasLyrics.Length == 0)
             {
                 var lyrics = _interface.NowPlaying_GetLyrics();
