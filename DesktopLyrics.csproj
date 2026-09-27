@@ -108,6 +108,8 @@
     <Compile Include="Gdiplus.cs" />
     <Compile Include="GdiplusPInvoke.cs" />
     <Compile Include="FrmLyricsWindow.cs" />
+    <Compile Include="PartyAnimation.cs" />
+    <Compile Include="PartyDancerWindow.cs" />
     <Compile Include="LyricCardLayout.cs" />
     <Compile Include="FrmEnglishImport.cs" />
     <Compile Include="EnglishImportDocument.cs" />
@@ -164,6 +166,12 @@
     </BootstrapperPackage>
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets\PartyRem.png">
+      <LogicalName>MusicBeePlugin.PartyRem.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\PartyRam.png">
+      <LogicalName>MusicBeePlugin.PartyRam.png</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="FrmLyrics.resx">
       <DependentUpon>FrmLyrics.cs</DependentUpon>
     </EmbeddedResource>

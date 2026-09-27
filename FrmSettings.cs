@@ -189,6 +189,7 @@ namespace MusicBeePlugin
         public bool ShowAlbumArt;
         public bool ShowVisualizer;
         public bool TransparentCanvas;
+        public bool PartyMode;
         public bool ShowSongQueue;
         public bool SongQueuePreferenceSet;
         public bool ShowTranslation;

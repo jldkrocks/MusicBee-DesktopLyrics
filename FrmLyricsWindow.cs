@@ -55,7 +55,10 @@ namespace MusicBeePlugin
         private Plugin.PlayState _playState = Plugin.PlayState.Undefined;
         private long _lastPlayStateCheck;
         private Rectangle _previousButton, _playButton, _nextButton, _menuButton,
-            _timingButton, _lrcButton, _backgroundButton, _resizeGrip;
+            _timingButton, _lrcButton, _backgroundButton, _partyButton, _resizeGrip;
+        private PartyDancerWindow _leftDancer, _rightDancer;
+        private double _partyBpm;
+        private long _lastPartyUpdate;
         private string _hoverButton;
         private long _queueNoticeStarted;
         private string _queueNoticeText = "That's the end of the queue ♪";
@@ -157,15 +160,17 @@ namespace MusicBeePlugin
                 StartAnimation();
                 RefreshArtwork(true);
                 RefreshQueue();
+                UpdatePartyDancers();
             };
             VisibleChanged += (sender, args) =>
             {
                 if (_animationDisposed) return;
                 if (Visible && _loaded) StartAnimation();
                 else _animationTimer.Stop();
+                UpdatePartyDancers();
             };
-            LocationChanged += (sender, args) => SaveBounds();
-            SizeChanged += (sender, args) => SaveBounds();
+            LocationChanged += (sender, args) => { SaveBounds(); UpdatePartyDancers(); };
+            SizeChanged += (sender, args) => { SaveBounds(); UpdatePartyDancers(); };
             ResizeBegin += (sender, args) =>
             {
                 _movingOrResizing = true;
@@ -252,6 +257,12 @@ namespace MusicBeePlugin
                 RefreshPlayState();
                 _lastPlayStateCheck = now;
             }
+            if (_settings.PartyMode && (_lastPartyUpdate == 0 ||
+                (now - _lastPartyUpdate) * 1000.0 / Stopwatch.Frequency >= 35))
+            {
+                UpdatePartyDancers();
+                _lastPartyUpdate = now;
+            }
             if (_settings.ShowSongQueue &&
                 (_lastQueueCheck == 0 ||
                  (now - _lastQueueCheck) * 1000.0 / Stopwatch.Frequency >= 12000))
@@ -281,6 +292,7 @@ namespace MusicBeePlugin
             _settings = settings;
             ClearTextGeometries();
             if (transparentChanged) ApplyTransparency();
+            UpdatePartyDancers();
             if (_useArtworkColors != settings.UseArtworkColors)
             {
                 _useArtworkColors = settings.UseArtworkColors;
@@ -307,8 +319,6 @@ namespace MusicBeePlugin
                 value => _settings.ShowTransportControls = value);
             AddToggle(menu, "Show visualizer", () => _settings.ShowVisualizer,
                 value => _settings.ShowVisualizer = value);
-            AddToggle(menu, "Transparent background", () => _settings.TransparentCanvas,
-                value => _settings.TransparentCanvas = value);
             AddToggle(menu, "Show queue and history", () => _settings.ShowSongQueue,
                 value => _settings.ShowSongQueue = value);
             AddToggle(menu, "Match album artwork colours", () => _settings.UseArtworkColors,
@@ -320,10 +330,15 @@ namespace MusicBeePlugin
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Add English meaning from Genius…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenEnglishImporter)));
-            menu.Items.Add("Edit lyric timing…", null, (sender, args) =>
+            var timingAction = menu.Items.Add("Edit lyric timing…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenTimingEditor)));
-            menu.Items.Add("Find lyrics on LRCLIB…", null, (sender, args) =>
+            var lrcAction = menu.Items.Add("Find lyrics on LRCLIB…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenLrcLibPicker)));
+            menu.Opening += (sender, args) =>
+            {
+                timingAction.Visible = _timingButton.IsEmpty;
+                lrcAction.Visible = _lrcButton.IsEmpty;
+            };
             menu.Items.Add("More settings…", null, (sender, args) =>
                 BeginInvoke(new Action(() => _openSettings?.Invoke())));
             menu.Items.Add(new ToolStripSeparator());
@@ -339,9 +354,7 @@ namespace MusicBeePlugin
             item.Click += (sender, args) =>
             {
                 var wasShowingArt = _settings.ShowAlbumArt;
-                var wasTransparent = _settings.TransparentCanvas;
                 setter(!getter());
-                if (wasTransparent != _settings.TransparentCanvas) ApplyTransparency();
                 UpdateFromSettings(_settings);
                 if (wasShowingArt != _settings.ShowAlbumArt) RefreshArtwork(true);
                 if (_settings.ShowSongQueue) RefreshQueue();
@@ -368,6 +381,68 @@ namespace MusicBeePlugin
         {
             try { _playState = _musicBee.Player_GetPlayState(); }
             catch (Exception) { _playState = Plugin.PlayState.Undefined; }
+        }
+
+        private void UpdatePartyDancers()
+        {
+            if (!_loaded || _animationDisposed) return;
+            if (!_settings.PartyMode)
+            {
+                DisposePartyDancers();
+                return;
+            }
+            if (!Visible || WindowState == FormWindowState.Minimized)
+            {
+                _leftDancer?.Hide();
+                _rightDancer?.Hide();
+                return;
+            }
+            try
+            {
+                if (_leftDancer == null)
+                    _leftDancer = new PartyDancerWindow("MusicBeePlugin.PartyRem.png");
+                if (_rightDancer == null)
+                    _rightDancer = new PartyDancerWindow("MusicBeePlugin.PartyRam.png");
+                var position = _musicBee.Player_GetPosition();
+                var frame = PartyAnimation.FrameAt(position, _partyBpm);
+                PlacePartyDancer(_leftDancer, true, frame);
+                PlacePartyDancer(_rightDancer, false, frame);
+            }
+            catch (Exception ex)
+            {
+                DisposePartyDancers();
+                _settings.PartyMode = false;
+                _settingsChanged?.Invoke(_settings);
+                Invalidate();
+                MessageBox.Show(this, "Could not show the party dancers: " + ex.Message,
+                    "Party mode", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void PlacePartyDancer(PartyDancerWindow dancer, bool left, int frame)
+        {
+            var area = Screen.FromControl(this).WorkingArea;
+            var space = left ? Left - area.Left - 8 : area.Right - Right - 8;
+            if (space < 65)
+            {
+                dancer.Hide();
+                return;
+            }
+            var desiredHeight = Math.Min(320, Math.Max(150, Height - 10));
+            var width = Math.Min(space, (int)Math.Round(desiredHeight * 180d / 353));
+            var height = (int)Math.Round(width * 353d / 180);
+            var y = Math.Max(area.Top, Math.Min(area.Bottom - height,
+                Top + (Height - height) / 2));
+            var x = left ? Left - width - 8 : Right + 8;
+            dancer.Present(new Rectangle(x, y, width, height), frame);
+            if (!dancer.Visible) dancer.Show(this);
+        }
+
+        private void DisposePartyDancers()
+        {
+            _leftDancer?.Dispose();
+            _rightDancer?.Dispose();
+            _leftDancer = _rightDancer = null;
         }
 
         public void UpdateLyrics(string line1, string line2, string nextLine)
@@ -415,6 +490,13 @@ namespace MusicBeePlugin
             {
                 _queueTracks.Clear();
                 _lastFutureOffset = 0;
+                try
+                {
+                    _partyBpm = PartyAnimation.ReadBpm(
+                        _musicBee.NowPlaying_GetFileTag(Plugin.MetaDataType.BeatsPerMin));
+                }
+                catch (Exception) { _partyBpm = 0; }
+                _lastPartyUpdate = 0;
             }
             if (trackChanged && !string.IsNullOrWhiteSpace(trackUrl))
             {
@@ -1003,6 +1085,7 @@ namespace MusicBeePlugin
                 DrawLrcButton(g, bounds);
             }
             DrawBackgroundButton(g, bounds);
+            DrawPartyButton(g, bounds);
             DrawMenuButton(g, bounds);
             DrawResizeGrip(g, bounds);
         }
@@ -1364,6 +1447,32 @@ namespace MusicBeePlugin
             }
         }
 
+        private void DrawPartyButton(Graphics g, Rectangle bounds)
+        {
+            _partyButton = new Rectangle(16, bounds.Bottom -
+                (_settings.TransparentCanvas ? (bounds.Height < 260 ? 50 : 62) : 40),
+                65, 30);
+            using (var path = RoundedRectangle(_partyButton, 12))
+            using (var shade = new SolidBrush(Color.FromArgb(
+                       _settings.TransparentCanvas ? 255 : _settings.PartyMode ? 175 :
+                       _hoverButton == "party" ? 112 : 84, 18, 27, 46)))
+            using (var border = new Pen(Color.FromArgb(
+                       _settings.PartyMode ? 220 : 115,
+                       _settings.TransparentCanvas ? Color.White : _palette.Border)))
+            using (var font = new Font("Segoe UI", 8.3f, FontStyle.Bold, GraphicsUnit.Point))
+            using (var brush = new SolidBrush(Color.FromArgb(242, Color.White)))
+            using (var format = new StringFormat
+                   { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+            {
+                var smoothing = g.SmoothingMode;
+                if (_settings.TransparentCanvas) g.SmoothingMode = SmoothingMode.None;
+                g.FillPath(shade, path);
+                if (!_settings.TransparentCanvas) g.DrawPath(border, path);
+                g.SmoothingMode = smoothing;
+                g.DrawString("PARTY", font, brush, _partyButton, format);
+            }
+        }
+
         private void DrawResizeGrip(Graphics g, Rectangle bounds)
         {
             _resizeGrip = Rectangle.Empty;
@@ -1563,6 +1672,7 @@ namespace MusicBeePlugin
                 }
             var hit = _menuButton.Contains(e.Location) ? "menu" :
                 _backgroundButton.Contains(e.Location) ? "background" :
+                _partyButton.Contains(e.Location) ? "party" :
                 _queueTab.Contains(e.Location) ? "queue-tab" :
                 _timingButton.Contains(e.Location) ? "timing" :
                 _lrcButton.Contains(e.Location) ? "lrclib" :
@@ -1596,6 +1706,7 @@ namespace MusicBeePlugin
                 _queueTab.Contains(e.Location) ||
                 _menuButton.Contains(e.Location) ||
                 _backgroundButton.Contains(e.Location) ||
+                _partyButton.Contains(e.Location) ||
                 _previousButton.Contains(e.Location) ||
                 _playButton.Contains(e.Location) ||
                 _nextButton.Contains(e.Location)) return;
@@ -1662,6 +1773,14 @@ namespace MusicBeePlugin
                 _settings.TransparentCanvas = !_settings.TransparentCanvas;
                 ApplyTransparency();
                 _settingsChanged?.Invoke(_settings);
+                return;
+            }
+            if (_partyButton.Contains(e.Location))
+            {
+                _settings.PartyMode = !_settings.PartyMode;
+                UpdatePartyDancers();
+                _settingsChanged?.Invoke(_settings);
+                Invalidate();
                 return;
             }
             if (_timingButton.Contains(e.Location))
@@ -1892,6 +2011,7 @@ namespace MusicBeePlugin
                 _animationDisposed = true;
                 Interlocked.Increment(ref _artworkRequestId);
                 _animationTimer?.Dispose();
+                DisposePartyDancers();
                 _albumArtwork?.Dispose();
                 _backgroundCache?.Dispose();
                 ClearTextGeometries();

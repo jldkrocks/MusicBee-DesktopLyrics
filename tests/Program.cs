@@ -12,6 +12,15 @@ namespace MusicBeePlugin
         [STAThread]
         private static void Main()
         {
+            if (PartyAnimation.ReadBpm("120 BPM") != 120 ||
+                PartyAnimation.ReadBpm("96,5") != 96.5 ||
+                PartyAnimation.ReadBpm("unknown") != 0 ||
+                PartyAnimation.FrameAt(140, 0) != 1 ||
+                PartyAnimation.FrameAt(1680, 0) != 0 ||
+                PartyAnimation.FrameAt(750, 120) != 6 ||
+                PartyAnimation.FrameAt(1500, 120) != 0)
+                throw new Exception("Party frames must loop at native speed or on song beats.");
+
             const string lrc = "[00:09.68] First line\n" +
                                "[00:17.30] \n" +
                                "[00:17.30] Second line\n" +
