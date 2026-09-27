@@ -16,6 +16,7 @@
     <Compile Include="..\LyricParser.cs"><Link>LyricParser.cs</Link></Compile>
     <Compile Include="..\LrcTimingDocument.cs"><Link>LrcTimingDocument.cs</Link></Compile>
     <Compile Include="..\TimingTagStore.cs"><Link>TimingTagStore.cs</Link></Compile>
+    <Compile Include="..\FrmTimingEditor.cs"><Link>FrmTimingEditor.cs</Link></Compile>
     <Compile Include="..\LyricsController.cs"><Link>LyricsController.cs</Link></Compile>
     <Compile Include="..\MusicBeeInterface.cs"><Link>MusicBeeInterface.cs</Link></Compile>
     <Compile Include="..\QueueNavigation.cs"><Link>QueueNavigation.cs</Link></Compile>

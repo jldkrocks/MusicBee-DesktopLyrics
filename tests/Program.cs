@@ -2,11 +2,13 @@ using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Windows.Forms;
 
 namespace MusicBeePlugin
 {
     internal static class Program
     {
+        [STAThread]
         private static void Main()
         {
             const string lrc = "[00:09.68] First line\n" +
@@ -86,6 +88,15 @@ namespace MusicBeePlugin
                 if (TimingTagStore.Save(api, "track.mp3", edited, edited,
                     "another change", out saveError) || storedLyrics != edited)
                     throw new Exception("Failed file writes must restore the old in-memory lyrics.");
+
+                using (var editor = new FrmTimingEditor(api, "track.mp3", "Test song",
+                    editable, timing, (url, text) => { }, url => { },
+                    (url, text) => { }))
+                {
+                    var grid = FindGrid(editor.Controls);
+                    if (grid == null || grid.Rows.Count != timing.Entries.Count)
+                        throw new Exception("The timing mode must display every timestamped row.");
+                }
             }
             finally
             {
@@ -203,6 +214,18 @@ namespace MusicBeePlugin
                 File.Delete(imagePath);
             }
             Console.WriteLine("Artwork palette checks passed.");
+        }
+
+        private static DataGridView FindGrid(Control.ControlCollection controls)
+        {
+            foreach (Control control in controls)
+            {
+                var grid = control as DataGridView;
+                if (grid != null) return grid;
+                grid = FindGrid(control.Controls);
+                if (grid != null) return grid;
+            }
+            return null;
         }
     }
 }
