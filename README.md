@@ -27,6 +27,8 @@ If you close the visualizer with **X**, choose **View → Desktop Lyrics** to re
 
 The window can show a small song title at the top, cover art beside the lyrics, and previous, play/pause, and next controls at the bottom. The middle button changes between pause and play as playback changes. Open the three-line menu in the upper right (or right-click the window) to toggle the title, cover art, playback controls, spectrum, artwork colours, and next-lyric preview. **More settings…** opens the font and other plugin settings from the window. These choices are saved for the next MusicBee launch. The lyric panel now slides and fades with the text.
 
+The cover scales with the window height, and the lyric panel is centred above the playback controls. The plugin settings' lyric colour, border colour, and single/two/three-colour gradient choices also apply to text in this window. Artwork colour matching affects the window background and spectrum independently.
+
 # Chinese version
 
 ## MusicBee 桌面歌词

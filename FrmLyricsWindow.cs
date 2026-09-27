@@ -476,13 +476,18 @@ namespace MusicBeePlugin
             var bottomInset = _settings.ShowTransportControls ? 58f : 15f;
             var region = new RectangleF(0, topInset, bounds.Width,
                 Math.Max(24f, bounds.Height - topInset - bottomInset));
+            // Give the cover its own vertical space. In a short window it can
+            // extend below the lyric row without squeezing down to a thumbnail.
             var artSize = _settings.ShowAlbumArt
-                ? Math.Min(142f, Math.Max(44f, region.Height - 12f)) : 0f;
+                ? Math.Max(0f, Math.Min(260f,
+                    Math.Min(bounds.Height - 44f, bounds.Width * 0.16f))) : 0f;
             if (artSize > 0)
-                DrawAlbumArt(g, new RectangleF(16, region.Top + (region.Height - artSize) / 2,
+                DrawAlbumArt(g, new RectangleF(16,
+                    Math.Max(topInset - 4f, (bounds.Height - artSize) / 2f),
                     artSize, artSize));
             var panelLeft = artSize > 0 ? (int)(16 + artSize + 15) : 13;
-            var panelWidth = Math.Max(40, bounds.Width - panelLeft - 13);
+            // Equal margins keep the lyric centred over the transport controls.
+            var panelWidth = Math.Max(40, bounds.Width - panelLeft * 2);
             var content = new RectangleF(panelLeft + 9, region.Top,
                 Math.Max(1, panelWidth - 18), region.Height);
 
@@ -830,13 +835,27 @@ namespace MusicBeePlugin
                     fitted = new Font(selected.FontFamily, size, selected.Style, GraphicsUnit.Point);
                 }
                 using (fitted)
+                using (var textPath = new GraphicsPath())
                 using (var shadow = new SolidBrush(Color.FromArgb(alpha * 2 / 3, 0, 0, 0)))
-                using (var foreground = CreateTextBrush(area, alpha))
+                using (var outline = new Pen(Color.FromArgb(alpha, _settings.BorderColor),
+                           Math.Max(1.5f, Math.Min(3f, size / 20f))))
                 {
-                    var shadowArea = area;
-                    shadowArea.Offset(1, 2);
-                    g.DrawString(lyric, fitted, shadow, shadowArea, format);
-                    g.DrawString(lyric, fitted, foreground, area, format);
+                    textPath.AddString(lyric, fitted.FontFamily, (int)fitted.Style,
+                        fitted.SizeInPoints * g.DpiY / 72f, area, format);
+                    if (textPath.PointCount == 0) return;
+                    using (var shadowPath = (GraphicsPath)textPath.Clone())
+                    using (var offset = new Matrix())
+                    {
+                        offset.Translate(1f, 2f);
+                        shadowPath.Transform(offset);
+                        g.FillPath(shadow, shadowPath);
+                    }
+                    outline.LineJoin = LineJoin.Round;
+                    g.DrawPath(outline, textPath);
+                    // Fit the gradient to the actual glyphs, not the taller
+                    // layout row, so both selected colours appear clearly.
+                    using (var foreground = CreateTextBrush(textPath.GetBounds(), alpha))
+                        g.FillPath(foreground, textPath);
                 }
             }
         }
@@ -847,14 +866,15 @@ namespace MusicBeePlugin
             var second = Color.FromArgb(alpha, _settings.Color2);
             if (_settings.GradientType == (int)GradientType.NoGradient || area.Height < 2)
                 return new SolidBrush(first);
-            var triple = _settings.GradientType == (int)GradientType.TripleColor;
-            var gradientArea = triple
-                ? new RectangleF(area.X, area.Y, area.Width, area.Height / 2f)
-                : area;
-            return new LinearGradientBrush(gradientArea, first, second, LinearGradientMode.Vertical)
-            {
-                WrapMode = triple ? WrapMode.TileFlipY : WrapMode.Tile
-            };
+            var gradient = new LinearGradientBrush(area, first, second,
+                LinearGradientMode.Vertical);
+            if (_settings.GradientType == (int)GradientType.TripleColor)
+                gradient.InterpolationColors = new ColorBlend
+                {
+                    Colors = new[] { first, second, first },
+                    Positions = new[] { 0f, 0.5f, 1f }
+                };
+            return gradient;
         }
 
         private static GraphicsPath RoundedRectangle(Rectangle rect, int radius)
