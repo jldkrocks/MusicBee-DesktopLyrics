@@ -7,6 +7,9 @@ namespace MusicBeePlugin
     {
         internal const int FrameCount = 12;
         internal const int FrameDurationMs = 140;
+        internal const int HalfTimeFromBpm = 110;
+        internal const int QuarterTimeFromBpm = 220;
+        private const double PoseHold = 0.18;
 
         internal static double ReadBpm(string tag)
         {
@@ -28,7 +31,17 @@ namespace MusicBeePlugin
             var loopMs = LoopDurationMs(bpm);
             var phase = positionMs % loopMs;
             if (phase < 0) phase += loopMs;
-            return Math.Min(FrameCount - 1, (int)(phase * FrameCount / loopMs));
+            var halfLoop = loopMs / 2;
+            var startingFrame = phase < halfLoop ? 0 : FrameCount / 2;
+            var travel = (phase % halfLoop) / halfLoop;
+            if (travel <= PoseHold) return startingFrame;
+            // Hold the two accented poses, then pass through all five in-between
+            // drawings. The easing softens the departure and arrival without
+            // skipping frames as the loop speeds up or slows down.
+            var t = (travel - PoseHold) / (1 - PoseHold);
+            var eased = t * t * (3 - 2 * t);
+            return startingFrame + Math.Min(FrameCount / 2 - 1,
+                (int)(eased * (FrameCount / 2)));
         }
 
         internal static double LoopDurationMs(double bpm)
@@ -36,9 +49,11 @@ namespace MusicBeePlugin
             var nativeLoopMs = FrameCount * FrameDurationMs;
             if (bpm >= 40 && bpm <= 240)
             {
-                // Frame 6 is the raised-arm side pose; frame 0 is the opposite
-                // side. A two-beat loop puts those poses one beat apart.
-                return 2 * 60000d / bpm;
+                // Fold fast tempos into a comfortable dance pace. Each side
+                // spans one, two, or four beats respectively.
+                var beatsPerLoop = bpm >= QuarterTimeFromBpm ? 8 :
+                    bpm >= HalfTimeFromBpm ? 4 : 2;
+                return beatsPerLoop * 60000d / bpm;
             }
             return nativeLoopMs;
         }
@@ -47,8 +62,9 @@ namespace MusicBeePlugin
         {
             var loop = LoopDurationMs(bpm);
             // At the beat the animation is halfway through its loop (frame 6).
-            // The next beat returns to frame 0. Floor keeps a fractional loop
-            // from putting the sampled beat just before frame 6.
+            // At higher tempos frame 0 arrives two or four beats later.
+            // Floor keeps a fractional loop from putting the sampled beat
+            // just before frame 6.
             var origin = (beatPositionMs - loop / 2) % loop;
             if (origin < 0) origin += loop;
             return (int)Math.Floor(origin);

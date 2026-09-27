@@ -2194,27 +2194,22 @@ namespace MusicBeePlugin
                     cached.DpiY == g.DpiY)
                     return cached;
 
-            var size = Math.Max(10f, Math.Min(points, height * 0.74f));
             var availableWidth = Math.Max(8f, width - 8f);
+            var fit = LyricTextLayout.Fit(g, lyric, selected, points, width, height);
+            var size = fit.Points;
             using (var format = new StringFormat(StringFormatFlags.NoWrap)
                    {
                        Alignment = StringAlignment.Center,
                        LineAlignment = StringAlignment.Center,
-                       Trimming = StringTrimming.EllipsisCharacter
+                       Trimming = fit.Lines == 1 ?
+                           StringTrimming.EllipsisCharacter : StringTrimming.None
                    })
             {
-                Font fitted = new Font(selected.FontFamily, size, selected.Style, GraphicsUnit.Point);
-                var measuredWidth = g.MeasureString(lyric, fitted).Width;
-                if (measuredWidth > availableWidth)
-                {
-                    size = Math.Max(10f, size * availableWidth / measuredWidth);
-                    fitted.Dispose();
-                    fitted = new Font(selected.FontFamily, size, selected.Style, GraphicsUnit.Point);
-                }
-                using (fitted)
+                using (var fitted = new Font(selected.FontFamily, size,
+                           selected.Style, GraphicsUnit.Point))
                 {
                     var path = new GraphicsPath();
-                    path.AddString(lyric, fitted.FontFamily, (int)fitted.Style,
+                    path.AddString(fit.Text, fitted.FontFamily, (int)fitted.Style,
                         fitted.SizeInPoints * g.DpiY / 72f,
                         new RectangleF(0, 0, width, height), format);
                     if (path.PointCount == 0)
@@ -2225,13 +2220,16 @@ namespace MusicBeePlugin
                     var glyphBounds = path.GetBounds();
                     // MeasureString includes different font padding from the
                     // actual outline. Check the outline too before caching it.
-                    if (glyphBounds.Width > availableWidth && size > 10f)
+                    if ((glyphBounds.Width > availableWidth ||
+                         glyphBounds.Height > height - 2f) && size > 10f)
                     {
-                        size = Math.Max(10f, size * availableWidth / glyphBounds.Width);
+                        size = Math.Max(10f, size * Math.Min(
+                            availableWidth / Math.Max(1f, glyphBounds.Width),
+                            Math.Max(1f, height - 2f) / Math.Max(1f, glyphBounds.Height)));
                         path.Reset();
                         using (var narrower = new Font(selected.FontFamily, size,
                                    selected.Style, GraphicsUnit.Point))
-                            path.AddString(lyric, narrower.FontFamily, (int)narrower.Style,
+                            path.AddString(fit.Text, narrower.FontFamily, (int)narrower.Style,
                                 narrower.SizeInPoints * g.DpiY / 72f,
                                 new RectangleF(0, 0, width, height), format);
                         glyphBounds = path.GetBounds();

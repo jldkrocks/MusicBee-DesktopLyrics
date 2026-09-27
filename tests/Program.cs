@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Reflection;
@@ -16,22 +17,41 @@ namespace MusicBeePlugin
             if (PartyAnimation.ReadBpm("120 BPM") != 120 ||
                 PartyAnimation.ReadBpm("96,5") != 96.5 ||
                 PartyAnimation.ReadBpm("unknown") != 0 ||
-                PartyAnimation.FrameAt(140, 0) != 1 ||
+                PartyAnimation.FrameAt(0, 0) != 0 ||
                 PartyAnimation.FrameAt(1680, 0) != 0 ||
-                PartyAnimation.FrameAt(750, 120) != 9 ||
-                PartyAnimation.FrameAt(1000, 120) != 0 ||
-                PartyAnimation.FrameAt(1000, 80) != 8 ||
-                PartyAnimation.FrameAt(1000, 160) != 4 ||
+                PartyAnimation.FrameAt(0, 120) != 0 ||
+                PartyAnimation.FrameAt(250, 120) != 0 ||
+                PartyAnimation.FrameAt(1000, 120) != 6 ||
+                PartyAnimation.FrameAt(1250, 120) != 6 ||
+                PartyAnimation.FrameAt(2000, 120) != 0 ||
+                PartyAnimation.FrameAt(750, 80) != 6 ||
                 Math.Abs(PartyAnimation.LoopDurationMs(80) - 1500) > 0.001 ||
-                Math.Abs(PartyAnimation.LoopDurationMs(160) - 750) > 0.001)
-                throw new Exception("Party dancers must cross sides on each beat.");
+                Math.Abs(PartyAnimation.LoopDurationMs(109) - 120000d / 109) > 0.001 ||
+                Math.Abs(PartyAnimation.LoopDurationMs(110) - 240000d / 110) > 0.001 ||
+                Math.Abs(PartyAnimation.LoopDurationMs(160) - 1500) > 0.001 ||
+                Math.Abs(PartyAnimation.LoopDurationMs(240) - 2000) > 0.001)
+                throw new Exception("Party dancers should hold each side and use half-time on fast tracks.");
+
+            for (var side = 0; side < 2; side++)
+            {
+                var seen = new bool[6];
+                for (var ms = side * 1000; ms < (side + 1) * 1000; ms += 5)
+                    seen[PartyAnimation.FrameAt(ms, 120) - side * 6] = true;
+                foreach (var frame in seen)
+                    if (!frame) throw new Exception("Travel must show every in-between drawing.");
+            }
 
             var beatOrigin = PartyAnimation.OriginForBeat(750, 120);
             if (PartyAnimation.FrameAt(750 - beatOrigin, 120) != 6 ||
-                PartyAnimation.FrameAt(1250 - beatOrigin, 120) != 0 ||
-                PartyAnimation.FrameAt(1750 - beatOrigin, 120) != 6 ||
+                PartyAnimation.FrameAt(1250 - beatOrigin, 120) == 0 ||
+                PartyAnimation.FrameAt(1750 - beatOrigin, 120) != 0 ||
+                PartyAnimation.FrameAt(2750 - beatOrigin, 120) != 6 ||
                 PartyAnimation.FrameAt(-PartyAnimation.OriginForBeat(0, 120), 120) != 6)
-                throw new Exception("The marked frame and opposite pose must alternate on beats.");
+                throw new Exception("Fast tracks must alternate sides every other beat.");
+            var slowBeatOrigin = PartyAnimation.OriginForBeat(750, 80);
+            if (PartyAnimation.FrameAt(750 - slowBeatOrigin, 80) != 6 ||
+                PartyAnimation.FrameAt(1500 - slowBeatOrigin, 80) != 0)
+                throw new Exception("Slower tracks must still alternate on successive beats.");
 
             var workArea = new Rectangle(0, 0, 1920, 1040);
             var monitors = new[] { new Rectangle(-1920, 0, 1920, 1040),
@@ -82,9 +102,9 @@ namespace MusicBeePlugin
             if (beat.Bpm != fixedBpm || beat.OriginMs != fixedOrigin)
                 throw new Exception("A song's tempo and animation phase must not wander or stutter.");
 
-            var manualOrigin = PartyAnimation.OriginForPhase(1234, 80, 0, 160);
+            var manualOrigin = PartyAnimation.OriginForPhase(1234, 80, 0, 120);
             if (PartyAnimation.FrameAt(1234, 80) !=
-                PartyAnimation.FrameAt(1234 - manualOrigin, 160))
+                PartyAnimation.FrameAt(1234 - manualOrigin, 120))
                 throw new Exception("Manual BPM adjustment must keep the current dance frame.");
             var tempoRoot = Path.Combine(Path.GetTempPath(),
                 "DesktopLyrics-Tempo-" + Guid.NewGuid().ToString("N"));
@@ -94,6 +114,7 @@ namespace MusicBeePlugin
                 tempoStore.Save("first.mp3", beat.Bpm, beat.OriginMs, false);
                 var loaded = new PartyTempoStore(tempoRoot).Load("first.mp3");
                 if (loaded == null || loaded.Manual || !loaded.TwoBeatPhase ||
+                    loaded.BeatPatternVersion != 2 ||
                     loaded.Bpm != beat.Bpm ||
                     loaded.OriginMs != beat.OriginMs ||
                     tempoStore.Load("second.mp3") != null)
@@ -116,6 +137,27 @@ namespace MusicBeePlugin
                 if (loaded == null || loaded.Bpm != 120 ||
                     loaded.OriginMs != PartyAnimation.OriginForBeat(0, 120))
                     throw new Exception("Older saved BPMs must keep their speed with a new beat phase.");
+
+                tempoStore.Save("last-release.mp3", 120, 500, false);
+                string oldPatternFile = null;
+                // Locate this particular file by its track URL, independent of
+                // directory ordering.
+                foreach (var file in Directory.GetFiles(Path.Combine(tempoRoot,
+                    "DesktopLyrics-PartyTempo"), "*.json"))
+                {
+                    if (JObject.Parse(File.ReadAllText(file))["TrackUrl"].ToString() ==
+                        "last-release.mp3") oldPatternFile = file;
+                }
+                if (oldPatternFile == null)
+                    throw new Exception("Could not locate the previous tempo entry.");
+                var oldPattern = JObject.Parse(File.ReadAllText(oldPatternFile));
+                oldPattern.Remove("BeatPatternVersion");
+                File.WriteAllText(oldPatternFile, oldPattern.ToString());
+                loaded = tempoStore.Load("last-release.mp3");
+                if (loaded == null || loaded.OriginMs !=
+                    PartyAnimation.OriginForBeat(0, 120) ||
+                    PartyAnimation.FrameAt(-loaded.OriginMs, loaded.Bpm) != 6)
+                    throw new Exception("Two-beat saves must retain their beat grid at half-time.");
             }
             finally
             {
@@ -166,6 +208,38 @@ namespace MusicBeePlugin
                 withBoth.Bounds.Bottom != withBoth.Preview.Bottom ||
                 LyricCardLayout.RequiredHeight(50, 30, 6, true) > lyricArea.Height)
                 throw new Exception("English must sit above a centred lyric with the next line below.");
+            using (var canvas = new Bitmap(1100, 200))
+            using (var graphics = Graphics.FromImage(canvas))
+            using (var font = new Font("Arial", 26, FontStyle.Bold))
+            {
+                var english = "A cry reflected brightly in someone's eyes, feelings carried " +
+                    "on the wind, wishes entrusted to the moon, living on with all " +
+                    "the strength we have, even today";
+                var longLine = LyricTextLayout.Fit(graphics, english, font,
+                    26, 960, 72);
+                var shortLine = LyricTextLayout.Fit(graphics, "The moon above",
+                    font, 26, 960, 72);
+                var cjk = "星が降る夜に君の声を思い出してもう一度遠い空を見上げた";
+                var unspaced = LyricTextLayout.Fit(graphics, cjk, font, 28, 360, 82);
+                if (longLine.Lines != 2 || !longLine.Text.Contains("\n") ||
+                    longLine.Points < 12 || shortLine.Lines != 1 ||
+                    unspaced.Lines != 2 ||
+                    unspaced.Text.Replace("\n", "") != cjk)
+                    throw new Exception("Long lyrics should wrap within their row without shrinking short lines.");
+                using (var format = new StringFormat(StringFormatFlags.NoWrap)
+                       { Alignment = StringAlignment.Center,
+                         LineAlignment = StringAlignment.Center })
+                using (var path = new GraphicsPath())
+                {
+                    path.AddString(longLine.Text, font.FontFamily, (int)font.Style,
+                        longLine.Points * graphics.DpiY / 72f,
+                        new RectangleF(0, 0, 960, 72), format);
+                    var bounds = path.GetBounds();
+                    if (bounds.Width > 952 || bounds.Height > 70 ||
+                        bounds.Height < longLine.Points * graphics.DpiY / 72f * 1.4f)
+                        throw new Exception("Wrapped lyric outlines must fit their card row.");
+                }
+            }
             Console.WriteLine("LRC parser checks passed.");
 
             const string romajiLrc = "[00:00.00] ...\n" +

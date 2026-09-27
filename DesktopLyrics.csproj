@@ -114,6 +114,7 @@
     <Compile Include="PartyLayout.cs" />
     <Compile Include="PartyDancerWindow.cs" />
     <Compile Include="LyricCardLayout.cs" />
+    <Compile Include="LyricTextLayout.cs" />
     <Compile Include="FrmEnglishImport.cs" />
     <Compile Include="EnglishImportDocument.cs" />
     <Compile Include="EnglishTranslationStore.cs" />

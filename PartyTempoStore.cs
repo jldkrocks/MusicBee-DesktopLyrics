@@ -13,6 +13,7 @@ namespace MusicBeePlugin
         public int OriginMs;
         public bool Manual;
         public bool TwoBeatPhase;
+        public int BeatPatternVersion;
     }
 
     // One small file per song avoids rewriting the main plugin settings while
@@ -45,6 +46,18 @@ namespace MusicBeePlugin
                 // phase. Keep the BPM, but start at the assumed beat at 0.
                 if (!entry.TwoBeatPhase)
                     entry.OriginMs = PartyAnimation.OriginForBeat(0, entry.Bpm);
+                else if (entry.BeatPatternVersion < 2 &&
+                         entry.Bpm >= PartyAnimation.HalfTimeFromBpm)
+                {
+                    // Earlier saves alternated sides on every beat. Rebuild
+                    // the onset from that two-beat loop so half-time keeps
+                    // the old beat grid instead of landing on an offbeat.
+                    var oldLoop = 2 * 60000d / entry.Bpm;
+                    var beat = (entry.OriginMs + oldLoop / 2) % oldLoop;
+                    if (beat > oldLoop / 2) beat -= oldLoop;
+                    entry.OriginMs = PartyAnimation.OriginForBeat(
+                        (int)Math.Round(beat), entry.Bpm);
+                }
                 return entry;
             }
             catch (Exception) { return null; } // Inaccessible or invalid cache.
@@ -64,7 +77,7 @@ namespace MusicBeePlugin
                 File.WriteAllText(temporary, JsonConvert.SerializeObject(new PartyTempoEntry
                 {
                     TrackUrl = trackUrl, Bpm = bpm, OriginMs = originMs,
-                    Manual = manual, TwoBeatPhase = true
+                    Manual = manual, TwoBeatPhase = true, BeatPatternVersion = 2
                 }), new UTF8Encoding(false));
                 if (File.Exists(filename)) File.Replace(temporary, filename, null);
                 else File.Move(temporary, filename);
