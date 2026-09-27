@@ -12,36 +12,37 @@ namespace MusicBeePlugin
         {
             public string Title;
             public string Artist;
+            public string FileUrl;
+            public int Index;
+            public int Offset;
         }
 
-        public static List<Track> Read(Plugin.MusicBeeApiInterface musicBee, int limit = 4)
+        public static List<Track> Read(Plugin.MusicBeeApiInterface musicBee,
+            int firstOffset = 1, int limit = 12)
         {
             var tracks = new List<Track>();
             if (musicBee.NowPlayingList_GetNextIndex == null ||
-                musicBee.NowPlayingList_GetFileTag == null) return tracks;
+                musicBee.NowPlayingList_GetListFileUrl == null) return tracks;
 
             try
             {
                 var current = musicBee.NowPlayingList_GetCurrentIndex == null ? -1 :
                     musicBee.NowPlayingList_GetCurrentIndex();
                 var seen = new HashSet<int>();
-                for (var offset = 1; offset <= limit; offset++)
+                for (var offset = firstOffset; offset < firstOffset + limit; offset++)
                 {
                     var index = musicBee.NowPlayingList_GetNextIndex(offset);
                     if (index < 0 || index == current || !seen.Add(index)) break;
-                    var title = musicBee.NowPlayingList_GetFileTag(index,
+                    var url = musicBee.NowPlayingList_GetListFileUrl(index);
+                    if (string.IsNullOrWhiteSpace(url)) break;
+                    var title = musicBee.NowPlayingList_GetFileTag?.Invoke(index,
                         Plugin.MetaDataType.TrackTitle);
-                    var artist = musicBee.NowPlayingList_GetFileTag(index,
+                    var artist = musicBee.NowPlayingList_GetFileTag?.Invoke(index,
                         Plugin.MetaDataType.Artist);
-                    if (string.IsNullOrWhiteSpace(title) &&
-                        musicBee.NowPlayingList_GetListFileUrl != null)
-                    {
-                        var url = musicBee.NowPlayingList_GetListFileUrl(index);
-                        if (!string.IsNullOrWhiteSpace(url))
-                            title = Path.GetFileNameWithoutExtension(url);
-                    }
-                    if (string.IsNullOrWhiteSpace(title)) continue;
-                    tracks.Add(new Track { Title = title.Trim(), Artist = artist?.Trim() ?? "" });
+                    if (string.IsNullOrWhiteSpace(title))
+                        title = Path.GetFileNameWithoutExtension(url);
+                    tracks.Add(new Track { Title = title.Trim(), Artist = artist?.Trim() ?? "",
+                        FileUrl = url, Index = index, Offset = offset });
                 }
             }
             catch (Exception)

@@ -38,7 +38,7 @@ namespace MusicBeePlugin
         private long _lastPaintRequest;
         private long _lastSpectrumSample;
         private long _lastQueueCheck;
-        private bool _movingOrResizing;
+        private volatile bool _movingOrResizing;
         private bool _useArtworkColors;
         private string _artworkTrackUrl;
         private int _artworkRequestId;
@@ -53,12 +53,27 @@ namespace MusicBeePlugin
         private string _songTitle = "", _songArtist = "";
         private Plugin.PlayState _playState = Plugin.PlayState.Undefined;
         private long _lastPlayStateCheck;
-        private Rectangle _previousButton, _playButton, _nextButton, _menuButton, _timingButton;
+        private Rectangle _previousButton, _playButton, _nextButton, _menuButton,
+            _timingButton, _lrcButton;
         private string _hoverButton;
         private long _queueNoticeStarted;
+        private string _queueNoticeText = "That's the end of the queue ♪";
+        private bool _queueEnded;
         private FrmTimingEditor _timingEditor;
+        private FrmLrcLibPicker _lrcPicker;
         private List<UpcomingQueue.Track> _queueTracks = new List<UpcomingQueue.Track>();
+        private readonly List<QueueHit> _queueHits = new List<QueueHit>();
+        private Rectangle _queueCard, _queueUpButton, _queueDownButton;
+        private int _queueScroll, _queueVisibleCount;
+        private bool _queueExhausted;
+        private string _hoverQueue;
         private readonly List<TextGeometry> _textGeometries = new List<TextGeometry>();
+
+        private sealed class QueueHit
+        {
+            public Rectangle Area;
+            public UpcomingQueue.Track Track;
+        }
 
         private sealed class TextGeometry : IDisposable
         {
@@ -75,7 +90,7 @@ namespace MusicBeePlugin
         private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
 
         public Form Form => this;
-        public bool IsAtEndOfQueue => _queueNoticeStarted != 0;
+        public bool IsAtEndOfQueue => _queueEnded;
         public bool HasQueueNotice => _queueNoticeStarted != 0 &&
             (Stopwatch.GetTimestamp() - _queueNoticeStarted) * 1000.0 /
                 Stopwatch.Frequency < QueueNoticeMs;
@@ -135,12 +150,10 @@ namespace MusicBeePlugin
             ResizeBegin += (sender, args) =>
             {
                 _movingOrResizing = true;
-                _animationTimer.Change(Timeout.Infinite, Timeout.Infinite);
             };
             ResizeEnd += (sender, args) =>
             {
                 _movingOrResizing = false;
-                if (Visible && !_animationDisposed) StartAnimation();
                 Invalidate();
             };
         }
@@ -176,7 +189,6 @@ namespace MusicBeePlugin
 
         private void AnimationClockTick(object state)
         {
-            if (_movingOrResizing) return;
             if (Interlocked.CompareExchange(ref _framePending, 1, 0) != 0) return;
             try
             {
@@ -184,7 +196,7 @@ namespace MusicBeePlugin
                 {
                     try
                     {
-                        if (IsDisposed || !Visible || _movingOrResizing) return;
+                        if (IsDisposed || !Visible) return;
                         var now = Stopwatch.GetTimestamp();
                         var elapsedMs = _lastFrameTimestamp == 0 ? 8.0 : Math.Min(50.0,
                             (now - _lastFrameTimestamp) * 1000.0 / Stopwatch.Frequency);
@@ -203,19 +215,23 @@ namespace MusicBeePlugin
                         }
                         if (_settings.ShowSongQueue &&
                             (_lastQueueCheck == 0 ||
-                             (now - _lastQueueCheck) * 1000.0 / Stopwatch.Frequency >= 5000))
+                             (now - _lastQueueCheck) * 1000.0 / Stopwatch.Frequency >= 12000))
                             RefreshQueue();
                         StepSpectrum(elapsedMs);
                         AdvancePalette();
                         // Keep transitions and live audio smooth, but do not
                         // repaint a paused, static window 120 times a second.
-                        if (_playState != Plugin.PlayState.Playing &&
+                        if (!_movingOrResizing && _playState != Plugin.PlayState.Playing &&
                             _transitionStarted == 0 && _paletteStarted == 0 &&
                             !HasQueueNotice && _lastPaintRequest != 0 &&
                             (now - _lastPaintRequest) * 1000.0 / Stopwatch.Frequency < 40)
                             return;
+                        if (_movingOrResizing && _lastPaintRequest != 0 &&
+                            (now - _lastPaintRequest) * 1000.0 / Stopwatch.Frequency < 16)
+                            return;
                         _lastPaintRequest = now;
                         Invalidate();
+                        if (_movingOrResizing) Update();
                     }
                     finally { Interlocked.Exchange(ref _framePending, 0); }
                 }));
@@ -262,6 +278,8 @@ namespace MusicBeePlugin
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Edit lyric timing…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenTimingEditor)));
+            menu.Items.Add("Find timed lyrics on LRCLIB…", null, (sender, args) =>
+                BeginInvoke(new Action(OpenLrcLibPicker)));
             menu.Items.Add("More settings…", null, (sender, args) =>
                 BeginInvoke(new Action(() => _openSettings?.Invoke())));
             return menu;
@@ -335,10 +353,21 @@ namespace MusicBeePlugin
             if (_timingEditor != null && !_timingEditor.IsDisposed &&
                 trackUrl != _timingEditor.TrackUrl)
                 _timingEditor.TrackChanged();
+            if (_lrcPicker != null && !_lrcPicker.IsDisposed &&
+                trackUrl != _lrcPicker.TrackUrl)
+                _lrcPicker.TrackChanged();
             _artworkTrackUrl = trackUrl;
-            if (trackChanged) RefreshQueue();
+            if (trackChanged)
+            {
+                _queueScroll = 0;
+                _queueTracks.Clear();
+                RefreshQueue();
+            }
             if (trackChanged && !string.IsNullOrWhiteSpace(trackUrl))
+            {
                 _queueNoticeStarted = 0;
+                _queueEnded = false;
+            }
             var request = Interlocked.Increment(ref _artworkRequestId);
             try
             {
@@ -433,9 +462,44 @@ namespace MusicBeePlugin
         public void RefreshQueue()
         {
             if (IsDisposed || !IsHandleCreated) return;
-            _queueTracks = UpcomingQueue.Read(_musicBee);
+            var previousCount = _queueTracks.Count;
+            _queueTracks = UpcomingQueue.Read(_musicBee, 1,
+                Math.Max(12, Math.Min(96, previousCount)));
+            _queueExhausted = _queueTracks.Count < Math.Max(12, Math.Min(96, previousCount));
+            _queueScroll = Math.Max(0, Math.Min(_queueScroll,
+                Math.Max(0, _queueTracks.Count - _queueVisibleCount)));
             _lastQueueCheck = Stopwatch.GetTimestamp();
             Invalidate();
+        }
+
+        private void LoadMoreQueue()
+        {
+            if (_queueExhausted || _queueTracks.Count >= 96) return;
+            var first = _queueTracks.Count == 0 ? 1 :
+                _queueTracks[_queueTracks.Count - 1].Offset + 1;
+            var count = Math.Min(12, 97 - first);
+            if (count <= 0) { _queueExhausted = true; return; }
+            var more = UpcomingQueue.Read(_musicBee, first, count);
+            foreach (var track in more)
+            {
+                if (_queueTracks.Exists(existing => existing.Index == track.Index))
+                {
+                    _queueExhausted = true;
+                    break;
+                }
+                _queueTracks.Add(track);
+            }
+            if (more.Count < count) _queueExhausted = true;
+        }
+
+        private void ScrollQueue(int lines)
+        {
+            if (_queueCard.IsEmpty || _queueVisibleCount == 0) return;
+            if (lines > 0 && _queueScroll + _queueVisibleCount + lines >= _queueTracks.Count)
+                LoadMoreQueue();
+            _queueScroll = Math.Max(0, Math.Min(_queueScroll + lines,
+                Math.Max(0, _queueTracks.Count - _queueVisibleCount)));
+            Invalidate(_queueCard);
         }
 
         private void SetPalette(ArtworkPalette target)
@@ -614,6 +678,9 @@ namespace MusicBeePlugin
 
         private void DrawUpcomingQueue(Graphics g, Rectangle bounds, int sideMargin)
         {
+            _queueHits.Clear();
+            _queueCard = _queueUpButton = _queueDownButton = Rectangle.Empty;
+            _queueVisibleCount = 0;
             if (!_settings.ShowSongQueue || sideMargin < 198 || bounds.Height < 265)
                 return;
             var top = _settings.ShowSongTitle ? 43 : 16;
@@ -621,6 +688,7 @@ namespace MusicBeePlugin
             var height = Math.Min(306, bounds.Height - top - bottom);
             var card = new Rectangle(bounds.Right - sideMargin + 13,
                 Math.Max(top, (bounds.Height - height) / 2), sideMargin - 27, height);
+            _queueCard = card;
             using (var path = RoundedRectangle(card, 12))
             using (var shade = new SolidBrush(Color.FromArgb(71, 10, 13, 25)))
             using (var border = new Pen(Color.FromArgb(43, _palette.Border)))
@@ -646,19 +714,54 @@ namespace MusicBeePlugin
                     return;
                 }
 
-                var visible = Math.Min(_queueTracks.Count, Math.Min(4, (height - 43) / 55));
+                var visible = Math.Min(4, (height - 43) / 55);
+                _queueVisibleCount = visible;
+                _queueScroll = Math.Max(0, Math.Min(_queueScroll,
+                    Math.Max(0, _queueTracks.Count - visible)));
+                if (_queueTracks.Count > visible || !_queueExhausted)
+                {
+                    _queueUpButton = new Rectangle(card.Right - 48, card.Top + 11, 17, 19);
+                    _queueDownButton = new Rectangle(card.Right - 27, card.Top + 11, 17, 19);
+                    using (var arrows = new SolidBrush(Color.FromArgb(150, 214, 220, 235)))
+                    {
+                        g.DrawString("▲", artistFont, arrows, _queueUpButton, format);
+                        g.DrawString("▼", artistFont, arrows, _queueDownButton, format);
+                    }
+                }
                 for (var i = 0; i < visible; i++)
                 {
                     var y = card.Top + 42 + i * 55;
-                    var track = _queueTracks[i];
+                    var index = _queueScroll + i;
+                    if (index >= _queueTracks.Count) break;
+                    var track = _queueTracks[index];
+                    var hit = new Rectangle(card.Left + 5, y - 2, card.Width - 16, 51);
+                    _queueHits.Add(new QueueHit { Area = hit, Track = track });
+                    if (_hoverQueue == track.Offset.ToString())
+                        using (var highlight = new SolidBrush(Color.FromArgb(34, _palette.Border)))
+                            g.FillRectangle(highlight, hit);
                     g.DrawString(track.Title, titleFont, titleBrush,
-                        new RectangleF(card.Left + 14, y, card.Width - 28, 25), format);
+                        new RectangleF(card.Left + 14, y, card.Width - 34, 25), format);
                     if (!string.IsNullOrWhiteSpace(track.Artist))
                         g.DrawString(track.Artist, artistFont, artistBrush,
-                            new RectangleF(card.Left + 14, y + 24, card.Width - 28, 19), format);
-                    if (i < visible - 1)
+                            new RectangleF(card.Left + 14, y + 24, card.Width - 34, 19), format);
+                    if (i < visible - 1 && index + 1 < _queueTracks.Count)
                         g.DrawLine(separator, card.Left + 14, y + 51,
-                            card.Right - 14, y + 51);
+                            card.Right - 18, y + 51);
+                }
+                if (_queueTracks.Count > visible)
+                {
+                    var rail = new Rectangle(card.Right - 9, card.Top + 45, 3,
+                        Math.Min(height - 55, visible * 55 - 7));
+                    var thumbHeight = Math.Max(20, rail.Height * visible / _queueTracks.Count);
+                    var maxScroll = _queueTracks.Count - visible;
+                    var thumbTop = rail.Top + (rail.Height - thumbHeight) *
+                        _queueScroll / maxScroll;
+                    using (var railBrush = new SolidBrush(Color.FromArgb(32, _palette.Border)))
+                    using (var thumb = new SolidBrush(Color.FromArgb(139, _palette.Border)))
+                    {
+                        g.FillRectangle(railBrush, rail);
+                        g.FillRectangle(thumb, rail.Left, thumbTop, rail.Width, thumbHeight);
+                    }
                 }
             }
         }
@@ -761,6 +864,7 @@ namespace MusicBeePlugin
             DrawSongTitle(g, bounds);
             DrawTransport(g, bounds);
             DrawTimingButton(g, bounds);
+            DrawLrcButton(g, bounds);
             DrawMenuButton(g, bounds);
         }
 
@@ -828,11 +932,21 @@ namespace MusicBeePlugin
                        Trimming = StringTrimming.EllipsisCharacter
                    })
                 g.DrawString(text, font, brush,
-                    new RectangleF(120, 7, Math.Max(1, bounds.Width - 240), 29), format);
+                    new RectangleF(120, 7, Math.Max(1, bounds.Width - 330), 29), format);
         }
 
         public void ShowEndOfQueue()
         {
+            _queueEnded = true;
+            _queueNoticeText = "That's the end of the queue ♪";
+            _queueNoticeStarted = Stopwatch.GetTimestamp();
+            Invalidate();
+        }
+
+        private void ShowQueueFeedback(string message)
+        {
+            _queueEnded = false;
+            _queueNoticeText = message;
             _queueNoticeStarted = Stopwatch.GetTimestamp();
             Invalidate();
         }
@@ -860,7 +974,7 @@ namespace MusicBeePlugin
             {
                 g.FillPath(background, path);
                 g.DrawPath(border, path);
-                g.DrawString("That's the end of the queue ♪", font, text, notice, format);
+                g.DrawString(_queueNoticeText, font, text, notice, format);
             }
         }
 
@@ -983,6 +1097,73 @@ namespace MusicBeePlugin
             }
         }
 
+        private void DrawLrcButton(Graphics g, Rectangle bounds)
+        {
+            _lrcButton = new Rectangle(bounds.Right - 198, 7, 74, 29);
+            var active = _lrcPicker != null && !_lrcPicker.IsDisposed;
+            using (var path = RoundedRectangle(_lrcButton, 8))
+            using (var shade = new SolidBrush(Color.FromArgb(active ? 150 :
+                       _hoverButton == "lrclib" ? 100 : 54, 20, 38, 58)))
+            using (var pen = new Pen(Color.FromArgb(active ? 220 : 135, _palette.Border)))
+            using (var font = new Font("Segoe UI", 8.5f, FontStyle.Bold))
+            using (var brush = new SolidBrush(Color.FromArgb(230, 238, 242, 249)))
+            using (var format = new StringFormat
+                   { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+            {
+                g.FillPath(shade, path);
+                g.DrawPath(pen, path);
+                g.DrawString("LRCLIB", font, brush, _lrcButton, format);
+            }
+        }
+
+        private void OpenLrcLibPicker()
+        {
+            if (_lrcPicker != null && !_lrcPicker.IsDisposed)
+            {
+                _lrcPicker.BringToFront();
+                return;
+            }
+            FrmLrcLibPicker picker = null;
+            try
+            {
+                var trackUrl = _musicBee.NowPlaying_GetFileUrl();
+                if (string.IsNullOrWhiteSpace(trackUrl))
+                {
+                    MessageBox.Show(this, "Play a song first.", "Find timed lyrics",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                var title = _musicBee.NowPlaying_GetFileTag(Plugin.MetaDataType.TrackTitle) ?? "";
+                var artist = _musicBee.NowPlaying_GetFileTag(Plugin.MetaDataType.Artist) ?? "";
+                if (string.IsNullOrWhiteSpace(title))
+                {
+                    MessageBox.Show(this, "MusicBee needs a song title to search LRCLIB.",
+                        "Find timed lyrics", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                var duration = _musicBee.NowPlaying_GetDuration?.Invoke() ?? 0;
+                var tag = _musicBee.Library_GetFileTag?.Invoke(trackUrl,
+                    Plugin.MetaDataType.Lyrics);
+                picker = new FrmLrcLibPicker(_musicBee, trackUrl, title, artist,
+                    duration, tag, _savedTiming);
+                _lrcPicker = picker;
+                picker.FormClosed += (sender, args) =>
+                {
+                    if (ReferenceEquals(_lrcPicker, picker)) _lrcPicker = null;
+                    if (!IsDisposed) Invalidate();
+                };
+                picker.Show(this);
+                Invalidate();
+            }
+            catch (Exception ex)
+            {
+                if (ReferenceEquals(_lrcPicker, picker)) _lrcPicker = null;
+                picker?.Dispose();
+                MessageBox.Show(this, "Could not open LRCLIB search: " + ex.Message,
+                    "Find timed lyrics", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
         private void OpenTimingEditor()
         {
             if (_timingEditor != null && !_timingEditor.IsDisposed)
@@ -1034,13 +1215,25 @@ namespace MusicBeePlugin
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            string queueHit = null;
+            foreach (var hit in _queueHits)
+                if (hit.Area.Contains(e.Location))
+                {
+                    queueHit = hit.Track.Offset.ToString();
+                    break;
+                }
             var hit = _menuButton.Contains(e.Location) ? "menu" :
                 _timingButton.Contains(e.Location) ? "timing" :
+                _lrcButton.Contains(e.Location) ? "lrclib" :
                 _previousButton.Contains(e.Location) ? "previous" :
                 _playButton.Contains(e.Location) ? "play" :
-                _nextButton.Contains(e.Location) ? "next" : null;
-            if (hit == _hoverButton) return;
+                _nextButton.Contains(e.Location) ? "next" :
+                !_queueUpButton.IsEmpty && _queueUpButton.Contains(e.Location) ? "queue-up" :
+                !_queueDownButton.IsEmpty && _queueDownButton.Contains(e.Location) ? "queue-down" :
+                queueHit == null ? null : "queue";
+            if (hit == _hoverButton && queueHit == _hoverQueue) return;
             _hoverButton = hit;
+            _hoverQueue = queueHit;
             Cursor = hit == null ? Cursors.Default : Cursors.Hand;
             Invalidate();
         }
@@ -1049,14 +1242,37 @@ namespace MusicBeePlugin
         {
             base.OnMouseLeave(e);
             _hoverButton = null;
+            _hoverQueue = null;
             Cursor = Cursors.Default;
             Invalidate();
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            if (_queueCard.Contains(e.Location))
+                ScrollQueue(-Math.Sign(e.Delta) * Math.Max(1, Math.Abs(e.Delta) / 120));
         }
 
         protected override void OnMouseClick(MouseEventArgs e)
         {
             base.OnMouseClick(e);
             if (e.Button != MouseButtons.Left) return;
+            if (_queueUpButton.Contains(e.Location)) { ScrollQueue(-1); return; }
+            if (_queueDownButton.Contains(e.Location)) { ScrollQueue(1); return; }
+            foreach (var hit in _queueHits)
+            {
+                if (!hit.Area.Contains(e.Location)) continue;
+                string error;
+                if (QueueNavigation.TryPlayQueuedTrack(_musicBee, hit.Track, out error))
+                {
+                    _queueEnded = false;
+                    _queueNoticeStarted = 0;
+                    RefreshQueue();
+                }
+                else ShowQueueFeedback(error);
+                return;
+            }
             if (_menuButton.Contains(e.Location))
             {
                 _flyoutMenu.Show(this, new Point(_menuButton.Right, _menuButton.Bottom),
@@ -1066,6 +1282,11 @@ namespace MusicBeePlugin
             if (_timingButton.Contains(e.Location))
             {
                 OpenTimingEditor();
+                return;
+            }
+            if (_lrcButton.Contains(e.Location))
+            {
+                OpenLrcLibPicker();
                 return;
             }
             try
@@ -1273,6 +1494,8 @@ namespace MusicBeePlugin
                 ClearTextGeometries();
                 if (_timingEditor != null && !_timingEditor.IsDisposed)
                     _timingEditor.ForceClose();
+                if (_lrcPicker != null && !_lrcPicker.IsDisposed)
+                    _lrcPicker.Close();
                 _flyoutMenu?.Dispose();
             }
             base.Dispose(disposing);

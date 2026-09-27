@@ -115,6 +115,9 @@
     <Compile Include="TimingTagStore.cs" />
     <Compile Include="QueueNavigation.cs" />
     <Compile Include="UpcomingQueue.cs" />
+    <Compile Include="LrcLibClient.cs" />
+    <Compile Include="ImportedLyricsTagStore.cs" />
+    <Compile Include="FrmLrcLibPicker.cs" />
     <Compile Include="LyricsController.cs" />
     <Compile Include="LyricsRenderer.cs" />
     <Compile Include="MusicBeeInterface.cs" />

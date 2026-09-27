@@ -12,6 +12,9 @@
     <Reference Include="System" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+    <PackageReference Include="Newtonsoft.Json">
+      <Version>13.0.1</Version>
+    </PackageReference>
     <Compile Include="..\ArtworkPalette.cs"><Link>ArtworkPalette.cs</Link></Compile>
     <Compile Include="..\LyricParser.cs"><Link>LyricParser.cs</Link></Compile>
     <Compile Include="..\LrcTimingDocument.cs"><Link>LrcTimingDocument.cs</Link></Compile>
@@ -21,6 +24,9 @@
     <Compile Include="..\MusicBeeInterface.cs"><Link>MusicBeeInterface.cs</Link></Compile>
     <Compile Include="..\QueueNavigation.cs"><Link>QueueNavigation.cs</Link></Compile>
     <Compile Include="..\UpcomingQueue.cs"><Link>UpcomingQueue.cs</Link></Compile>
+    <Compile Include="..\LrcLibClient.cs"><Link>LrcLibClient.cs</Link></Compile>
+    <Compile Include="..\ImportedLyricsTagStore.cs"><Link>ImportedLyricsTagStore.cs</Link></Compile>
+    <Compile Include="..\FrmLrcLibPicker.cs"><Link>FrmLrcLibPicker.cs</Link></Compile>
     <Compile Include="Program.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

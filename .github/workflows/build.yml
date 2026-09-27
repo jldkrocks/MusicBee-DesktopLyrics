@@ -20,12 +20,13 @@ jobs:
         run: msbuild DesktopLyrics.sln /p:Configuration=Release '/p:Platform=Any CPU'
       - name: Check lyrics, timing edits, queue and artwork palette
         run: |
+          msbuild tests/ParserSmoke.csproj /t:Restore /p:Configuration=Release
           msbuild tests/ParserSmoke.csproj /p:Configuration=Release
           & .\tests\bin\Release\ParserSmoke.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
-          name: DesktopLyrics-1.13.0.0
+          name: DesktopLyrics-1.14.0.0
           path: |
             bin/Release/mb_DesktopLyrics.dll
             pkg/*.zip

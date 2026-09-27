@@ -181,7 +181,8 @@ namespace MusicBeePlugin
                 NowPlayingList_GetFileTag = (index, field) =>
                     field == Plugin.MetaDataType.Artist ? "Artist " + index :
                     index == 10 ? "Queued first" : null,
-                NowPlayingList_GetListFileUrl = index => @"C:\Music\Other title.mp3"
+                NowPlayingList_GetListFileUrl = index => index == 10 ?
+                    @"C:\Music\Queued first.mp3" : @"C:\Music\Other title.mp3"
             };
             var queue = UpcomingQueue.Read(upcoming);
             if (queue.Count != 2 || queue[0].Title != "Queued first" ||
@@ -190,7 +191,75 @@ namespace MusicBeePlugin
             upcoming.NowPlayingList_GetNextIndex = offset => offset == 1 ? 5 : 7;
             if (UpcomingQueue.Read(upcoming).Count != 0)
                 throw new Exception("The current track must not appear in the upcoming queue.");
+            upcoming.NowPlayingList_GetNextIndex = offset =>
+                offset == 1 ? 10 : offset == 2 ? 7 : -1;
+            var page = UpcomingQueue.Read(upcoming, 2, 1);
+            if (page.Count != 1 || page[0].Index != 7 || page[0].Offset != 2)
+                throw new Exception("Scrolling must fetch the correct queue position.");
+            var played = "";
+            upcoming.NowPlaying_GetFileUrl = () => @"C:\Music\Current.mp3";
+            upcoming.NowPlayingList_PlayNow = url => { played = url; return true; };
+            string queueError;
+            if (!QueueNavigation.TryPlayQueuedTrack(upcoming, page[0], out queueError) ||
+                played != page[0].FileUrl)
+                throw new Exception("Clicking a queue song must play that file: " + queueError);
+            upcoming.NowPlayingList_GetNextIndex = offset =>
+                offset == 1 ? 10 : offset == 2 ? 9 : -1;
+            if (QueueNavigation.TryPlayQueuedTrack(upcoming, page[0], out queueError))
+                throw new Exception("A stale queue row must not play a different song.");
+            upcoming.NowPlayingList_GetNextIndex = offset =>
+                offset == 1 ? 10 : offset == 2 ? 7 : -1;
+            upcoming.NowPlayingList_GetListFileUrl = index => @"C:\Music\Repeat.mp3";
+            var repeated = UpcomingQueue.Read(upcoming, 2, 1)[0];
+            if (QueueNavigation.TryPlayQueuedTrack(upcoming, repeated, out queueError) ||
+                !queueError.Contains("duplicate"))
+                throw new Exception("MusicBee cannot address the second copy of a queued file.");
             Console.WriteLine("Upcoming queue checks passed.");
+
+            var searchJson = "[{\"id\":1,\"trackName\":\"Anytime Anywhere\",\"artistName\":\"milet\",\"duration\":50," +
+                "\"syncedLyrics\":\"[00:01.00] Short\"},{\"id\":2,\"trackName\":\"Anytime Anywhere\"," +
+                "\"artistName\":\"milet\",\"duration\":230,\"syncedLyrics\":\"[00:01.00] Correct\"}," +
+                "{\"id\":3,\"duration\":225,\"plainLyrics\":\"No timings\"}]";
+            var records = LrcLibClient.SortByDuration(LrcLibClient.ParseResults(searchJson), 230000);
+            if (records.Count != 3 || records[0].Id != 2 || !records[0].HasTimedLyrics ||
+                records[1].HasTimedLyrics || LrcLibClient.RetryDelay("12").TotalSeconds != 12)
+                throw new Exception("LRCLIB results must show the matching timed version first and honor Retry-After.");
+            var importedTag = "[00:01.00] Previous";
+            var importApi = new Plugin.MusicBeeApiInterface
+            {
+                NowPlaying_GetFileUrl = () => "track.mp3",
+                Library_GetFileTag = (url, field) => importedTag,
+                Library_SetFileTag = (url, field, text) =>
+                {
+                    if (field != Plugin.MetaDataType.Lyrics || url != "track.mp3")
+                        throw new Exception("Import must only change this song's Lyrics field.");
+                    importedTag = text;
+                    return true;
+                },
+                Library_CommitTagsToFile = url => true,
+                MB_RefreshPanels = () => { }
+            };
+            string importError;
+            if (!ImportedLyricsTagStore.Save(importApi, "track.mp3", importedTag,
+                    records[0].SyncedLyrics, out importError) ||
+                importedTag != records[0].SyncedLyrics)
+                throw new Exception("Timed lyrics must save in MusicBee's Lyrics field: " + importError);
+            if (ImportedLyricsTagStore.Save(importApi, "track.mp3", "stale",
+                    "[00:02.00] Wrong", out importError) ||
+                importedTag != records[0].SyncedLyrics)
+                throw new Exception("Import must not overwrite a tag changed since search opened.");
+            importApi.Library_CommitTagsToFile = url => false;
+            if (ImportedLyricsTagStore.Save(importApi, "track.mp3", importedTag,
+                    "[00:02.00] Failed", out importError) ||
+                importedTag != records[0].SyncedLyrics)
+                throw new Exception("A failed MusicBee commit must restore the old Lyrics field.");
+            using (var picker = new FrmLrcLibPicker(importApi, "track.mp3",
+                "Anytime Anywhere", "milet", 230000, importedTag, (url, text) => { }))
+            {
+                if (picker.TrackUrl != "track.mp3")
+                    throw new Exception("The LRCLIB picker must remain tied to the selected song.");
+            }
+            Console.WriteLine("LRCLIB import checks passed.");
 
             var imagePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".png");
             try
