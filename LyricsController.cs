@@ -22,8 +22,13 @@ namespace MusicBeePlugin
         private LyricParser.Lyrics _englishLyrics;
         private string[] _englishLines;
 
-        public LyricsController(Plugin.MusicBeeApiInterface @interface,
-            EnglishTranslationStore englishStore = null)
+        public LyricsController(Plugin.MusicBeeApiInterface @interface)
+            : this(@interface, null)
+        {
+        }
+
+        internal LyricsController(Plugin.MusicBeeApiInterface @interface,
+            EnglishTranslationStore englishStore)
         {
             _interface = @interface;
             _englishStore = englishStore;
