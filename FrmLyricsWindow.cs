@@ -359,11 +359,20 @@ namespace MusicBeePlugin
                 BeginInvoke(new Action(OpenPartyTempoEditor)));
             menu.Items.Add("Online Party BPM…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyOnlineSettings)));
+            var retryOnline = menu.Items.Add("Retry online BPM for this song", null,
+                (sender, args) => BeginInvoke(new Action(() => StartPartyOnlineLookup(true))));
             menu.Opening += (sender, args) =>
             {
                 timingAction.Visible = _timingButton.IsEmpty;
                 lrcAction.Visible = _lrcButton.IsEmpty;
                 tempoAction.Enabled = !string.IsNullOrWhiteSpace(_artworkTrackUrl);
+                var savedTempo = !string.IsNullOrWhiteSpace(_artworkTrackUrl) ?
+                    _partyTempoStore.Load(_artworkTrackUrl) : null;
+                retryOnline.Enabled = _settings.PartyMode &&
+                    !string.IsNullOrWhiteSpace(_partyApiKey) &&
+                    !string.IsNullOrWhiteSpace(_artworkTrackUrl) &&
+                    _partyTagBpm == 0 && (savedTempo == null ||
+                    (!savedTempo.Manual && !savedTempo.Online));
             };
             menu.Items.Add("More settings…", null, (sender, args) =>
                 BeginInvoke(new Action(() => _openSettings?.Invoke())));
@@ -546,8 +555,9 @@ namespace MusicBeePlugin
                 var explanation = new Label
                 {
                     Text = _partyLookupError ??
-                        "On each song, Party mode searches for a matching artist and title. " +
-                        "Manual BPM and song tags still take priority. Unmatched songs are left for manual adjustment.",
+                        "Party mode tries artist and title, then a title-only search checked " +
+                        "against the artist. A missing or ambiguous catalog entry can still " +
+                        "show NO MATCH; use Retry online BPM or Adjust Party BPM for that song.",
                     Bounds = new Rectangle(16, 79, 388, 68)
                 };
                 var credit = new LinkLabel

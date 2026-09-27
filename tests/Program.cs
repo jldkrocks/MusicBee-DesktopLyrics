@@ -188,6 +188,38 @@ namespace MusicBeePlugin
                 GetSongBpmClient.MatchTempo(bpmResults, "~Asterisk~", "Other Artist", "Natural") != 0 ||
                 GetSongBpmClient.MatchTempo("{\"search\":[]}", "~Asterisk~", "ORANGE RANGE", "") != 0)
                 throw new Exception("Online BPM must require a confident artist, title and version match.");
+            var shorterTitle = "{\"search\":[{\"title\":\"Cafe\",\"tempo\":113," +
+                "\"artist\":[{\"name\":\"Lead Artist\"}]," +
+                "\"album\":[{\"title\":\"Other\"},{\"title\":\"Record\"}]}," +
+                "{\"title\":\"Cafe\",\"tempo\":118," +
+                "\"artist\":{\"name\":\"Lead Artist\"}," +
+                "\"album\":{\"title\":\"Another Record\"}}]}";
+            if (GetSongBpmClient.MatchTempo(shorterTitle, "Café (feat. Guest)",
+                    "Lead Artist feat. Guest", "Record") != 113 ||
+                GetSongBpmClient.MatchTempo(shorterTitle, "Café - 2011 Remaster",
+                    "Lead Artist; Guest", "Record") != 113 ||
+                GetSongBpmClient.MatchTempo(shorterTitle, "Café",
+                    "Lead Artist", "") != 0 ||
+                GetSongBpmClient.MatchTempo(shorterTitle, "Café (Live)",
+                    "Lead Artist", "") != 0 ||
+                GetSongBpmClient.MatchTempo(shorterTitle, "Café (Remix)",
+                    "Lead Artist", "") != 0 ||
+                GetSongBpmClient.MatchTempo(shorterTitle, "Café feat. Guest - Live",
+                    "Lead Artist", "") != 0 ||
+                GetSongBpmClient.MatchTempo(shorterTitle, "Café (feat. Guest)",
+                    "Another Artist feat. Guest", "") != 0)
+                throw new Exception("Fallback matches must allow tag formatting without changing the recording or artist.");
+            var otherFeature = "{\"search\":[{\"title\":\"Cafe (feat. Other)\"," +
+                "\"tempo\":113,\"artist\":{\"name\":\"Lead Artist\"}}]}";
+            if (GetSongBpmClient.MatchTempo(otherFeature, "Café (feat. Guest)",
+                    "Lead Artist", "") != 0)
+                throw new Exception("Different featured versions need review.");
+            var searches = GetSongBpmClient.BuildQueries("Café (feat. Guest)",
+                "Lead Artist feat. Guest");
+            if (searches.Count != 3 || searches[0].Item1 != "both" ||
+                searches[1].Item2 != "song:Café artist:Lead Artist" ||
+                searches[2].Item1 != "song" || searches[2].Item2 != "Café")
+                throw new Exception("Try a cleaned combined search before a broader title search.");
 
             const string lrc = "[00:09.68] First line\n" +
                                "[00:17.30] \n" +
