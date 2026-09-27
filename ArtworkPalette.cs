@@ -44,7 +44,16 @@ namespace MusicBeePlugin
 
         public static bool TryLoad(string artworkPath, out ArtworkPalette palette)
         {
+            Bitmap cover;
+            var loaded = TryLoad(artworkPath, out palette, out cover);
+            cover?.Dispose();
+            return loaded;
+        }
+
+        public static bool TryLoad(string artworkPath, out ArtworkPalette palette, out Bitmap cover)
+        {
             palette = Default;
+            cover = null;
             if (string.IsNullOrWhiteSpace(artworkPath)) return false;
             try
             {
@@ -52,19 +61,22 @@ namespace MusicBeePlugin
                 {
                     var comma = artworkPath.IndexOf(',');
                     if (comma < 0) return false;
-                    return TryLoad(Convert.FromBase64String(artworkPath.Substring(comma + 1)), out palette);
+                    return TryLoad(Convert.FromBase64String(artworkPath.Substring(comma + 1)), out palette, out cover);
                 }
+                if (artworkPath.Length > 512 && artworkPath.IndexOf(':') < 0 &&
+                    artworkPath.IndexOf('\\') < 0)
+                    return TryLoad(Convert.FromBase64String(artworkPath), out palette, out cover);
                 Uri uri;
                 if (Uri.TryCreate(artworkPath, UriKind.Absolute, out uri) && uri.IsFile)
                     artworkPath = uri.LocalPath;
                 if (File.Exists(artworkPath))
                 {
                     using (var image = Image.FromFile(artworkPath))
-                        return TryCreate(image, out palette);
+                        return TryCreate(image, out palette, out cover);
                 }
                 // Older MusicBee artwork methods can return an encoded image.
                 if (artworkPath.Length > 64)
-                    return TryLoad(Convert.FromBase64String(artworkPath), out palette);
+                    return TryLoad(Convert.FromBase64String(artworkPath), out palette, out cover);
                 return false;
             }
             catch (Exception) { return false; }
@@ -72,20 +84,30 @@ namespace MusicBeePlugin
 
         public static bool TryLoad(byte[] artworkData, out ArtworkPalette palette)
         {
+            Bitmap cover;
+            var loaded = TryLoad(artworkData, out palette, out cover);
+            cover?.Dispose();
+            return loaded;
+        }
+
+        public static bool TryLoad(byte[] artworkData, out ArtworkPalette palette, out Bitmap cover)
+        {
             palette = Default;
+            cover = null;
             if (artworkData == null || artworkData.Length == 0) return false;
             try
             {
                 using (var stream = new MemoryStream(artworkData, false))
                 using (var image = Image.FromStream(stream))
-                    return TryCreate(image, out palette);
+                    return TryCreate(image, out palette, out cover);
             }
             catch (Exception) { return false; }
         }
 
-        private static bool TryCreate(Image image, out ArtworkPalette palette)
+        private static bool TryCreate(Image image, out ArtworkPalette palette, out Bitmap cover)
         {
             palette = Default;
+            cover = null;
             using (var thumbnail = new Bitmap(48, 48))
             {
                 using (var graphics = Graphics.FromImage(thumbnail))
@@ -152,6 +174,20 @@ namespace MusicBeePlugin
                     BarBottom = Mix(second, Color.White, 0.18f),
                     Border = Mix(first, Color.White, 0.35f)
                 };
+                var thumbnailCover = new Bitmap(256, 256);
+                try
+                {
+                    using (var graphics = Graphics.FromImage(thumbnailCover))
+                    {
+                        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        var crop = Math.Min(image.Width, image.Height);
+                        graphics.DrawImage(image, new Rectangle(0, 0, 256, 256),
+                            (image.Width - crop) / 2, (image.Height - crop) / 2,
+                            crop, crop, GraphicsUnit.Pixel);
+                    }
+                }
+                catch (Exception) { thumbnailCover.Dispose(); throw; }
+                cover = thumbnailCover;
                 return true;
 
                 Color Average(int bin)

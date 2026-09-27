@@ -64,6 +64,7 @@ namespace MusicBeePlugin
         public bool Configure(IntPtr panelHandle)
         {
             var settingsForm = new FrmSettings(_settings);
+            settingsForm.TopMost = _frmLyrics is FrmLyricsWindow;
             settingsForm.ShowWindowRequested += (sender, args) => ShowLyricsWindow();
             settingsForm.SettingsChanged += (sender, settings) =>
             {
@@ -164,6 +165,16 @@ namespace MusicBeePlugin
                         {
                             _settings.HideOnStartup = false;
                             _settings.WindowCloseRecoveryApplied = true;
+                            SaveSettings(_settings);
+                        }
+
+                        if (!_settings.WindowFeaturesPreferenceSet)
+                        {
+                            _settings.ShowTransportControls = true;
+                            _settings.ShowSongTitle = true;
+                            _settings.ShowAlbumArt = true;
+                            _settings.ShowVisualizer = true;
+                            _settings.WindowFeaturesPreferenceSet = true;
                             SaveSettings(_settings);
                         }
 
@@ -321,7 +332,8 @@ namespace MusicBeePlugin
                 _frmLyrics = null;
                 previous?.Form.Dispose();
                 var view = _settings.CompactWindow
-                    ? (IDesktopLyricsView)new FrmLyricsWindow(_settings, _mbApiInterface)
+                    ? (IDesktopLyricsView)new FrmLyricsWindow(_settings, _mbApiInterface,
+                        WindowSettingsChanged, () => Configure(IntPtr.Zero))
                     : new FrmLyrics(_settings);
                 _frmLyrics = view;
                 view.Form.FormClosed += (sender, args) =>
@@ -342,6 +354,13 @@ namespace MusicBeePlugin
                     _mbApiInterface.MB_Trace(e.ToString());
                 }
             }));
+        }
+
+        private void WindowSettingsChanged(SettingsObj settings)
+        {
+            _lyricsCtrl.NextLineWhenNoTranslation = settings.NextLineWhenNoTranslation;
+            SaveSettings(settings);
+            UpdateLyrics(force: true);
         }
 
         private void TimerTick(object sender, ElapsedEventArgs args)

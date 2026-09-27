@@ -25,6 +25,8 @@ The compact visualizer window is enabled by default on upgrade. You can also swi
 
 If you close the visualizer with **X**, choose **View → Desktop Lyrics** to reopen it, or use **Show lyrics window** in the plugin settings. Closing with X is temporary and the window returns on the next MusicBee launch. Using the View menu to turn Desktop Lyrics off remains a saved preference.
 
+The window can show a small song title at the top, cover art beside the lyrics, and previous, play/pause, and next controls at the bottom. The middle button changes between pause and play as playback changes. Open the three-line menu in the upper right (or right-click the window) to toggle the title, cover art, playback controls, spectrum, artwork colours, and next-lyric preview. **More settings…** opens the font and other plugin settings from the window. These choices are saved for the next MusicBee launch. The lyric panel now slides and fades with the text.
+
 # Chinese version
 
 ## MusicBee 桌面歌词

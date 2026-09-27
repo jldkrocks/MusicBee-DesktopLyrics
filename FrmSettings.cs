@@ -202,6 +202,11 @@ namespace MusicBeePlugin
         public bool CompactWindowPreferenceSet;
         public bool UseArtworkColors;
         public bool ArtworkColorsPreferenceSet;
+        public bool ShowTransportControls;
+        public bool ShowSongTitle;
+        public bool ShowAlbumArt;
+        public bool ShowVisualizer;
+        public bool WindowFeaturesPreferenceSet;
         public int WindowPosX = -1;
         public int WindowPosY = -1;
         public int WindowWidth = 760;
@@ -229,6 +234,11 @@ namespace MusicBeePlugin
                 UseArtworkColors = true,
                 ArtworkColorsPreferenceSet = true,
                 WindowCloseRecoveryApplied = true,
+                ShowTransportControls = true,
+                ShowSongTitle = true,
+                ShowAlbumArt = true,
+                ShowVisualizer = true,
+                WindowFeaturesPreferenceSet = true,
             };
         }
     }

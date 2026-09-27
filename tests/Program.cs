@@ -47,9 +47,17 @@ namespace MusicBeePlugin
                     throw new Exception("The palette should reflect both artwork colours.");
                 var imageBytes = File.ReadAllBytes(imagePath);
                 ArtworkPalette embeddedPalette;
-                if (!ArtworkPalette.TryLoad(imageBytes, out embeddedPalette) ||
-                    embeddedPalette.BarTop.ToArgb() != palette.BarTop.ToArgb())
-                    throw new Exception("Embedded artwork bytes should produce the same palette.");
+                Bitmap cover;
+                if (!ArtworkPalette.TryLoad(imageBytes, out embeddedPalette, out cover))
+                    throw new Exception("Embedded artwork should produce a palette and cover.");
+                using (cover)
+                {
+                    if (embeddedPalette.BarTop.ToArgb() != palette.BarTop.ToArgb() ||
+                        cover.Width != 256 || cover.Height != 256 ||
+                        cover.GetPixel(16, 128).R <= cover.GetPixel(16, 128).B ||
+                        cover.GetPixel(240, 128).B <= cover.GetPixel(240, 128).R)
+                        throw new Exception("The displayed cover should match the artwork colours.");
+                }
                 ArtworkPalette urlPalette;
                 if (!ArtworkPalette.TryLoad(new Uri(imagePath).AbsoluteUri, out urlPalette) ||
                     urlPalette.BarBottom.ToArgb() != palette.BarBottom.ToArgb())
