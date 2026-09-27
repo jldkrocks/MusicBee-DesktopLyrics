@@ -27,6 +27,10 @@ The **PARTY** button near the lower-left corner shows the supplied Rem and Ram d
 
 To add a MusicBee toolbar button, right-click its toolbar and choose **Configure Toolbar**. Add a button and choose **View: Toggle Desktop Lyrics Window** from the command dropdown. MusicBee's toolbar layout remains yours to arrange; the command also appears in Hotkeys.
 
+### Online BPM source
+
+[GetSongBPM](https://getsongbpm.com/) is being evaluated as an optional online tempo source for Party mode. The current release still uses song BPM tags, saved tempos, manual adjustments, and live detection; it does not query GetSongBPM yet.
+
 The cover scales with window height, and the lyric panel and song title are centred above playback controls. Long current, translation and preview lyrics use two centred rows when that makes them easier to read; short lyrics stay on one row. On narrow windows the LRCLIB and TIMING buttons move into the flyout to leave room for the title. The plugin settings' lyric colour, border colour, and single/two/three-colour gradient choices apply in the normal window. Transparent mode uses opaque neutral cards to avoid purple colour-key fringes while lyrics animate. Artwork colour matching uses several cover hues for a soft background glow and the spectrum. Background and lyric shapes are cached between animation frames. Animation continues while dragging and resizing; the timer also keeps the spectrum fade smooth when playback pauses. Windows still schedules paints during native window resizing, so the actual visible frame rate depends on its compositor and the window size.
 
 ### Add English meaning beside timed romaji
