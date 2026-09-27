@@ -19,6 +19,8 @@ namespace MusicBeePlugin
         private readonly Plugin.MusicBeeApiInterface _musicBee;
         private readonly Action<SettingsObj> _settingsChanged;
         private readonly Action _openSettings;
+        private readonly Action<string, string> _previewTiming, _savedTiming;
+        private readonly Action<string> _cancelTiming;
         private readonly ContextMenuStrip _flyoutMenu;
         private readonly float[] _fft = new float[4096];
         private readonly float[] _bars = new float[BarCount];
@@ -45,9 +47,10 @@ namespace MusicBeePlugin
         private string _songTitle = "", _songArtist = "";
         private Plugin.PlayState _playState = Plugin.PlayState.Undefined;
         private long _lastPlayStateCheck;
-        private Rectangle _previousButton, _playButton, _nextButton, _menuButton;
+        private Rectangle _previousButton, _playButton, _nextButton, _menuButton, _timingButton;
         private string _hoverButton;
         private long _queueNoticeStarted;
+        private FrmTimingEditor _timingEditor;
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
@@ -59,12 +62,17 @@ namespace MusicBeePlugin
                 Stopwatch.Frequency < QueueNoticeMs;
 
         public FrmLyricsWindow(SettingsObj settings, Plugin.MusicBeeApiInterface musicBee,
-            Action<SettingsObj> settingsChanged, Action openSettings)
+            Action<SettingsObj> settingsChanged, Action openSettings,
+            Action<string, string> previewTiming, Action<string> cancelTiming,
+            Action<string, string> savedTiming)
         {
             _settings = settings;
             _musicBee = musicBee;
             _settingsChanged = settingsChanged;
             _openSettings = openSettings;
+            _previewTiming = previewTiming;
+            _cancelTiming = cancelTiming;
+            _savedTiming = savedTiming;
             _useArtworkColors = settings.UseArtworkColors;
             Text = "Desktop Lyrics";
             FormBorderStyle = FormBorderStyle.SizableToolWindow;
@@ -205,6 +213,8 @@ namespace MusicBeePlugin
             AddToggle(menu, "Preview next lyric", () => _settings.NextLineWhenNoTranslation,
                 value => _settings.NextLineWhenNoTranslation = value);
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Edit lyric timing…", null, (sender, args) =>
+                BeginInvoke(new Action(OpenTimingEditor)));
             menu.Items.Add("More settings…", null, (sender, args) =>
                 BeginInvoke(new Action(() => _openSettings?.Invoke())));
             return menu;
@@ -274,6 +284,9 @@ namespace MusicBeePlugin
             catch (Exception) { return; }
             var trackChanged = trackUrl != _artworkTrackUrl;
             if (!force && !trackChanged) return;
+            if (_timingEditor != null && !_timingEditor.IsDisposed &&
+                trackUrl != _timingEditor.TrackUrl)
+                _timingEditor.TrackChanged();
             _artworkTrackUrl = trackUrl;
             if (trackChanged && !string.IsNullOrWhiteSpace(trackUrl))
                 _queueNoticeStarted = 0;
@@ -564,6 +577,7 @@ namespace MusicBeePlugin
             DrawQueueNotice(g, content);
             DrawSongTitle(g, bounds);
             DrawTransport(g, bounds);
+            DrawTimingButton(g, bounds);
             DrawMenuButton(g, bounds);
         }
 
@@ -631,7 +645,7 @@ namespace MusicBeePlugin
                        Trimming = StringTrimming.EllipsisCharacter
                    })
                 g.DrawString(text, font, brush,
-                    new RectangleF(45, 7, Math.Max(1, bounds.Width - 90), 29), format);
+                    new RectangleF(120, 7, Math.Max(1, bounds.Width - 240), 29), format);
         }
 
         public void ShowEndOfQueue()
@@ -763,10 +777,81 @@ namespace MusicBeePlugin
             }
         }
 
+        private void DrawTimingButton(Graphics g, Rectangle bounds)
+        {
+            _timingButton = new Rectangle(bounds.Right - 116, 7, 70, 29);
+            var active = _timingEditor != null && !_timingEditor.IsDisposed;
+            using (var path = RoundedRectangle(_timingButton, 8))
+            using (var shade = new SolidBrush(Color.FromArgb(active ? 150 :
+                       _hoverButton == "timing" ? 100 : 54, 20, 38, 58)))
+            using (var pen = new Pen(Color.FromArgb(active ? 220 : 135, _palette.Border)))
+            using (var font = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Point))
+            using (var textBrush = new SolidBrush(Color.FromArgb(230, 238, 242, 249)))
+            using (var format = new StringFormat
+                   {
+                       Alignment = StringAlignment.Center,
+                       LineAlignment = StringAlignment.Center
+                   })
+            {
+                g.FillPath(shade, path);
+                g.DrawPath(pen, path);
+                g.DrawString("TIMING", font, textBrush, _timingButton, format);
+            }
+        }
+
+        private void OpenTimingEditor()
+        {
+            if (_timingEditor != null && !_timingEditor.IsDisposed)
+            {
+                _timingEditor.BringToFront();
+                return;
+            }
+            FrmTimingEditor editor = null;
+            try
+            {
+                var trackUrl = _musicBee.NowPlaying_GetFileUrl();
+                if (string.IsNullOrWhiteSpace(trackUrl))
+                {
+                    MessageBox.Show(this, "Play a song with timed lyrics first.",
+                        "Edit lyric timing", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                var tag = _musicBee.Library_GetFileTag?.Invoke(trackUrl,
+                    Plugin.MetaDataType.Lyrics);
+                var source = string.IsNullOrWhiteSpace(tag) ?
+                    _musicBee.NowPlaying_GetLyrics() : tag;
+                LrcTimingDocument document;
+                if (!LrcTimingDocument.TryCreate(source, out document))
+                {
+                    MessageBox.Show(this, "This song needs timestamped lyrics in MusicBee's Lyrics field before timing can be edited.",
+                        "Edit lyric timing", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                editor = new FrmTimingEditor(_musicBee, trackUrl, _songTitle,
+                    tag, document, _previewTiming, _cancelTiming, _savedTiming);
+                _timingEditor = editor;
+                editor.FormClosed += (sender, args) =>
+                {
+                    if (ReferenceEquals(_timingEditor, editor)) _timingEditor = null;
+                    if (!IsDisposed) Invalidate();
+                };
+                editor.Show(this);
+                Invalidate();
+            }
+            catch (Exception ex)
+            {
+                if (ReferenceEquals(_timingEditor, editor)) _timingEditor = null;
+                editor?.Dispose();
+                MessageBox.Show(this, "Could not open the timing editor: " + ex.Message,
+                    "Edit lyric timing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
             var hit = _menuButton.Contains(e.Location) ? "menu" :
+                _timingButton.Contains(e.Location) ? "timing" :
                 _previousButton.Contains(e.Location) ? "previous" :
                 _playButton.Contains(e.Location) ? "play" :
                 _nextButton.Contains(e.Location) ? "next" : null;
@@ -792,6 +877,11 @@ namespace MusicBeePlugin
             {
                 _flyoutMenu.Show(this, new Point(_menuButton.Right, _menuButton.Bottom),
                     ToolStripDropDownDirection.BelowLeft);
+                return;
+            }
+            if (_timingButton.Contains(e.Location))
+            {
+                OpenTimingEditor();
                 return;
             }
             try
@@ -950,6 +1040,8 @@ namespace MusicBeePlugin
                 Interlocked.Increment(ref _artworkRequestId);
                 _animationTimer?.Dispose();
                 _albumArtwork?.Dispose();
+                if (_timingEditor != null && !_timingEditor.IsDisposed)
+                    _timingEditor.ForceClose();
                 _flyoutMenu?.Dispose();
             }
             base.Dispose(disposing);

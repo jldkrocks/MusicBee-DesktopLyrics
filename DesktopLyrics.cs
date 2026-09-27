@@ -350,7 +350,8 @@ namespace MusicBeePlugin
                 previous?.Form.Dispose();
                 var view = _settings.CompactWindow
                     ? (IDesktopLyricsView)new FrmLyricsWindow(_settings, _mbApiInterface,
-                        WindowSettingsChanged, () => Configure(IntPtr.Zero))
+                        WindowSettingsChanged, () => Configure(IntPtr.Zero),
+                        PreviewTimingLyrics, CancelTimingPreview, TimingLyricsSaved)
                     : new FrmLyrics(_settings);
                 _frmLyrics = view;
                 view.Form.FormClosed += (sender, args) =>
@@ -377,6 +378,24 @@ namespace MusicBeePlugin
         {
             _lyricsCtrl.NextLineWhenNoTranslation = settings.NextLineWhenNoTranslation;
             SaveSettings(settings);
+            UpdateLyrics(force: true);
+        }
+
+        private void PreviewTimingLyrics(string trackUrl, string lyrics)
+        {
+            lock (_lock) _lyricsCtrl.PreviewLyrics(trackUrl, lyrics);
+            UpdateLyrics(force: true);
+        }
+
+        private void CancelTimingPreview(string trackUrl)
+        {
+            lock (_lock) _lyricsCtrl.CancelPreview(trackUrl);
+            UpdateLyrics(force: true);
+        }
+
+        private void TimingLyricsSaved(string trackUrl, string lyrics)
+        {
+            lock (_lock) _lyricsCtrl.KeepSavedLyrics(trackUrl, lyrics);
             UpdateLyrics(force: true);
         }
 

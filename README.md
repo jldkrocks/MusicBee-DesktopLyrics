@@ -31,6 +31,10 @@ The cover scales with the window height, and the lyric panel is centred above th
 
 At the end of the playing queue, the Next button leaves the window open and shows a brief message. The message also appears when MusicBee signals the queue has ended; it clears when another song starts.
 
+### Edit lyric timing
+
+For a song whose timestamped LRC lyrics are pasted into MusicBee's **Lyrics** field, click **TIMING** at the top right of the compact window (or choose **Edit lyric timing…** in its flyout). The separate editor shows one row per timestamp; lyrics and translations sharing a timestamp move together. Use the arrows beside a row for ±0.1 or ±1 second, or the **Whole song** buttons to shift every timestamp, including empty pause markers. Each adjustment previews the result in the lyrics window and plays from shortly before the adjusted line. **Reset** restores the original timings; **Cancel** discards changes. **Save edits** writes the updated timestamps to that song's MusicBee Lyrics tag and refreshes its panels. The original LRC is copied to `DesktopLyrics-TimingBackups` under MusicBee's plugin storage before saving. If the song changes while editing, the editor keeps unsaved changes available to save to the previous song or discard.
+
 # Chinese version
 
 ## MusicBee 桌面歌词

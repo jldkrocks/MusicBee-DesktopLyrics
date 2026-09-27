@@ -9,18 +9,51 @@ namespace MusicBeePlugin
         private readonly Plugin.MusicBeeApiInterface _interface;
         private string _lastLyrics;
         private LyricParser.Lyrics _lyrics;
+        private string _editedTrackUrl, _editedLyrics;
+        private bool _editedLyricsSaved;
         public LyricsController(Plugin.MusicBeeApiInterface @interface)
         {
             _interface = @interface;
         }
 
+        public void PreviewLyrics(string trackUrl, string lyrics)
+        {
+            _editedTrackUrl = trackUrl;
+            _editedLyrics = lyrics;
+            _editedLyricsSaved = false;
+        }
+
+        public void KeepSavedLyrics(string trackUrl, string lyrics)
+        {
+            _editedTrackUrl = trackUrl;
+            _editedLyrics = lyrics;
+            _editedLyricsSaved = true;
+        }
+
+        public void CancelPreview(string trackUrl)
+        {
+            if (_editedTrackUrl != trackUrl || _editedLyricsSaved) return;
+            _editedTrackUrl = _editedLyrics = null;
+            _lastLyrics = null;
+            _lyrics = null;
+        }
+
         public LyricView UpdateLyrics(bool useGeneratedWhenUnavailable)
         {
             // TODO passively change?
-            var hasLyrics = _interface.NowPlaying_GetFileTag(Plugin.MetaDataType.HasLyrics) ?? "";
-            if (hasLyrics.StartsWith("Y")  || hasLyrics.Length == 0)
+            if (_editedTrackUrl != null &&
+                _interface.NowPlaying_GetFileUrl() != _editedTrackUrl)
             {
-                var lyrics = _interface.NowPlaying_GetLyrics();
+                _editedTrackUrl = _editedLyrics = null;
+                _editedLyricsSaved = false;
+                _lastLyrics = null;
+                _lyrics = null;
+            }
+            var hasLyrics = _interface.NowPlaying_GetFileTag(Plugin.MetaDataType.HasLyrics) ?? "";
+            if (_editedTrackUrl != null || hasLyrics.StartsWith("Y") || hasLyrics.Length == 0)
+            {
+                var lyrics = _editedTrackUrl != null ? _editedLyrics :
+                    _interface.NowPlaying_GetLyrics();
                 if (lyrics != _lastLyrics)
                 {
                     _lyrics = LyricParser.ParseLyric(lyrics);
