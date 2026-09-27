@@ -96,8 +96,8 @@ namespace MusicBeePlugin
                     "[00:10.00]")).Entries;
                 if (store.Load("romaji.mp3", shifted)?[1] != "Moonlight")
                     throw new Exception("Changing only LRC timing must preserve saved English.");
-                var revised = LyricParser.ParseLyric(romajiLrc.Replace("moon", "sun")).Entries;
-                if (store.Load("romaji.mp3", revised) != null)
+                var revisedRomaji = LyricParser.ParseLyric(romajiLrc.Replace("moon", "sun")).Entries;
+                if (store.Load("romaji.mp3", revisedRomaji) != null)
                     throw new Exception("Changed romaji must require a new English review.");
 
                 var englishApi = new Plugin.MusicBeeApiInterface
