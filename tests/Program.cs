@@ -41,6 +41,21 @@ namespace MusicBeePlugin
             bilingual.ShowTranslation = false;
             if (bilingual.UpdateLyrics(false)?.LyricLine2 != null)
                 throw new Exception("The flyout toggle must hide only the translation.");
+            var lyricArea = new RectangleF(45, 43, 480, 166);
+            var withBoth = LyricCardLayout.Create(lyricArea, 50, 30, 6,
+                true, true, 0);
+            var onlyEnglish = LyricCardLayout.Create(lyricArea, 50, 30, 6,
+                true, false, 0);
+            var onlyPreview = LyricCardLayout.Create(lyricArea, 50, 30, 6,
+                false, true, 0);
+            if (withBoth.English.Bottom >= withBoth.Main.Top ||
+                withBoth.Preview.Top <= withBoth.Main.Bottom ||
+                withBoth.Main.Top != onlyEnglish.Main.Top ||
+                withBoth.Main.Top != onlyPreview.Main.Top ||
+                withBoth.Bounds.Top != withBoth.English.Top ||
+                withBoth.Bounds.Bottom != withBoth.Preview.Bottom ||
+                LyricCardLayout.RequiredHeight(50, 30, 6, true) > lyricArea.Height)
+                throw new Exception("English must sit above a centred lyric with the next line below.");
             Console.WriteLine("LRC parser checks passed.");
 
             const string romajiLrc = "[00:00.00] ...\n" +
@@ -123,6 +138,33 @@ namespace MusicBeePlugin
                 englishController.ShowTranslation = true;
                 if (englishController.UpdateLyrics(false)?.LyricLine2 != null)
                     throw new Exception("Removing saved English must clear the visible meaning.");
+
+                const string mixed = "[00:01.00] Back up, get far of the sky, black rover\n" +
+                    "[00:02.00] Nankai mo Play";
+                var mixedEntries = LyricParser.ParseLyric(mixed).Entries;
+                store.Save("mixed.mp3", mixedEntries,
+                    new[] { "Back up, get far of the sky / Black rover",
+                        "Play it again and again" }, "");
+                var mixedPosition = 1500;
+                var mixedApi = new Plugin.MusicBeeApiInterface
+                {
+                    NowPlaying_GetFileUrl = () => "mixed.mp3",
+                    NowPlaying_GetFileTag = field => "Y",
+                    Library_GetFileTag = (url, field) => mixed,
+                    Player_GetPosition = () => mixedPosition
+                };
+                var mixedController = new LyricsController(mixedApi, store)
+                {
+                    NextLineWhenNoTranslation = true
+                };
+                var repeatedEnglish = mixedController.UpdateLyrics(false);
+                if (repeatedEnglish?.LyricLine2 != null ||
+                    repeatedEnglish.NextLine?.Trim() != "Nankai mo Play")
+                    throw new Exception("An English chorus must not display itself twice or hide the next lyric.");
+                mixedPosition = 2500;
+                if (mixedController.UpdateLyrics(false)?.LyricLine2 !=
+                    "Play it again and again")
+                    throw new Exception("Meaning must remain visible under romaji with English loanwords.");
             }
             finally
             {

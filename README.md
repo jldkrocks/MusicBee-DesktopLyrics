@@ -9,11 +9,7 @@ The lyrics must in LRC format, synchronized. Offset label is supported.
 It can work with NeteaseLyrics plugin [https://github.com/cqjjjzr/MusicBee-NeteaseLyrics](https://github.com/cqjjjzr/MusicBee-NeteaseLyrics "(GitHub Repo)") [https://getmusicbee.com/forum/index.php?topic=24313.0](https://getmusicbee.com/forum/index.php?topic=24313.0 "(Forum Topic)") in order to display double-line lyrics, if you can provide lrc splitted with slash "/" it can also correctly handled.
 
 # Download & Installation
-To use this plugin, download it from "Release" page of this GitHub repo or from links below:  
-For users who are in China:  
-[https://pan.baidu.com/s/1UrPo_NF8H3dNwQyNpNEZbg?pwd=1sr3](https://pan.baidu.com/s/1UrPo_NF8H3dNwQyNpNEZbg?pwd=1sr3 "Baidu Netdisk Download"), passcode `1sr3`  
-For users who aren't in China:  
-[https://1drv.ms/f/s!AicHZ6DLvCtX7B5M4CRdcJfCULCe](https://1drv.ms/f/s!AicHZ6DLvCtX7B5M4CRdcJfCULCe "OneDrive Download")  
+Open the latest successful run of **Build Desktop Lyrics** on this repository's **Actions** tab. Download its `DesktopLyrics-<version>` artifact, then use the DLL or packaged ZIP inside it.
 
 Just install this plugin in the Plugins tab in the Settings or put the DLL file into the Plugins of your MusicBee installation, and then enable it, set the lyrics style in the settings, and you're ready to rock!
 
@@ -38,11 +34,11 @@ Play a song with timed romaji in MusicBee's Lyrics field, open the lyrics window
 1. Click **Open Genius search**. In your browser, choose an English translation for the correct song and copy the lyric text.
 2. Paste the English text into the importer. If the line breaks differ, you can also paste the corresponding Genius romaji into the optional box; that helps the importer match phrases to your timed romaji. Paste the translation page's URL in **Source URL** if you want to keep its source with the saved result.
 3. Click **Align and review**. Compare each English line with the MusicBee lyric and timestamp. Edit the English cells directly. **Repeat previous English here** handles one English phrase spanning two timed lines; **Join next English here** handles two English phrases spanning one timed line. Highlighted pairs and the empty/extra counts flag places to check.
-4. Click **Save English**. The English appears under the active romaji immediately. The flyout's **Show English / translation** switch hides or restores it. Reopen the importer to replace or remove it.
+4. Click **Save English**. The English appears above the active romaji immediately. The flyout's **Show English / translation** switch hides or restores it. Reopen the importer to replace or remove it.
 
 The plugin opens Genius in your browser; **you choose and copy the translation**. It does not retrieve full lyrics from Genius's API, scrape the page, or translate them automatically. The alignment uses your existing MusicBee timestamps and needs your review, especially when a translation paraphrases or combines lines. The English is saved per song in `DesktopLyrics-English` under MusicBee's plugin storage, separately from its Lyrics tag. Timing-only edits keep the English; changes to the romaji lines require you to review and import it again. The feature also works without a Genius page if you have an English translation from another source.
 
-Existing bilingual LRC in MusicBee still works: a romaji line and English line at the **same timestamp** are displayed together, with the English smaller. A separately imported English line takes precedence when present. In short windows, the translation takes the space normally used by the next-line preview; taller windows can display both.
+Existing bilingual LRC in MusicBee still works: a romaji line and English line at the **same timestamp** are displayed together, with the English smaller. A separately imported English line takes precedence when present. A repeated English phrase is shown once, even if its punctuation or casing differs. English sits above the centred current lyric and the upcoming line remains below it; only an extremely short lyric area hides the upcoming line to keep the active lyric legible.
 
 At the end of the playing queue, the Next button leaves the window open and shows a brief message. The message also appears when MusicBee signals the queue has ended; it clears when another song starts.
 
@@ -71,11 +67,7 @@ MusicBee 中歌曲关联的歌词必须为 LRC 格式的同步歌词。支持 `o
 双行歌词的两行之间用正斜杠“/”分割。
 
 ## 下载 & 安装
-要用此插件请从本 GitHub repo 的 “Release” 页面或下列链接下载：  
-国内：
-[https://pan.baidu.com/s/1UrPo_NF8H3dNwQyNpNEZbg?pwd=1sr3](https://pan.baidu.com/s/1UrPo_NF8H3dNwQyNpNEZbg?pwd=1sr3 "Baidu Netdisk Download"), 提取码 `1sr3`  
-国外：  
-[https://1drv.ms/f/s!AicHZ6DLvCtX7B5M4CRdcJfCULCe](https://1drv.ms/f/s!AicHZ6DLvCtX7B5M4CRdcJfCULCe "OneDrive Download")  
+在本仓库的 **Actions** 页面打开最新成功的 **Build Desktop Lyrics** 运行，下载 `DesktopLyrics-<version>` 构建产物，其中包含 DLL 和 ZIP 压缩包。
 
 下载后从 MusicBee 设置的“插件”标签页安装或直接将DLL文件复制到 MusicBee 安装目录下的 “`Plugins`” 目录，启动之，在设置中设置好歌词外观，就 OK。
 

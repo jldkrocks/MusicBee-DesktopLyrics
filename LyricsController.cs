@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 
 namespace MusicBeePlugin
 {
@@ -181,8 +182,27 @@ namespace MusicBeePlugin
                 ? _englishLines[currentIndex] : null;
             var translation = !string.IsNullOrWhiteSpace(english)
                 ? english : currentEntry.LyricLine2;
+            if (RepeatsCurrentLine(currentEntry.LyricLine1, translation))
+                translation = null;
             return new LyricView(currentEntry.LyricLine1,
                 ShowTranslation ? translation : null, nextLine);
+        }
+
+        private static bool RepeatsCurrentLine(string current, string english)
+        {
+            if (string.IsNullOrWhiteSpace(current) ||
+                string.IsNullOrWhiteSpace(english)) return false;
+            var left = ComparableText(current);
+            return left.Length > 0 && left == ComparableText(english);
+        }
+
+        private static string ComparableText(string text)
+        {
+            var normalized = new StringBuilder(text.Length);
+            foreach (var c in text)
+                if (char.IsLetterOrDigit(c))
+                    normalized.Append(char.ToLowerInvariant(c));
+            return normalized.ToString();
         }
 
         public class LyricView

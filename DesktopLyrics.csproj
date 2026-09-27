@@ -108,6 +108,7 @@
     <Compile Include="Gdiplus.cs" />
     <Compile Include="GdiplusPInvoke.cs" />
     <Compile Include="FrmLyricsWindow.cs" />
+    <Compile Include="LyricCardLayout.cs" />
     <Compile Include="FrmEnglishImport.cs" />
     <Compile Include="EnglishImportDocument.cs" />
     <Compile Include="EnglishTranslationStore.cs" />

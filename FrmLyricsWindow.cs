@@ -911,11 +911,11 @@ namespace MusicBeePlugin
             var panelWidth = Math.Max(40, bounds.Width - panelLeft * 2);
             var content = new RectangleF(panelLeft + 9, region.Top,
                 Math.Max(1, panelWidth - 18), region.Height);
-            // Keep the English line directly beneath the romaji. In a short
-            // window, omit the next-line preview to leave that pair readable.
-            var shownNext = bounds.Height < 300 && !string.IsNullOrWhiteSpace(_line2)
+            // Keep the next line beneath the central romaji, with English
+            // above it. Only a very short lyric area hides the preview.
+            var shownNext = content.Height < 130 && !string.IsNullOrWhiteSpace(_line2)
                 ? null : _nextLine;
-            var previousShownNext = bounds.Height < 300 &&
+            var previousShownNext = content.Height < 130 &&
                 !string.IsNullOrWhiteSpace(_previousLine2) ? null : _previousNextLine;
 
             var progress = 1f;
@@ -934,16 +934,19 @@ namespace MusicBeePlugin
             var gap = 6f * scale;
             var mainHeight = 58f * scale;
             var subHeight = 38f * scale;
-            var subCount = Math.Max(CountSubLines(_line2, shownNext),
-                                    CountSubLines(_previousLine2, previousShownNext));
-            var groupHeight = mainHeight + subCount * (subHeight + gap);
-            if (groupHeight > content.Height)
+            var hasSideLine = !string.IsNullOrWhiteSpace(_line2) ||
+                !string.IsNullOrWhiteSpace(shownNext) ||
+                !string.IsNullOrWhiteSpace(_previousLine2) ||
+                !string.IsNullOrWhiteSpace(previousShownNext);
+            var groupHeight = LyricCardLayout.RequiredHeight(mainHeight, subHeight,
+                gap, hasSideLine);
+            var availableHeight = Math.Max(12f, content.Height - 18f);
+            if (groupHeight > availableHeight)
             {
-                var fit = content.Height / groupHeight;
+                var fit = availableHeight / groupHeight;
                 mainHeight *= fit;
                 subHeight *= fit;
                 gap *= fit;
-                groupHeight = content.Height;
             }
             var eased = progress * progress * (3 - 2 * progress);
             var promotePreview = progress < 1f && !string.IsNullOrEmpty(previousShownNext) &&
@@ -972,16 +975,15 @@ namespace MusicBeePlugin
                 !promotePreview, true);
             if (promotePreview)
             {
-                var oldCount = CountSubLines(_previousLine2, previousShownNext);
-                var newCount = CountSubLines(_line2, shownNext);
-                var oldTop = content.Top + (content.Height -
-                    (mainHeight + oldCount * (subHeight + gap))) / 2;
-                var newTop = content.Top + (content.Height -
-                    (mainHeight + newCount * (subHeight + gap))) / 2;
-                var oldPreviewY = oldTop + mainHeight + gap +
-                    (string.IsNullOrWhiteSpace(_previousLine2) ? 0 : subHeight + gap);
-                var start = new RectangleF(content.Left, oldPreviewY, content.Width, subHeight);
-                var end = new RectangleF(content.Left, newTop, content.Width, mainHeight);
+                var oldLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
+                    gap, !string.IsNullOrWhiteSpace(_previousLine2), true,
+                    -18f * scale * eased);
+                var newLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
+                    gap, !string.IsNullOrWhiteSpace(_line2),
+                    !string.IsNullOrWhiteSpace(shownNext),
+                    18f * scale * (1 - eased));
+                var start = oldLayout.Preview;
+                var end = newLayout.Main;
                 var traveling = new RectangleF(content.Left,
                     start.Top + (end.Top - start.Top) * eased, content.Width,
                     start.Height + (end.Height - start.Height) * eased);
@@ -1022,20 +1024,21 @@ namespace MusicBeePlugin
             var bottom = float.MinValue;
             if (hasOld)
             {
-                var height = mainHeight + CountSubLines(_previousLine2,
-                    previousShownNext) * (subHeight + gap);
-                var y = content.Top + (content.Height - height) / 2 - 18f * scale * eased;
-                top = Math.Min(top, y);
-                bottom = Math.Max(bottom, y + height);
+                var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
+                    !string.IsNullOrWhiteSpace(_previousLine2),
+                    !string.IsNullOrWhiteSpace(previousShownNext),
+                    -18f * scale * eased);
+                top = Math.Min(top, layout.Bounds.Top);
+                bottom = Math.Max(bottom, layout.Bounds.Bottom);
             }
             if (hasNew)
             {
-                var height = mainHeight + CountSubLines(_line2, shownNext) *
-                    (subHeight + gap);
-                var y = content.Top + (content.Height - height) / 2 +
-                    18f * scale * (1 - eased);
-                top = Math.Min(top, y);
-                bottom = Math.Max(bottom, y + height);
+                var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
+                    !string.IsNullOrWhiteSpace(_line2),
+                    !string.IsNullOrWhiteSpace(shownNext),
+                    18f * scale * (1 - eased));
+                top = Math.Min(top, layout.Bounds.Top);
+                bottom = Math.Max(bottom, layout.Bounds.Bottom);
             }
             var card = new Rectangle(left, (int)Math.Floor(top - 10), width,
                 Math.Max(29, (int)Math.Ceiling(bottom - top + 20)));
@@ -1055,10 +1058,12 @@ namespace MusicBeePlugin
         {
             if (opacity <= 0 || (string.IsNullOrWhiteSpace(line1) &&
                 string.IsNullOrWhiteSpace(line2) && string.IsNullOrWhiteSpace(preview))) return;
-            var height = mainHeight + CountSubLines(line2, preview) * (subHeight + gap);
-            var top = content.Top + (content.Height - height) / 2 + offsetY;
-            using (var path = RoundedRectangle(new Rectangle(left, (int)(top - 9),
-                       width, Math.Max(29, (int)(height + 18))), 14))
+            var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
+                !string.IsNullOrWhiteSpace(line2), !string.IsNullOrWhiteSpace(preview),
+                offsetY);
+            using (var path = RoundedRectangle(new Rectangle(left,
+                       (int)Math.Floor(layout.Bounds.Top - 9), width,
+                       Math.Max(29, (int)Math.Ceiling(layout.Bounds.Height + 18))), 14))
             using (var shade = new SolidBrush(Color.FromArgb((int)(128 * opacity), 10, 13, 27)))
             using (var outline = new Pen(Color.FromArgb((int)(56 * opacity), _palette.Border)))
             {
@@ -1691,35 +1696,24 @@ namespace MusicBeePlugin
             Invalidate();
         }
 
-        private static int CountSubLines(string translation, string preview)
-        {
-            return (string.IsNullOrWhiteSpace(translation) ? 0 : 1) +
-                   (string.IsNullOrWhiteSpace(preview) ? 0 : 1);
-        }
-
         private void DrawLyricGroup(Graphics g, RectangleF content, float mainHeight,
             float subHeight, float gap, float scale, string line1, string line2,
             string nextLine, float opacity, float offsetY, bool drawMain, bool drawPreview)
         {
             if (opacity <= 0) return;
-            var subCount = CountSubLines(line2, nextLine);
-            var groupHeight = mainHeight + subCount * (subHeight + gap);
-            var y = content.Top + (content.Height - groupHeight) / 2 + offsetY;
+            var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
+                !string.IsNullOrWhiteSpace(line2),
+                !string.IsNullOrWhiteSpace(nextLine), offsetY);
             var fontSize = (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale;
 
-            if (drawMain)
-                DrawLine(g, line1, new RectangleF(content.Left, y, content.Width, mainHeight),
-                    fontSize, (int)(255 * opacity));
-            y += mainHeight + gap;
             if (!string.IsNullOrWhiteSpace(line2))
-            {
-                DrawLine(g, line2, new RectangleF(content.Left, y, content.Width, subHeight),
-                    fontSize * 0.68f, (int)(225 * opacity));
-                y += subHeight + gap;
-            }
+                DrawLine(g, line2, layout.English, fontSize * 0.68f,
+                    (int)(225 * opacity));
+            if (drawMain)
+                DrawLine(g, line1, layout.Main, fontSize, (int)(255 * opacity));
             if (drawPreview && !string.IsNullOrWhiteSpace(nextLine))
-                DrawLine(g, nextLine, new RectangleF(content.Left, y, content.Width, subHeight),
-                    fontSize * 0.63f, (int)(145 * opacity));
+                DrawLine(g, nextLine, layout.Preview, fontSize * 0.63f,
+                    (int)(145 * opacity));
         }
 
         private void DrawSpectrum(Graphics g, Rectangle area)
@@ -1744,6 +1738,7 @@ namespace MusicBeePlugin
 
         private void DrawLine(Graphics g, string lyric, RectangleF area, float desiredPoints, int alpha)
         {
+            lyric = lyric?.Trim();
             if (string.IsNullOrEmpty(lyric) || alpha <= 0) return;
             var geometry = GetTextGeometry(g, lyric, area, desiredPoints);
             if (geometry == null) return;
@@ -1757,7 +1752,12 @@ namespace MusicBeePlugin
                 {
                     // The glyph path is stored at the origin. Movement during
                     // a lyric transition needs only a graphics translation.
-                    g.TranslateTransform(area.Left, area.Top);
+                    // Centre the actual glyph bounds. The parser can retain
+                    // spaces after LRC timestamps, and font side bearings
+                    // otherwise shift some lines within the same card.
+                    var centeredX = (area.Width - geometry.Bounds.Width) / 2f -
+                        geometry.Bounds.Left;
+                    g.TranslateTransform(area.Left + centeredX, area.Top);
                     g.TranslateTransform(1f, 2f);
                     g.FillPath(shadow, geometry.Path);
                     g.TranslateTransform(-1f, -2f);
@@ -1791,6 +1791,7 @@ namespace MusicBeePlugin
                     return cached;
 
             var size = Math.Max(10f, Math.Min(points, height * 0.74f));
+            var availableWidth = Math.Max(8f, width - 8f);
             using (var format = new StringFormat(StringFormatFlags.NoWrap)
                    {
                        Alignment = StringAlignment.Center,
@@ -1800,9 +1801,9 @@ namespace MusicBeePlugin
             {
                 Font fitted = new Font(selected.FontFamily, size, selected.Style, GraphicsUnit.Point);
                 var measuredWidth = g.MeasureString(lyric, fitted).Width;
-                if (measuredWidth > width - 8)
+                if (measuredWidth > availableWidth)
                 {
-                    size = Math.Max(10f, size * (width - 8) / measuredWidth);
+                    size = Math.Max(10f, size * availableWidth / measuredWidth);
                     fitted.Dispose();
                     fitted = new Font(selected.FontFamily, size, selected.Style, GraphicsUnit.Point);
                 }
@@ -1817,12 +1818,26 @@ namespace MusicBeePlugin
                         path.Dispose();
                         return null;
                     }
+                    var glyphBounds = path.GetBounds();
+                    // MeasureString includes different font padding from the
+                    // actual outline. Check the outline too before caching it.
+                    if (glyphBounds.Width > availableWidth && size > 10f)
+                    {
+                        size = Math.Max(10f, size * availableWidth / glyphBounds.Width);
+                        path.Reset();
+                        using (var narrower = new Font(selected.FontFamily, size,
+                                   selected.Style, GraphicsUnit.Point))
+                            path.AddString(lyric, narrower.FontFamily, (int)narrower.Style,
+                                narrower.SizeInPoints * g.DpiY / 72f,
+                                new RectangleF(0, 0, width, height), format);
+                        glyphBounds = path.GetBounds();
+                    }
                     var geometry = new TextGeometry
                     {
                         Text = lyric, FontFamily = family, FontStyle = selected.Style,
                         DesiredPoints = points, Width = width, Height = height,
                         DpiY = g.DpiY, FittedPoints = size, Path = path,
-                        Bounds = path.GetBounds()
+                        Bounds = glyphBounds
                     };
                     _textGeometries.Add(geometry);
                     if (_textGeometries.Count > 20)
