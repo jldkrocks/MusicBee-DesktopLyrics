@@ -63,7 +63,8 @@ namespace MusicBeePlugin
         private double _partyBpm, _partyTagBpm;
         private int _partyOriginMs;
         private PartyTempoSource _partyTempoSource;
-        private string _partyApiKey, _songAlbum = "", _lastOnlineAttemptTrack, _partyLookupError;
+        private string _partyApiKey, _songAlbum = "", _lastOnlineAttemptTrack,
+            _partyLookupError, _partyLookupDetail;
         private CancellationTokenSource _partyLookupCancellation;
         private PartyOnlineStatus _partyOnlineStatus;
         private int _partySpectrumMisses;
@@ -458,6 +459,7 @@ namespace MusicBeePlugin
                 string.IsNullOrWhiteSpace(_songArtist))
             {
                 _partyOnlineStatus = PartyOnlineStatus.NoMatch;
+                _partyLookupDetail = "The song needs a title and artist tag in MusicBee.";
                 Invalidate();
                 return;
             }
@@ -468,6 +470,7 @@ namespace MusicBeePlugin
             _lastOnlineAttemptTrack = _artworkTrackUrl;
             _partyOnlineStatus = PartyOnlineStatus.Searching;
             _partyLookupError = null;
+            _partyLookupDetail = null;
             Invalidate();
             LookupPartyTempoAsync(_artworkTrackUrl, _songTitle, _songArtist,
                 _songAlbum, _partyApiKey, pending);
@@ -477,12 +480,14 @@ namespace MusicBeePlugin
             string artist, string album, string apiKey, CancellationTokenSource pending)
         {
             double bpm = 0;
-            string error = null;
+            string error = null, detail = null;
             var wasCurrent = false;
             try
             {
-                bpm = await GetSongBpmClient.SearchAsync(title, artist, album,
+                var result = await GetSongBpmClient.SearchAsync(title, artist, album,
                     apiKey, pending.Token);
+                bpm = result.Bpm;
+                detail = result.Detail;
             }
             catch (OperationCanceledException) { return; }
             catch (Exception ex) { error = ex.Message; }
@@ -504,7 +509,11 @@ namespace MusicBeePlugin
                 _partyLookupError = error;
                 _partyOnlineStatus = PartyOnlineStatus.Error;
             }
-            else if (bpm == 0) _partyOnlineStatus = PartyOnlineStatus.NoMatch;
+            else if (bpm == 0)
+            {
+                _partyLookupDetail = detail;
+                _partyOnlineStatus = PartyOnlineStatus.NoMatch;
+            }
             else
             {
                 try
@@ -554,7 +563,7 @@ namespace MusicBeePlugin
                 };
                 var explanation = new Label
                 {
-                    Text = _partyLookupError ??
+                    Text = _partyLookupError ?? _partyLookupDetail ??
                         "Party mode tries artist and title, then a title-only search checked " +
                         "against the artist. A missing or ambiguous catalog entry can still " +
                         "show NO MATCH; use Retry online BPM or Adjust Party BPM for that song.",
@@ -599,6 +608,7 @@ namespace MusicBeePlugin
                     _partyApiKey = key;
                     _partyOnlineStatus = PartyOnlineStatus.None;
                     _partyLookupError = null;
+                    _partyLookupDetail = null;
                     _lastOnlineAttemptTrack = null;
                     LoadPartyTempo(_artworkTrackUrl);
                     StartPartyOnlineLookup();
@@ -877,6 +887,7 @@ namespace MusicBeePlugin
                 _lastOnlineAttemptTrack = null;
                 _partyOnlineStatus = PartyOnlineStatus.None;
                 _partyLookupError = null;
+                _partyLookupDetail = null;
                 _queueTracks.Clear();
                 _lastFutureOffset = 0;
                 try

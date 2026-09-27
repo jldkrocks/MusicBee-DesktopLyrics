@@ -220,6 +220,24 @@ namespace MusicBeePlugin
                 searches[1].Item2 != "song:Café artist:Lead Artist" ||
                 searches[2].Item1 != "song" || searches[2].Item2 != "Café")
                 throw new Exception("Try a cleaned combined search before a broader title search.");
+            var decoratedSearches = GetSongBpmClient.BuildQueries(
+                "* ~Asterisk~", "ORANGE RANGE");
+            if (decoratedSearches.Count != 3 ||
+                decoratedSearches[1].Item2 != "song:Asterisk artist:ORANGE RANGE" ||
+                decoratedSearches[2].Item2 != "Asterisk" ||
+                GetSongBpmClient.BuildQueries("~dust bunnies~", "lando!")[1].Item2 !=
+                    "song:dust bunnies artist:lando!")
+                throw new Exception("Decorative title characters must not block catalog searches.");
+            var ostSearches = GetSongBpmClient.BuildQueries(
+                "Kamado Tanjirō no Uta -OST ver.-", "椎名豪 featuring 中川奈美");
+            if (ostSearches.Count != 3 ||
+                ostSearches[1].Item2 != "song:Kamado Tanjirō no Uta artist:椎名豪" ||
+                GetSongBpmClient.MatchTempo(
+                    "{\"search\":[{\"title\":\"Kamado Tanjirō no Uta\"," +
+                    "\"tempo\":105,\"artist\":{\"name\":\"椎名豪\"}}]}",
+                    "Kamado Tanjirō no Uta -OST ver.-",
+                    "椎名豪 featuring 中川奈美", "") != 0)
+                throw new Exception("Broad OST searches must still verify the recording version.");
 
             const string lrc = "[00:09.68] First line\n" +
                                "[00:17.30] \n" +

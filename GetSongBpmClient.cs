@@ -15,7 +15,7 @@ namespace MusicBeePlugin
     {
         private const string Endpoint = "https://api.getsong.co/search/?";
         private const string UserAgent =
-            "DesktopLyrics/1.15.15 (https://github.com/jldkrocks/MusicBee-DesktopLyrics)";
+            "DesktopLyrics/1.15.16 (https://github.com/jldkrocks/MusicBee-DesktopLyrics)";
         private static readonly SemaphoreSlim Requests = new SemaphoreSlim(1, 1);
         private static DateTime _nextRequestUtc = DateTime.MinValue;
         private static readonly Regex TrailingDetail = new Regex(
@@ -27,23 +27,52 @@ namespace MusicBeePlugin
         private static readonly Regex RecordingVersion = new Regex(
             @"\b(?:live|remix|acoustic|instrumental|radio\s+edit|sped\s+up|slowed|demo|karaoke|re-recorded)\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex OstSuffix = new Regex(
+            @"\s*[-–—]\s*OST\s+ver\.?[-.]?\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        internal static async Task<double> SearchAsync(string title, string artist,
+        internal sealed class LookupResult
+        {
+            internal double Bpm;
+            internal string Detail;
+        }
+
+        private sealed class MatchEvaluation
+        {
+            internal double Bpm;
+            internal bool HasResults, HasTitle, HasArtist, HasTempo, Ambiguous;
+        }
+
+        internal static async Task<LookupResult> SearchAsync(string title, string artist,
             string album, string apiKey, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist) ||
-                string.IsNullOrWhiteSpace(apiKey)) return 0;
+                string.IsNullOrWhiteSpace(apiKey)) return new LookupResult
+                { Detail = "This song needs a title, artist and API key." };
             await Requests.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                var combined = new MatchEvaluation();
                 foreach (var query in BuildQueries(title, artist))
                 {
                     var json = await RequestAsync(query.Item1, query.Item2, apiKey,
                         cancellationToken).ConfigureAwait(false);
-                    var bpm = MatchTempo(json, title, artist, album);
-                    if (bpm > 0) return bpm;
+                    var match = Evaluate(json, title, artist, album);
+                    if (match.Bpm > 0 && !combined.Ambiguous)
+                        return new LookupResult { Bpm = match.Bpm };
+                    combined.HasResults |= match.HasResults;
+                    combined.HasTitle |= match.HasTitle;
+                    combined.HasArtist |= match.HasArtist;
+                    combined.HasTempo |= match.HasTempo;
+                    combined.Ambiguous |= match.Ambiguous;
                 }
-                return 0;
+                return new LookupResult { Detail = combined.Ambiguous ?
+                    "Multiple BPMs match this title and artist; the album did not resolve them." :
+                    combined.HasTempo ? "Matching BPMs could not be resolved." :
+                    combined.HasArtist ? "Title and artist found, but no usable BPM was listed." :
+                    combined.HasTitle ? "Title found, but the listed artist does not match." :
+                    combined.HasResults ? "Songs were returned, but none matched this title/version." :
+                    "GetSongBPM returned no songs for this title." };
             }
             finally { Requests.Release(); }
         }
@@ -54,12 +83,11 @@ namespace MusicBeePlugin
         internal static List<Tuple<string, string>> BuildQueries(string title, string artist)
         {
             var queries = new List<Tuple<string, string>>();
-            var cleanTitle = CoreTitle(title);
+            var cleanTitle = SearchTitle(title);
             var leadArtist = PrimaryArtist(artist);
             queries.Add(Tuple.Create("both", "song:" + Limit(title) +
                 " artist:" + Limit(artist)));
-            if (Normalize(cleanTitle) != Normalize(title) ||
-                Normalize(leadArtist) != Normalize(artist))
+            if (cleanTitle != title.Trim() || leadArtist != artist.Trim())
                 queries.Add(Tuple.Create("both", "song:" + Limit(cleanTitle) +
                     " artist:" + Limit(leadArtist)));
             queries.Add(Tuple.Create("song", Limit(cleanTitle)));
@@ -143,11 +171,19 @@ namespace MusicBeePlugin
 
         internal static double MatchTempo(string json, string title, string artist, string album)
         {
+            return Evaluate(json, title, artist, album).Bpm;
+        }
+
+        private static MatchEvaluation Evaluate(string json, string title,
+            string artist, string album)
+        {
             var root = JObject.Parse(json);
             if (root["error"] != null)
                 throw new InvalidOperationException("GetSongBPM could not complete the search.");
+            var evaluation = new MatchEvaluation();
             var results = root["search"] as JArray;
-            if (results == null) return 0;
+            if (results == null) return evaluation;
+            evaluation.HasResults = results.Count > 0;
             var wantedTitle = Normalize(CoreTitle(title));
             var wantedArtist = Normalize(artist);
             var wantedAlbum = Normalize(album);
@@ -158,26 +194,34 @@ namespace MusicBeePlugin
                 if (Normalize(CoreTitle(candidateTitle)) != wantedTitle ||
                     // Distinct featured versions must not collapse to one song.
                     (Normalize(title) != Normalize(candidateTitle) &&
-                     HasFeature(title) && HasFeature(candidateTitle)) ||
-                    !ArtistMatches(item["artist"], wantedArtist,
+                     HasFeature(title) && HasFeature(candidateTitle))) continue;
+                evaluation.HasTitle = true;
+                if (!ArtistMatches(item["artist"], wantedArtist,
                         Normalize(PrimaryArtist(artist)))) continue;
+                evaluation.HasArtist = true;
                 double bpm;
                 if (!double.TryParse((string)item["tempo"], NumberStyles.Float,
                     CultureInfo.InvariantCulture, out bpm) || bpm < 40 || bpm > 240 ||
                     double.IsNaN(bpm) || double.IsInfinity(bpm)) continue;
+                evaluation.HasTempo = true;
                 var itemAlbum = item["album"];
                 matches.Add(Tuple.Create(bpm, wantedAlbum.Length > 0 &&
                     AlbumMatches(itemAlbum, wantedAlbum)));
             }
-            if (matches.Count == 0) return 0;
+            if (matches.Count == 0) return evaluation;
             // Prefer this album if it resolves conflicting versions. Otherwise
             // conflicting tempos for the same title and artist need manual review.
             var albumMatches = matches.FindAll(match => match.Item2);
             if (albumMatches.Count > 0) matches = albumMatches;
             var first = matches[0].Item1;
             foreach (var match in matches)
-                if (Math.Abs(match.Item1 - first) > 0.5) return 0;
-            return first;
+                if (Math.Abs(match.Item1 - first) > 0.5)
+                {
+                    evaluation.Ambiguous = true;
+                    return evaluation;
+                }
+            evaluation.Bpm = first;
+            return evaluation;
         }
 
         private static bool AlbumMatches(JToken albums, string wanted)
@@ -235,6 +279,13 @@ namespace MusicBeePlugin
                 core = shortened;
             } while (core.Length > 0 && core != previous);
             return core.Length > 0 ? core : title.Trim();
+        }
+
+        private static string SearchTitle(string title)
+        {
+            var query = CoreTitle(title).Trim(' ', '~', '*', '♪', '☆', '★');
+            var shorter = OstSuffix.Replace(query, "").Trim();
+            return shorter.Length > 0 ? shorter : query;
         }
 
         private static string VersionTerms(string title)
