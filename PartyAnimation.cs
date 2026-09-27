@@ -43,5 +43,17 @@ namespace MusicBeePlugin
             }
             return nativeLoopMs;
         }
+
+        internal static int OriginForPhase(int positionMs, double oldBpm,
+            int oldOriginMs, double newBpm)
+        {
+            var oldLoop = LoopDurationMs(oldBpm);
+            var phase = (positionMs - (double)oldOriginMs) % oldLoop;
+            if (phase < 0) phase += oldLoop;
+            var newLoop = LoopDurationMs(newBpm);
+            var origin = (positionMs - phase / oldLoop * newLoop) % newLoop;
+            if (origin < 0) origin += newLoop;
+            return (int)Math.Round(origin);
+        }
     }
 }

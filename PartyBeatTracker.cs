@@ -86,12 +86,7 @@ namespace MusicBeePlugin
             // Keep the current animation frame when changing from its native
             // speed to the detected tempo. Subsequent frames use only the
             // frozen BPM and MusicBee's playback position.
-            var nativeLoop = PartyAnimation.FrameCount * PartyAnimation.FrameDurationMs;
-            var nativePhase = (positionMs % nativeLoop) / (double)nativeLoop;
-            var tempoLoop = PartyAnimation.LoopDurationMs(Bpm);
-            var origin = (positionMs - nativePhase * tempoLoop) % tempoLoop;
-            if (origin < 0) origin += tempoLoop;
-            OriginMs = (int)Math.Round(origin);
+            OriginMs = PartyAnimation.OriginForPhase(positionMs, 0, 0, Bpm);
         }
     }
 }

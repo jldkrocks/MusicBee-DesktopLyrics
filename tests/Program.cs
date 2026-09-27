@@ -75,6 +75,35 @@ namespace MusicBeePlugin
             if (beat.Bpm != fixedBpm || beat.OriginMs != fixedOrigin)
                 throw new Exception("A song's tempo and animation phase must not wander or stutter.");
 
+            var manualOrigin = PartyAnimation.OriginForPhase(1234, 80, 0, 160);
+            if (PartyAnimation.FrameAt(1234, 80) !=
+                PartyAnimation.FrameAt(1234 - manualOrigin, 160))
+                throw new Exception("Manual BPM adjustment must keep the current dance frame.");
+            var tempoRoot = Path.Combine(Path.GetTempPath(),
+                "DesktopLyrics-Tempo-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var tempoStore = new PartyTempoStore(tempoRoot);
+                tempoStore.Save("first.mp3", beat.Bpm, beat.OriginMs, false);
+                var loaded = new PartyTempoStore(tempoRoot).Load("first.mp3");
+                if (loaded == null || loaded.Manual || loaded.Bpm != beat.Bpm ||
+                    loaded.OriginMs != beat.OriginMs ||
+                    tempoStore.Load("second.mp3") != null)
+                    throw new Exception("A detected BPM must persist for only its song.");
+                tempoStore.Save("first.mp3", 132.5, manualOrigin, true);
+                loaded = new PartyTempoStore(tempoRoot).Load("first.mp3");
+                if (loaded == null || !loaded.Manual || loaded.Bpm != 132.5 ||
+                    loaded.OriginMs != manualOrigin)
+                    throw new Exception("A manual BPM must replace the saved automatic value.");
+                tempoStore.Delete("first.mp3");
+                if (new PartyTempoStore(tempoRoot).Load("first.mp3") != null)
+                    throw new Exception("Forgetting a BPM must allow fresh detection.");
+            }
+            finally
+            {
+                if (Directory.Exists(tempoRoot)) Directory.Delete(tempoRoot, true);
+            }
+
             const string lrc = "[00:09.68] First line\n" +
                                "[00:17.30] \n" +
                                "[00:17.30] Second line\n" +

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -23,6 +24,7 @@ namespace MusicBeePlugin
         private readonly Action<string, string> _previewTiming, _savedTiming;
         private readonly Action<string> _cancelTiming;
         private readonly EnglishTranslationStore _englishStore;
+        private readonly PartyTempoStore _partyTempoStore;
         private readonly Action<string> _englishSaved;
         private readonly ContextMenuStrip _flyoutMenu;
         private readonly float[] _fft = new float[4096];
@@ -58,7 +60,9 @@ namespace MusicBeePlugin
             _timingButton, _lrcButton, _backgroundButton, _partyButton, _resizeGrip;
         private PartyDancerWindow _leftDancer, _rightDancer;
         private readonly PartyBeatTracker _partyBeat = new PartyBeatTracker();
-        private double _partyBpm;
+        private double _partyBpm, _partyTagBpm;
+        private int _partyOriginMs;
+        private PartyTempoSource _partyTempoSource;
         private int _partySpectrumMisses;
         private long _lastPartyUpdate;
         private Rectangle _partyLayoutWindow, _leftPartyBounds, _rightPartyBounds;
@@ -83,6 +87,8 @@ namespace MusicBeePlugin
         private string _hoverQueue;
         private readonly List<TextGeometry> _textGeometries = new List<TextGeometry>();
         private static readonly Color ClearKey = Color.Fuchsia;
+
+        private enum PartyTempoSource { None, Tag, Saved, Manual }
 
         private sealed class QueueHit
         {
@@ -122,7 +128,7 @@ namespace MusicBeePlugin
             Action<SettingsObj> settingsChanged, Action openSettings,
             Action<string, string> previewTiming, Action<string> cancelTiming,
             Action<string, string> savedTiming, EnglishTranslationStore englishStore,
-            Action<string> englishSaved)
+            Action<string> englishSaved, PartyTempoStore partyTempoStore)
         {
             _settings = settings;
             _musicBee = musicBee;
@@ -133,6 +139,7 @@ namespace MusicBeePlugin
             _cancelTiming = cancelTiming;
             _savedTiming = savedTiming;
             _englishStore = englishStore;
+            _partyTempoStore = partyTempoStore;
             _englishSaved = englishSaved;
             _useArtworkColors = settings.UseArtworkColors;
             Text = "Desktop Lyrics";
@@ -342,10 +349,13 @@ namespace MusicBeePlugin
                 BeginInvoke(new Action(OpenTimingEditor)));
             var lrcAction = menu.Items.Add("Find lyrics on LRCLIB…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenLrcLibPicker)));
+            var tempoAction = menu.Items.Add("Adjust Party BPM…", null, (sender, args) =>
+                BeginInvoke(new Action(OpenPartyTempoEditor)));
             menu.Opening += (sender, args) =>
             {
                 timingAction.Visible = _timingButton.IsEmpty;
                 lrcAction.Visible = _lrcButton.IsEmpty;
+                tempoAction.Enabled = !string.IsNullOrWhiteSpace(_artworkTrackUrl);
             };
             menu.Items.Add("More settings…", null, (sender, args) =>
                 BeginInvoke(new Action(() => _openSettings?.Invoke())));
@@ -391,6 +401,124 @@ namespace MusicBeePlugin
             catch (Exception) { _playState = Plugin.PlayState.Undefined; }
         }
 
+        private void LoadPartyTempo(string trackUrl)
+        {
+            var saved = _partyTempoStore.Load(trackUrl);
+            if (saved != null && (saved.Manual || _partyTagBpm == 0))
+            {
+                _partyBpm = saved.Bpm;
+                _partyOriginMs = saved.OriginMs;
+                _partyTempoSource = saved.Manual ? PartyTempoSource.Manual :
+                    PartyTempoSource.Saved;
+            }
+            else
+            {
+                _partyBpm = _partyTagBpm;
+                _partyOriginMs = 0;
+                _partyTempoSource = _partyBpm > 0 ? PartyTempoSource.Tag :
+                    PartyTempoSource.None;
+            }
+        }
+
+        private void OpenPartyTempoEditor()
+        {
+            var trackUrl = _artworkTrackUrl;
+            if (string.IsNullOrWhiteSpace(trackUrl)) return;
+            var saved = _partyTempoStore.Load(trackUrl);
+            var currentBpm = _partyBpm > 0 ? _partyBpm :
+                _partyBeat.Bpm > 0 ? _partyBeat.Bpm : 120;
+            using (var dialog = new Form
+            {
+                Text = "Party BPM for this song", ClientSize = new Size(360, 170),
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterParent,
+                ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false,
+                TopMost = true
+            })
+            {
+                var title = new Label
+                {
+                    Text = string.IsNullOrWhiteSpace(_songTitle) ? "Current song" : _songTitle,
+                    AutoEllipsis = true, Bounds = new Rectangle(16, 12, 328, 24)
+                };
+                var bpmLabel = new Label
+                {
+                    Text = "BPM", Bounds = new Rectangle(16, 48, 64, 22)
+                };
+                var bpmInput = new NumericUpDown
+                {
+                    Minimum = 40, Maximum = 240, DecimalPlaces = 1,
+                    Increment = 1, Value = (decimal)Math.Round(currentBpm, 1),
+                    Bounds = new Rectangle(82, 43, 100, 26)
+                };
+                var explanation = new Label
+                {
+                    Text = "Saved for this song by Desktop Lyrics. Music tags are not changed.",
+                    Bounds = new Rectangle(16, 82, 328, 34)
+                };
+                var forget = new Button
+                {
+                    Text = "Forget saved BPM", Enabled = saved != null,
+                    Bounds = new Rectangle(16, 128, 140, 28)
+                };
+                var cancel = new Button
+                {
+                    Text = "Cancel", DialogResult = DialogResult.Cancel,
+                    Bounds = new Rectangle(188, 128, 74, 28)
+                };
+                var save = new Button
+                {
+                    Text = "Save", DialogResult = DialogResult.OK,
+                    Bounds = new Rectangle(270, 128, 74, 28)
+                };
+                forget.Click += (sender, args) => { dialog.DialogResult = DialogResult.No; dialog.Close(); };
+                dialog.Controls.AddRange(new Control[]
+                    { title, bpmLabel, bpmInput, explanation, forget, cancel, save });
+                dialog.AcceptButton = save;
+                dialog.CancelButton = cancel;
+                var result = dialog.ShowDialog(this);
+                if (result != DialogResult.OK && result != DialogResult.No) return;
+                try
+                {
+                    if (_musicBee.NowPlaying_GetFileUrl() != trackUrl)
+                    {
+                        MessageBox.Show(this, "The song changed. Open Party BPM again for the current song.",
+                            "Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                    if (result == DialogResult.No)
+                    {
+                        _partyTempoStore.Delete(trackUrl);
+                        _partyBeat.Reset();
+                        LoadPartyTempo(trackUrl);
+                    }
+                    else
+                    {
+                        var bpm = (double)bpmInput.Value;
+                        var position = Math.Max(0, _musicBee.Player_GetPosition());
+                        var oldBpm = _partyBpm > 0 ? _partyBpm : _partyBeat.Bpm;
+                        var oldOrigin = _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs;
+                        var origin = PartyAnimation.OriginForPhase(position,
+                            oldBpm, oldOrigin, bpm);
+                        _partyTempoStore.Save(trackUrl, bpm, origin, true);
+                        _partyBpm = bpm;
+                        _partyOriginMs = origin;
+                        _partyTempoSource = PartyTempoSource.Manual;
+                        _partyBeat.Reset();
+                    }
+                    _partySpectrumMisses = 0;
+                    _lastPartyUpdate = 0;
+                    UpdatePartyDancers();
+                    Invalidate();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Could not save Party BPM: " + ex.Message,
+                        "Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+        }
+
         private void UpdatePartyDancers()
         {
             if (!_loaded || _animationDisposed) return;
@@ -415,7 +543,7 @@ namespace MusicBeePlugin
                 var position = _musicBee.Player_GetPosition();
                 var detectedBpm = _partyBpm == 0 ? _partyBeat.Bpm : 0;
                 var frame = PartyAnimation.FrameAt(
-                    position - (detectedBpm > 0 ? _partyBeat.OriginMs : 0),
+                    position - (_partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs),
                     _partyBpm > 0 ? _partyBpm : detectedBpm);
                 RefreshPartyLayout();
                 PlacePartyDancer(_leftDancer, _leftPartyBounds, frame);
@@ -525,11 +653,12 @@ namespace MusicBeePlugin
                 _lastFutureOffset = 0;
                 try
                 {
-                    _partyBpm = PartyAnimation.ReadBpm(
+                    _partyTagBpm = PartyAnimation.ReadBpm(
                         _musicBee.NowPlaying_GetFileTag(Plugin.MetaDataType.BeatsPerMin));
                 }
-                catch (Exception) { _partyBpm = 0; }
+                catch (Exception) { _partyTagBpm = 0; }
                 _partyBeat.Reset();
+                LoadPartyTempo(trackUrl);
                 _partySpectrumMisses = 0;
                 _lastPartyUpdate = 0;
             }
@@ -751,8 +880,18 @@ namespace MusicBeePlugin
                             SafeMagnitude(_fft[validCount / 2 - 1 - bin])));
                     bassEnergy += magnitude / Math.Sqrt(bin);
                 }
-                try { _partyBeat.Observe(_musicBee.Player_GetPosition(), bassEnergy); }
-                catch (Exception) { /* Playback position can be unavailable between songs. */ }
+                try
+                {
+                    _partyBeat.Observe(_musicBee.Player_GetPosition(), bassEnergy);
+                    if (_partyBeat.Bpm > 0 && !string.IsNullOrWhiteSpace(_artworkTrackUrl))
+                        _partyTempoStore.Save(_artworkTrackUrl, _partyBeat.Bpm,
+                            _partyBeat.OriginMs, false);
+                }
+                catch (Exception)
+                {
+                    // Playback position or plugin storage can be unavailable.
+                    // The current song still uses the tempo if saving fails.
+                }
             }
             var total = 0f;
             for (var bar = 0; bar < BarCount; bar++)
@@ -1577,8 +1716,12 @@ namespace MusicBeePlugin
                 {
                     g.DrawString("PARTY", font, brush, new Rectangle(
                         _partyButton.Left, _partyButton.Top + 2, _partyButton.Width, 17), format);
-                    var tempo = _partyBpm > 0 ? "TAG " + Math.Round(_partyBpm) + " BPM" :
-                        _partyBeat.Bpm > 0 ? "AUTO " + Math.Round(_partyBeat.Bpm) + " BPM" :
+                    var source = _partyTempoSource == PartyTempoSource.Manual ? "SET " :
+                        _partyTempoSource == PartyTempoSource.Saved ? "SAVED " : "TAG ";
+                    var tempo = _partyBpm > 0 ? source +
+                        _partyBpm.ToString("0.#", CultureInfo.InvariantCulture) :
+                        _partyBeat.Bpm > 0 ? "AUTO " +
+                            _partyBeat.Bpm.ToString("0.#", CultureInfo.InvariantCulture) :
                         _partySpectrumMisses >= 30 ? "NO SIGNAL" : "LISTENING...";
                     g.DrawString(tempo, smallFont, brush, new Rectangle(
                         _partyButton.Left, _partyButton.Top + 18, _partyButton.Width, 16), format);

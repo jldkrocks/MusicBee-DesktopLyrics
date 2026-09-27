@@ -110,6 +110,7 @@
     <Compile Include="FrmLyricsWindow.cs" />
     <Compile Include="PartyAnimation.cs" />
     <Compile Include="PartyBeatTracker.cs" />
+    <Compile Include="PartyTempoStore.cs" />
     <Compile Include="PartyLayout.cs" />
     <Compile Include="PartyDancerWindow.cs" />
     <Compile Include="LyricCardLayout.cs" />
