@@ -982,7 +982,7 @@ namespace MusicBeePlugin
             DrawQueueNotice(g, content);
             DrawSongTitle(g, bounds);
             DrawTransport(g, bounds);
-            if (_settings.TransparentCanvas)
+            if (_settings.TransparentCanvas || bounds.Width < 700)
                 _timingButton = _lrcButton = Rectangle.Empty;
             else
             {
@@ -1099,11 +1099,14 @@ namespace MusicBeePlugin
             if (!_settings.ShowSongTitle || string.IsNullOrWhiteSpace(_songTitle)) return;
             var text = _songTitle.Trim();
             if (!string.IsNullOrWhiteSpace(_songArtist)) text += "  ·  " + _songArtist.Trim();
-            var titleArea = _settings.TransparentCanvas ?
-                new RectangleF(Math.Max(8, bounds.Width / 2f - 230),
-                    bounds.Height < 260 ? 18 : 26,
-                    Math.Min(460, Math.Max(1, bounds.Width - 160)), 29) :
-                new RectangleF(120, 7, Math.Max(1, bounds.Width - 365), 29);
+            // Centre on the window and its playback controls. Leave room for
+            // the regular-mode actions on the right; narrow windows put those
+            // actions in the flyout and can give the title more space.
+            var titleWidth = Math.Min(460, Math.Max(1, bounds.Width -
+                (_settings.TransparentCanvas || bounds.Width < 700 ? 160 : 500)));
+            var titleArea = new RectangleF((bounds.Width - titleWidth) / 2f,
+                _settings.TransparentCanvas ? (bounds.Height < 260 ? 18 : 26) : 7,
+                titleWidth, 29);
             if (_settings.TransparentCanvas)
                 using (var path = RoundedRectangle(Rectangle.Round(titleArea), 10))
                 using (var shade = new SolidBrush(Color.FromArgb(255, 13, 17, 28)))
@@ -1325,7 +1328,7 @@ namespace MusicBeePlugin
         private void DrawBackgroundButton(Graphics g, Rectangle bounds)
         {
             _backgroundButton = new Rectangle(bounds.Right -
-                (_settings.TransparentCanvas ? 78 : 238), 7, 32, 29);
+                (_settings.TransparentCanvas || bounds.Width < 700 ? 78 : 238), 7, 32, 29);
             using (var path = RoundedRectangle(_backgroundButton, 8))
             using (var shade = new SolidBrush(Color.FromArgb(
                        _settings.TransparentCanvas ? 255 : 72, 20, 38, 58)))
