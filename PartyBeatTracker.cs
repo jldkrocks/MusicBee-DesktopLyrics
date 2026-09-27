@@ -83,10 +83,9 @@ namespace MusicBeePlugin
             if (matches < 5) return;
             Bpm = 60000d * matches / total;
 
-            // Keep the current animation frame when changing from its native
-            // speed to the detected tempo. Subsequent frames use only the
-            // frozen BPM and MusicBee's playback position.
-            OriginMs = PartyAnimation.OriginForPhase(positionMs, 0, 0, Bpm);
+            // The current onset is the beat reference. It selects the raised
+            // side pose now and the opposite side on the next beat.
+            OriginMs = PartyAnimation.OriginForBeat(positionMs, Bpm);
         }
     }
 }

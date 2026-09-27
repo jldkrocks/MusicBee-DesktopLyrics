@@ -4,6 +4,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
+using Newtonsoft.Json.Linq;
 
 namespace MusicBeePlugin
 {
@@ -17,13 +18,20 @@ namespace MusicBeePlugin
                 PartyAnimation.ReadBpm("unknown") != 0 ||
                 PartyAnimation.FrameAt(140, 0) != 1 ||
                 PartyAnimation.FrameAt(1680, 0) != 0 ||
-                PartyAnimation.FrameAt(750, 120) != 4 ||
-                PartyAnimation.FrameAt(2000, 120) != 0 ||
-                PartyAnimation.FrameAt(1000, 80) != 4 ||
-                PartyAnimation.FrameAt(1000, 160) != 8 ||
-                Math.Abs(PartyAnimation.LoopDurationMs(80) - 3000) > 0.001 ||
-                Math.Abs(PartyAnimation.LoopDurationMs(160) - 1500) > 0.001)
-                throw new Exception("Party dancers must have a visibly different four-beat speed per song.");
+                PartyAnimation.FrameAt(750, 120) != 9 ||
+                PartyAnimation.FrameAt(1000, 120) != 0 ||
+                PartyAnimation.FrameAt(1000, 80) != 8 ||
+                PartyAnimation.FrameAt(1000, 160) != 4 ||
+                Math.Abs(PartyAnimation.LoopDurationMs(80) - 1500) > 0.001 ||
+                Math.Abs(PartyAnimation.LoopDurationMs(160) - 750) > 0.001)
+                throw new Exception("Party dancers must cross sides on each beat.");
+
+            var beatOrigin = PartyAnimation.OriginForBeat(750, 120);
+            if (PartyAnimation.FrameAt(750 - beatOrigin, 120) != 6 ||
+                PartyAnimation.FrameAt(1250 - beatOrigin, 120) != 0 ||
+                PartyAnimation.FrameAt(1750 - beatOrigin, 120) != 6 ||
+                PartyAnimation.FrameAt(-PartyAnimation.OriginForBeat(0, 120), 120) != 6)
+                throw new Exception("The marked frame and opposite pose must alternate on beats.");
 
             var workArea = new Rectangle(0, 0, 1920, 1040);
             var monitors = new[] { new Rectangle(-1920, 0, 1920, 1040),
@@ -60,9 +68,8 @@ namespace MusicBeePlugin
                 if (lockedAt < 0 && beat.Bpm > 0)
                 {
                     lockedAt = ms;
-                    if (PartyAnimation.FrameAt(ms, 0) !=
-                        PartyAnimation.FrameAt(ms - beat.OriginMs, beat.Bpm))
-                        throw new Exception("Locking the song tempo must preserve the current frame.");
+                    if (PartyAnimation.FrameAt(ms - beat.OriginMs, beat.Bpm) != 6)
+                        throw new Exception("A detected beat must select the marked frame.");
                 }
             }
             if (lockedAt < 0 || Math.Abs(beat.Bpm - 60000d / 510) > 5)
@@ -86,7 +93,8 @@ namespace MusicBeePlugin
                 var tempoStore = new PartyTempoStore(tempoRoot);
                 tempoStore.Save("first.mp3", beat.Bpm, beat.OriginMs, false);
                 var loaded = new PartyTempoStore(tempoRoot).Load("first.mp3");
-                if (loaded == null || loaded.Manual || loaded.Bpm != beat.Bpm ||
+                if (loaded == null || loaded.Manual || !loaded.TwoBeatPhase ||
+                    loaded.Bpm != beat.Bpm ||
                     loaded.OriginMs != beat.OriginMs ||
                     tempoStore.Load("second.mp3") != null)
                     throw new Exception("A detected BPM must persist for only its song.");
@@ -98,6 +106,16 @@ namespace MusicBeePlugin
                 tempoStore.Delete("first.mp3");
                 if (new PartyTempoStore(tempoRoot).Load("first.mp3") != null)
                     throw new Exception("Forgetting a BPM must allow fresh detection.");
+                tempoStore.Save("old.mp3", 120, 123, false);
+                var oldFile = Directory.GetFiles(Path.Combine(tempoRoot,
+                    "DesktopLyrics-PartyTempo"), "*.json")[0];
+                var oldJson = JObject.Parse(File.ReadAllText(oldFile));
+                oldJson.Remove("TwoBeatPhase");
+                File.WriteAllText(oldFile, oldJson.ToString());
+                loaded = new PartyTempoStore(tempoRoot).Load("old.mp3");
+                if (loaded == null || loaded.Bpm != 120 ||
+                    loaded.OriginMs != PartyAnimation.OriginForBeat(0, 120))
+                    throw new Exception("Older saved BPMs must keep their speed with a new beat phase.");
             }
             finally
             {

@@ -414,7 +414,8 @@ namespace MusicBeePlugin
             else
             {
                 _partyBpm = _partyTagBpm;
-                _partyOriginMs = 0;
+                _partyOriginMs = _partyBpm > 0 ?
+                    PartyAnimation.OriginForBeat(0, _partyBpm) : 0;
                 _partyTempoSource = _partyBpm > 0 ? PartyTempoSource.Tag :
                     PartyTempoSource.None;
             }
@@ -427,9 +428,10 @@ namespace MusicBeePlugin
             var saved = _partyTempoStore.Load(trackUrl);
             var currentBpm = _partyBpm > 0 ? _partyBpm :
                 _partyBeat.Bpm > 0 ? _partyBeat.Bpm : 120;
+            int? tappedBeat = null;
             using (var dialog = new Form
             {
-                Text = "Party BPM for this song", ClientSize = new Size(360, 170),
+                Text = "Party BPM for this song", ClientSize = new Size(360, 204),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition = FormStartPosition.CenterParent,
                 ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false,
@@ -451,29 +453,49 @@ namespace MusicBeePlugin
                     Increment = 1, Value = (decimal)Math.Round(currentBpm, 1),
                     Bounds = new Rectangle(82, 43, 100, 26)
                 };
+                var syncBeat = new Button
+                {
+                    Text = "Sync pose on beat",
+                    Bounds = new Rectangle(190, 43, 154, 28)
+                };
                 var explanation = new Label
                 {
-                    Text = "Saved for this song by Desktop Lyrics. Music tags are not changed.",
-                    Bounds = new Rectangle(16, 82, 328, 34)
+                    Text = "Click Sync when the music hits a beat to put the raised-arm pose there. Save stores BPM and timing only in Desktop Lyrics.",
+                    Bounds = new Rectangle(16, 84, 328, 60)
                 };
                 var forget = new Button
                 {
                     Text = "Forget saved BPM", Enabled = saved != null,
-                    Bounds = new Rectangle(16, 128, 140, 28)
+                    Bounds = new Rectangle(16, 164, 140, 28)
                 };
                 var cancel = new Button
                 {
                     Text = "Cancel", DialogResult = DialogResult.Cancel,
-                    Bounds = new Rectangle(188, 128, 74, 28)
+                    Bounds = new Rectangle(188, 164, 74, 28)
                 };
                 var save = new Button
                 {
                     Text = "Save", DialogResult = DialogResult.OK,
-                    Bounds = new Rectangle(270, 128, 74, 28)
+                    Bounds = new Rectangle(270, 164, 74, 28)
+                };
+                syncBeat.Click += (sender, args) =>
+                {
+                    try
+                    {
+                        if (_musicBee.NowPlaying_GetFileUrl() != trackUrl)
+                            throw new InvalidOperationException("The song changed.");
+                        tappedBeat = Math.Max(0, _musicBee.Player_GetPosition());
+                        syncBeat.Text = "Beat captured";
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(dialog, "Could not mark the beat: " + ex.Message,
+                            "Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                 };
                 forget.Click += (sender, args) => { dialog.DialogResult = DialogResult.No; dialog.Close(); };
                 dialog.Controls.AddRange(new Control[]
-                    { title, bpmLabel, bpmInput, explanation, forget, cancel, save });
+                    { title, bpmLabel, bpmInput, syncBeat, explanation, forget, cancel, save });
                 dialog.AcceptButton = save;
                 dialog.CancelButton = cancel;
                 var result = dialog.ShowDialog(this);
@@ -495,11 +517,17 @@ namespace MusicBeePlugin
                     else
                     {
                         var bpm = (double)bpmInput.Value;
-                        var position = Math.Max(0, _musicBee.Player_GetPosition());
-                        var oldBpm = _partyBpm > 0 ? _partyBpm : _partyBeat.Bpm;
-                        var oldOrigin = _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs;
-                        var origin = PartyAnimation.OriginForPhase(position,
-                            oldBpm, oldOrigin, bpm);
+                        int origin;
+                        if (tappedBeat.HasValue)
+                            origin = PartyAnimation.OriginForBeat(tappedBeat.Value, bpm);
+                        else
+                        {
+                            var position = Math.Max(0, _musicBee.Player_GetPosition());
+                            var oldBpm = _partyBpm > 0 ? _partyBpm : _partyBeat.Bpm;
+                            var oldOrigin = _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs;
+                            origin = PartyAnimation.OriginForPhase(position,
+                                oldBpm, oldOrigin, bpm);
+                        }
                         _partyTempoStore.Save(trackUrl, bpm, origin, true);
                         _partyBpm = bpm;
                         _partyOriginMs = origin;

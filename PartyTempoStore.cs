@@ -12,6 +12,7 @@ namespace MusicBeePlugin
         public double Bpm;
         public int OriginMs;
         public bool Manual;
+        public bool TwoBeatPhase;
     }
 
     // One small file per song avoids rewriting the main plugin settings while
@@ -36,10 +37,15 @@ namespace MusicBeePlugin
                 if (!File.Exists(filename)) return null;
                 var entry = JsonConvert.DeserializeObject<PartyTempoEntry>(
                     File.ReadAllText(filename));
-                return entry != null && entry.TrackUrl == trackUrl &&
-                    entry.Bpm >= 40 && entry.Bpm <= 240 &&
-                    !double.IsNaN(entry.Bpm) && !double.IsInfinity(entry.Bpm) &&
-                    entry.OriginMs >= 0 && entry.OriginMs <= 6000 ? entry : null;
+                if (entry == null || entry.TrackUrl != trackUrl ||
+                    entry.Bpm < 40 || entry.Bpm > 240 ||
+                    double.IsNaN(entry.Bpm) || double.IsInfinity(entry.Bpm) ||
+                    entry.OriginMs < 0 || entry.OriginMs > 6000) return null;
+                // Older saved values used a four-beat loop and an arbitrary
+                // phase. Keep the BPM, but start at the assumed beat at 0.
+                if (!entry.TwoBeatPhase)
+                    entry.OriginMs = PartyAnimation.OriginForBeat(0, entry.Bpm);
+                return entry;
             }
             catch (Exception) { return null; } // Inaccessible or invalid cache.
         }
@@ -57,7 +63,8 @@ namespace MusicBeePlugin
             {
                 File.WriteAllText(temporary, JsonConvert.SerializeObject(new PartyTempoEntry
                 {
-                    TrackUrl = trackUrl, Bpm = bpm, OriginMs = originMs, Manual = manual
+                    TrackUrl = trackUrl, Bpm = bpm, OriginMs = originMs,
+                    Manual = manual, TwoBeatPhase = true
                 }), new UTF8Encoding(false));
                 if (File.Exists(filename)) File.Replace(temporary, filename, null);
                 else File.Move(temporary, filename);

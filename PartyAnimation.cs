@@ -36,12 +36,22 @@ namespace MusicBeePlugin
             var nativeLoopMs = FrameCount * FrameDurationMs;
             if (bpm >= 40 && bpm <= 240)
             {
-                // A fixed four-beat phrase makes the actual song tempo change
-                // the dancer's speed. Rounding the beat count to preserve the
-                // native speed made very different BPMs look almost identical.
-                return 4 * 60000d / bpm;
+                // Frame 6 is the raised-arm side pose; frame 0 is the opposite
+                // side. A two-beat loop puts those poses one beat apart.
+                return 2 * 60000d / bpm;
             }
             return nativeLoopMs;
+        }
+
+        internal static int OriginForBeat(int beatPositionMs, double bpm)
+        {
+            var loop = LoopDurationMs(bpm);
+            // At the beat the animation is halfway through its loop (frame 6).
+            // The next beat returns to frame 0. Floor keeps a fractional loop
+            // from putting the sampled beat just before frame 6.
+            var origin = (beatPositionMs - loop / 2) % loop;
+            if (origin < 0) origin += loop;
+            return (int)Math.Floor(origin);
         }
 
         internal static int OriginForPhase(int positionMs, double oldBpm,
