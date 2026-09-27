@@ -33,6 +33,7 @@ namespace MusicBeePlugin
         private Timer _timer;
         private System.Windows.Forms.Timer _stopHideTimer;
         private LyricsController _lyricsCtrl;
+        private EnglishTranslationStore _englishStore;
         private readonly object _lock = new object();
         private DateTime _missingLyricsSinceUtc = DateTime.MinValue;
 
@@ -56,7 +57,9 @@ namespace MusicBeePlugin
             _about.ReceiveNotifications = ReceiveNotificationFlags.PlayerEvents;
             _about.ConfigurationPanelHeight = 0;   // height in pixels that musicbee should reserve in a panel for config settings. When set, a handle to an empty panel will be passed to the Configure function
 
-            _lyricsCtrl = new LyricsController(_mbApiInterface);
+            _englishStore = new EnglishTranslationStore(
+                _mbApiInterface.Setting_GetPersistentStoragePath());
+            _lyricsCtrl = new LyricsController(_mbApiInterface, _englishStore);
             return _about;
         }
 
@@ -382,7 +385,8 @@ namespace MusicBeePlugin
                 var view = (IDesktopLyricsView)new FrmLyricsWindow(_settings,
                     _mbApiInterface, _history, WindowSettingsChanged,
                     () => Configure(IntPtr.Zero), PreviewTimingLyrics,
-                    CancelTimingPreview, TimingLyricsSaved);
+                    CancelTimingPreview, TimingLyricsSaved, _englishStore,
+                    ImportedEnglishSaved);
                 _frmLyrics = view;
                 view.Form.FormClosed += (sender, args) =>
                 {
@@ -427,6 +431,12 @@ namespace MusicBeePlugin
         private void TimingLyricsSaved(string trackUrl, string lyrics)
         {
             lock (_lock) _lyricsCtrl.KeepSavedLyrics(trackUrl, lyrics);
+            UpdateLyrics(force: true);
+        }
+
+        private void ImportedEnglishSaved(string trackUrl)
+        {
+            lock (_lock) _lyricsCtrl.InvalidateImportedEnglish();
             UpdateLyrics(force: true);
         }
 

@@ -22,6 +22,8 @@ namespace MusicBeePlugin
         private readonly Action _openSettings;
         private readonly Action<string, string> _previewTiming, _savedTiming;
         private readonly Action<string> _cancelTiming;
+        private readonly EnglishTranslationStore _englishStore;
+        private readonly Action<string> _englishSaved;
         private readonly ContextMenuStrip _flyoutMenu;
         private readonly float[] _fft = new float[4096];
         private readonly float[] _bars = new float[BarCount];
@@ -61,6 +63,7 @@ namespace MusicBeePlugin
         private FrmTimingEditor _timingEditor;
         private FrmTimingCreator _timingCreator;
         private FrmLrcLibPicker _lrcPicker;
+        private FrmEnglishImport _englishImporter;
         private List<UpcomingQueue.Track> _queueTracks = new List<UpcomingQueue.Track>();
         private readonly List<QueueHit> _queueHits = new List<QueueHit>();
         private Rectangle _queueCard, _queueTab, _queueUpButton, _queueDownButton;
@@ -109,7 +112,8 @@ namespace MusicBeePlugin
             PlaybackHistory history,
             Action<SettingsObj> settingsChanged, Action openSettings,
             Action<string, string> previewTiming, Action<string> cancelTiming,
-            Action<string, string> savedTiming)
+            Action<string, string> savedTiming, EnglishTranslationStore englishStore,
+            Action<string> englishSaved)
         {
             _settings = settings;
             _musicBee = musicBee;
@@ -119,6 +123,8 @@ namespace MusicBeePlugin
             _previewTiming = previewTiming;
             _cancelTiming = cancelTiming;
             _savedTiming = savedTiming;
+            _englishStore = englishStore;
+            _englishSaved = englishSaved;
             _useArtworkColors = settings.UseArtworkColors;
             Text = "Desktop Lyrics";
             FormBorderStyle = FormBorderStyle.SizableToolWindow;
@@ -309,9 +315,11 @@ namespace MusicBeePlugin
                 value => _settings.UseArtworkColors = value);
             AddToggle(menu, "Preview next lyric", () => _settings.NextLineWhenNoTranslation,
                 value => _settings.NextLineWhenNoTranslation = value);
-            AddToggle(menu, "Show translation", () => _settings.ShowTranslation,
+            AddToggle(menu, "Show English / translation", () => _settings.ShowTranslation,
                 value => _settings.ShowTranslation = value);
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Add English meaning from Genius…", null, (sender, args) =>
+                BeginInvoke(new Action(OpenEnglishImporter)));
             menu.Items.Add("Edit lyric timing…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenTimingEditor)));
             menu.Items.Add("Find lyrics on LRCLIB…", null, (sender, args) =>
@@ -399,6 +407,9 @@ namespace MusicBeePlugin
             if (_lrcPicker != null && !_lrcPicker.IsDisposed &&
                 trackUrl != _lrcPicker.TrackUrl)
                 _lrcPicker.TrackChanged();
+            if (_englishImporter != null && !_englishImporter.IsDisposed &&
+                trackUrl != _englishImporter.TrackUrl)
+                _englishImporter.TrackChanged();
             _artworkTrackUrl = trackUrl;
             if (trackChanged)
             {
@@ -1409,6 +1420,56 @@ namespace MusicBeePlugin
                 picker?.Dispose();
                 MessageBox.Show(this, "Could not open LRCLIB search: " + ex.Message,
                     "Find timed lyrics", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void OpenEnglishImporter()
+        {
+            if (_englishImporter != null && !_englishImporter.IsDisposed)
+            {
+                _englishImporter.BringToFront();
+                return;
+            }
+            FrmEnglishImport importer = null;
+            try
+            {
+                var trackUrl = _musicBee.NowPlaying_GetFileUrl();
+                if (string.IsNullOrWhiteSpace(trackUrl))
+                {
+                    MessageBox.Show(this, "Play a song with timed romaji lyrics first.",
+                        "Add English meaning", MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+                var tag = _musicBee.Library_GetFileTag?.Invoke(trackUrl,
+                    Plugin.MetaDataType.Lyrics);
+                var source = string.IsNullOrWhiteSpace(tag) ?
+                    _musicBee.NowPlaying_GetLyrics() : tag;
+                var lyrics = LyricParser.ParseLyric(source);
+                if (lyrics == null || lyrics.Entries.Count == 0)
+                {
+                    MessageBox.Show(this,
+                        "This song needs timed lyrics in MusicBee before English can follow them.",
+                        "Add English meaning", MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+                importer = new FrmEnglishImport(_musicBee, _englishStore,
+                    trackUrl, _songTitle, _songArtist, lyrics.Entries, _englishSaved);
+                _englishImporter = importer;
+                importer.FormClosed += (sender, args) =>
+                {
+                    if (ReferenceEquals(_englishImporter, importer))
+                        _englishImporter = null;
+                };
+                importer.Show(this);
+            }
+            catch (Exception ex)
+            {
+                if (ReferenceEquals(_englishImporter, importer)) _englishImporter = null;
+                importer?.Dispose();
+                MessageBox.Show(this, "Could not open English import: " + ex.Message,
+                    "Add English meaning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 

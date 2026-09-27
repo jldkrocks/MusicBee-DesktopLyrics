@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace MusicBeePlugin
 {
@@ -10,6 +10,7 @@ namespace MusicBeePlugin
         public bool ShowTranslation { get; set; } = true;
 
         private readonly Plugin.MusicBeeApiInterface _interface;
+        private readonly EnglishTranslationStore _englishStore;
         private string _lastLyrics;
         private LyricParser.Lyrics _lyrics;
         private string _editedTrackUrl, _editedLyrics;
@@ -17,9 +18,22 @@ namespace MusicBeePlugin
         private bool _savedTagSeen;
         private string _tagTrackUrl, _taggedLyrics;
         private DateTime _nextTagCheckUtc;
-        public LyricsController(Plugin.MusicBeeApiInterface @interface)
+        private string _englishTrackUrl;
+        private LyricParser.Lyrics _englishLyrics;
+        private string[] _englishLines;
+
+        public LyricsController(Plugin.MusicBeeApiInterface @interface,
+            EnglishTranslationStore englishStore = null)
         {
             _interface = @interface;
+            _englishStore = englishStore;
+        }
+
+        public void InvalidateImportedEnglish()
+        {
+            _englishTrackUrl = null;
+            _englishLyrics = null;
+            _englishLines = null;
         }
 
         public void PreviewLyrics(string trackUrl, string lyrics)
@@ -124,6 +138,12 @@ namespace MusicBeePlugin
                     _interface.NowPlaying_GetFileTag(Plugin.MetaDataType.Artist), null);
                 return null;
             }
+            if (_englishTrackUrl != currentUrl || !ReferenceEquals(_englishLyrics, _lyrics))
+            {
+                _englishTrackUrl = currentUrl;
+                _englishLyrics = _lyrics;
+                _englishLines = _englishStore?.Load(currentUrl, _lyrics.Entries);
+            }
                 
             var time = _interface.Player_GetPosition();
             var nTime = time + _lyrics.Offset;
@@ -152,8 +172,12 @@ namespace MusicBeePlugin
                     break;
                 }
             }
+            var english = _englishLines != null && currentIndex < _englishLines.Length
+                ? _englishLines[currentIndex] : null;
+            var translation = !string.IsNullOrWhiteSpace(english)
+                ? english : currentEntry.LyricLine2;
             return new LyricView(currentEntry.LyricLine1,
-                ShowTranslation ? currentEntry.LyricLine2 : null, nextLine);
+                ShowTranslation ? translation : null, nextLine);
         }
 
         public class LyricView

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -108,6 +108,9 @@
     <Compile Include="Gdiplus.cs" />
     <Compile Include="GdiplusPInvoke.cs" />
     <Compile Include="FrmLyricsWindow.cs" />
+    <Compile Include="FrmEnglishImport.cs" />
+    <Compile Include="EnglishImportDocument.cs" />
+    <Compile Include="EnglishTranslationStore.cs" />
     <Compile Include="FrmTimingEditor.cs" />
     <Compile Include="FrmTimingCreator.cs" />
     <Compile Include="IDesktopLyricsView.cs" />

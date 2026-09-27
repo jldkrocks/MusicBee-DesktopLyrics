@@ -43,6 +43,93 @@ namespace MusicBeePlugin
                 throw new Exception("The flyout toggle must hide only the translation.");
             Console.WriteLine("LRC parser checks passed.");
 
+            const string romajiLrc = "[00:00.00] ...\n" +
+                "[00:09.00] The moon above\n" +
+                "[00:12.00] An alley flickers\n" +
+                "[00:16.00] The city sleeps";
+            var romaji = LyricParser.ParseLyric(romajiLrc).Entries;
+            var sequential = new EnglishImportDocument(romaji,
+                "[Verse 1]\nMoonlight\nThe lights\nThe city is quiet", null);
+            if (sequential.Rows[0].English != "" ||
+                sequential.Rows[1].English != "Moonlight" ||
+                sequential.Rows[3].English != "The city is quiet" ||
+                sequential.EmptyCount != 0 || sequential.ExtraCount != 0)
+                throw new Exception("English lines must skip instrumental placeholders.");
+            var bridge = new EnglishImportDocument(romaji,
+                "[Verse 1]\nMoonlight\nThe lights shine\nThe city is quiet",
+                "[Verse 1]\nThe moon above\nAn alley\nflickers\nThe city sleeps");
+            if (bridge.Rows[1].English != "Moonlight" ||
+                bridge.Rows[2].English != "The lights shine" ||
+                bridge.Rows[3].English != "The city is quiet" ||
+                !bridge.Rows[2].Check)
+                throw new Exception("Optional romaji must bridge different line breaks and flag uncertain pairs.");
+            var oneMeaning = new EnglishImportDocument(romaji,
+                "Moonlight\nThe city is quiet", null);
+            oneMeaning.RepeatPrevious(2);
+            if (oneMeaning.Rows[0].English != "" ||
+                oneMeaning.Rows[1].English != "Moonlight" ||
+                oneMeaning.Rows[2].English != "Moonlight" ||
+                oneMeaning.Rows[3].English != "The city is quiet" ||
+                oneMeaning.EmptyCount != 0)
+                throw new Exception("Repeating a meaning must shift only active lyric rows.");
+            var splitMeaning = new EnglishImportDocument(romaji,
+                "Moonlight\nThrough the alley\nThe lights shine\nThe city is quiet", null);
+            splitMeaning.JoinNext(1);
+            if (splitMeaning.Rows[0].English != "" ||
+                splitMeaning.Rows[1].English != "Moonlight / Through the alley" ||
+                splitMeaning.Rows[2].English != "The lights shine" ||
+                splitMeaning.Rows[3].English != "The city is quiet" ||
+                splitMeaning.ExtraCount != 0)
+                throw new Exception("Joining two meanings must use an extra line and skip placeholders.");
+
+            var englishRoot = Path.Combine(Path.GetTempPath(), "LyricsEnglish-" + Guid.NewGuid());
+            try
+            {
+                var store = new EnglishTranslationStore(englishRoot);
+                store.Save("romaji.mp3", romaji, sequential.TranslationLines(),
+                    "https://genius.com/example");
+                var saved = store.Load("romaji.mp3", romaji);
+                if (saved == null || saved[1] != "Moonlight" ||
+                    store.Load("another.mp3", romaji) != null)
+                    throw new Exception("Saved English must belong only to its song.");
+                var shifted = LyricParser.ParseLyric(romajiLrc.Replace("[00:09.00]",
+                    "[00:10.00]")).Entries;
+                if (store.Load("romaji.mp3", shifted)?[1] != "Moonlight")
+                    throw new Exception("Changing only LRC timing must preserve saved English.");
+                var revised = LyricParser.ParseLyric(romajiLrc.Replace("moon", "sun")).Entries;
+                if (store.Load("romaji.mp3", revised) != null)
+                    throw new Exception("Changed romaji must require a new English review.");
+
+                var englishApi = new Plugin.MusicBeeApiInterface
+                {
+                    NowPlaying_GetFileUrl = () => "romaji.mp3",
+                    NowPlaying_GetFileTag = field => "Y",
+                    Library_GetFileTag = (url, field) => romajiLrc,
+                    Player_GetPosition = () => 10000
+                };
+                var englishController = new LyricsController(englishApi, store);
+                if (englishController.UpdateLyrics(false)?.LyricLine2 != "Moonlight")
+                    throw new Exception("The saved English must follow the current timed lyric.");
+                var replacement = new[] { "", "New meaning", "The lights", "The city" };
+                store.Save("romaji.mp3", romaji, replacement, "");
+                englishController.InvalidateImportedEnglish();
+                if (englishController.UpdateLyrics(false)?.LyricLine2 != "New meaning")
+                    throw new Exception("Saved English must refresh without switching songs.");
+                englishController.ShowTranslation = false;
+                if (englishController.UpdateLyrics(false)?.LyricLine2 != null)
+                    throw new Exception("The flyout switch must hide imported English.");
+                store.Delete("romaji.mp3");
+                englishController.InvalidateImportedEnglish();
+                englishController.ShowTranslation = true;
+                if (englishController.UpdateLyrics(false)?.LyricLine2 != null)
+                    throw new Exception("Removing saved English must clear the visible meaning.");
+            }
+            finally
+            {
+                if (Directory.Exists(englishRoot)) Directory.Delete(englishRoot, true);
+            }
+            Console.WriteLine("English alignment and storage checks passed.");
+
             const string editable = "[ti:Test]\r\n[offset:+150]\r\n" +
                 "[00:52.27] Main\r\n[00:52.27] Translation\r\n" +
                 "[00:52.27] \r\n[00:54.00][01:10.5] Repeated\r\n";

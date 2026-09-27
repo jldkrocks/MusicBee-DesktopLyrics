@@ -31,7 +31,18 @@ To add a MusicBee toolbar button, right-click its toolbar and choose **Configure
 
 The cover scales with window height, and the lyric panel and song title are centred above playback controls. On narrow windows the LRCLIB and TIMING buttons move into the flyout to leave room for the title. The plugin settings' lyric colour, border colour, and single/two/three-colour gradient choices apply in the normal window. Transparent mode uses opaque neutral cards to avoid purple colour-key fringes while lyrics animate. Artwork colour matching uses several cover hues for a soft background glow and the spectrum. Background and lyric shapes are cached between animation frames. Animation continues while dragging and resizing; the timer also keeps the spectrum fade smooth when playback pauses. Windows still schedules paints during native window resizing, so the actual visible frame rate depends on its compositor and the window size.
 
-For bilingual lyrics, put a romaji line and its English translation at the **same timestamp** in MusicBee's Lyrics field, for example `[00:52.27] Romaji line` followed by `[00:52.27] English meaning`. The English line appears smaller beneath the active lyric. The flyout's **Show translation** switch hides or restores it. In short windows, a translation takes the space normally used by the next-line preview; in taller windows both can appear. Existing paired LRC lyrics stay in the MusicBee tag. This release does not fetch translations from Genius or translate Japanese text automatically.
+### Add English meaning beside timed romaji
+
+Play a song with timed romaji in MusicBee's Lyrics field, open the lyrics window's flyout menu, and choose **Add English meaning from Genius…**. The importer guides you through four steps:
+
+1. Click **Open Genius search**. In your browser, choose an English translation for the correct song and copy the lyric text.
+2. Paste the English text into the importer. If the line breaks differ, you can also paste the corresponding Genius romaji into the optional box; that helps the importer match phrases to your timed romaji. Paste the translation page's URL in **Source URL** if you want to keep its source with the saved result.
+3. Click **Align and review**. Compare each English line with the MusicBee lyric and timestamp. Edit the English cells directly. **Repeat previous English here** handles one English phrase spanning two timed lines; **Join next English here** handles two English phrases spanning one timed line. Highlighted pairs and the empty/extra counts flag places to check.
+4. Click **Save English**. The English appears under the active romaji immediately. The flyout's **Show English / translation** switch hides or restores it. Reopen the importer to replace or remove it.
+
+The plugin opens Genius in your browser; **you choose and copy the translation**. It does not retrieve full lyrics from Genius's API, scrape the page, or translate them automatically. The alignment uses your existing MusicBee timestamps and needs your review, especially when a translation paraphrases or combines lines. The English is saved per song in `DesktopLyrics-English` under MusicBee's plugin storage, separately from its Lyrics tag. Timing-only edits keep the English; changes to the romaji lines require you to review and import it again. The feature also works without a Genius page if you have an English translation from another source.
+
+Existing bilingual LRC in MusicBee still works: a romaji line and English line at the **same timestamp** are displayed together, with the English smaller. A separately imported English line takes precedence when present. In short windows, the translation takes the space normally used by the next-line preview; taller windows can display both.
 
 At the end of the playing queue, the Next button leaves the window open and shows a brief message. The message also appears when MusicBee signals the queue has ended; it clears when another song starts.
 
