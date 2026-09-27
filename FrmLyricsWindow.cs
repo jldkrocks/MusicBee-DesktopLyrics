@@ -1216,10 +1216,10 @@ namespace MusicBeePlugin
         {
             base.OnMouseMove(e);
             string queueHit = null;
-            foreach (var hit in _queueHits)
-                if (hit.Area.Contains(e.Location))
+            foreach (var queueRow in _queueHits)
+                if (queueRow.Area.Contains(e.Location))
                 {
-                    queueHit = hit.Track.Offset.ToString();
+                    queueHit = queueRow.Track.Offset.ToString();
                     break;
                 }
             var hit = _menuButton.Contains(e.Location) ? "menu" :

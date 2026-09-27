@@ -13,14 +13,14 @@ namespace MusicBeePlugin
 {
     internal sealed class LrcLibRecord
     {
-        public long Id;
-        public string TrackName;
-        public string ArtistName;
-        public string AlbumName;
-        public double Duration;
-        public bool Instrumental;
-        public string PlainLyrics;
-        public string SyncedLyrics;
+        public long Id { get; set; }
+        public string TrackName { get; set; }
+        public string ArtistName { get; set; }
+        public string AlbumName { get; set; }
+        public double Duration { get; set; }
+        public bool Instrumental { get; set; }
+        public string PlainLyrics { get; set; }
+        public string SyncedLyrics { get; set; }
         public bool HasTimedLyrics => !Instrumental && !string.IsNullOrWhiteSpace(SyncedLyrics);
     }
 
