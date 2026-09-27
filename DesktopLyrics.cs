@@ -76,6 +76,7 @@ namespace MusicBeePlugin
             SaveSettings(_settings);
             LyricParser.PreserveSlash = _settings.PreserveSlash;
             _lyricsCtrl.NextLineWhenNoTranslation = _settings.NextLineWhenNoTranslation;
+            _lyricsCtrl.ShowTranslation = _settings.ShowTranslation;
             var activeView = _frmLyrics;
             activeView?.Form.Invoke(new Action(() =>
             {
@@ -181,8 +182,16 @@ namespace MusicBeePlugin
                             SaveSettings(_settings);
                         }
 
+                        if (!_settings.TranslationPreferenceSet)
+                        {
+                            _settings.ShowTranslation = true;
+                            _settings.TranslationPreferenceSet = true;
+                            SaveSettings(_settings);
+                        }
+
                         LyricParser.PreserveSlash = _settings.PreserveSlash;
                         _lyricsCtrl.NextLineWhenNoTranslation = _settings.NextLineWhenNoTranslation;
+                        _lyricsCtrl.ShowTranslation = _settings.ShowTranslation;
 
                         Application.EnableVisualStyles();
                         Application.SetCompatibleTextRenderingDefault(false);
@@ -398,6 +407,7 @@ namespace MusicBeePlugin
         private void WindowSettingsChanged(SettingsObj settings)
         {
             _lyricsCtrl.NextLineWhenNoTranslation = settings.NextLineWhenNoTranslation;
+            _lyricsCtrl.ShowTranslation = settings.ShowTranslation;
             SaveSettings(settings);
             UpdateLyrics(force: true);
         }

@@ -191,6 +191,8 @@ namespace MusicBeePlugin
         public bool TransparentCanvas;
         public bool ShowSongQueue;
         public bool SongQueuePreferenceSet;
+        public bool ShowTranslation;
+        public bool TranslationPreferenceSet;
         public bool WindowFeaturesPreferenceSet;
         public int WindowPosX = -1;
         public int WindowPosY = -1;
@@ -225,6 +227,8 @@ namespace MusicBeePlugin
                 ShowVisualizer = true,
                 ShowSongQueue = true,
                 SongQueuePreferenceSet = true,
+                ShowTranslation = true,
+                TranslationPreferenceSet = true,
                 WindowFeaturesPreferenceSet = true,
             };
         }

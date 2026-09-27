@@ -63,8 +63,9 @@ namespace MusicBeePlugin
         private FrmLrcLibPicker _lrcPicker;
         private List<UpcomingQueue.Track> _queueTracks = new List<UpcomingQueue.Track>();
         private readonly List<QueueHit> _queueHits = new List<QueueHit>();
-        private Rectangle _queueCard, _queueUpButton, _queueDownButton;
+        private Rectangle _queueCard, _queueTab, _queueUpButton, _queueDownButton;
         private int _queueScroll, _queueVisibleCount;
+        private bool _queueExpanded;
         private bool _queueExhausted;
         private int _lastFutureOffset;
         private string _hoverQueue;
@@ -308,6 +309,8 @@ namespace MusicBeePlugin
                 value => _settings.UseArtworkColors = value);
             AddToggle(menu, "Preview next lyric", () => _settings.NextLineWhenNoTranslation,
                 value => _settings.NextLineWhenNoTranslation = value);
+            AddToggle(menu, "Show translation", () => _settings.ShowTranslation,
+                value => _settings.ShowTranslation = value);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Edit lyric timing…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenTimingEditor)));
@@ -506,6 +509,7 @@ namespace MusicBeePlugin
         public void RefreshQueue()
         {
             if (IsDisposed || !IsHandleCreated) return;
+            _history.RetainPlayingList(UpcomingQueue.ReadPlayingListUrls(_musicBee));
             var requested = Math.Max(12, Math.Min(96, _lastFutureOffset));
             var future = UpcomingQueue.Read(_musicBee, 1, requested);
             _lastFutureOffset = future.Count == 0 ? 0 : future[future.Count - 1].Offset;
@@ -729,16 +733,46 @@ namespace MusicBeePlugin
         private void DrawUpcomingQueue(Graphics g, Rectangle bounds, int sideMargin)
         {
             _queueHits.Clear();
-            _queueCard = _queueUpButton = _queueDownButton = Rectangle.Empty;
+            _queueCard = _queueTab = _queueUpButton = _queueDownButton = Rectangle.Empty;
             _queueVisibleCount = 0;
-            if (!_settings.ShowSongQueue || sideMargin < 198 || bounds.Height < 265)
-                return;
-            var top = _settings.ShowSongTitle ? 43 : 16;
-            var bottom = _settings.ShowTransportControls ? 55 : 16;
-            var height = Math.Min(306, bounds.Height - top - bottom);
-            var card = new Rectangle(bounds.Right - sideMargin + 13,
-                Math.Max(top, (bounds.Height - height) / 2), sideMargin - 27, height);
+            if (!_settings.ShowSongQueue) return;
+            var narrow = sideMargin < 123 || bounds.Height < 218;
+            var compact = narrow || sideMargin < 198 || bounds.Height < 265;
+            var top = _settings.ShowSongTitle ?
+                (_settings.TransparentCanvas ? (bounds.Height < 260 ? 52 : 65) : 43) : 16;
+            var bottom = _settings.ShowTransportControls ?
+                (_settings.TransparentCanvas ? (bounds.Height < 260 ? 66 : 78) : 55) : 16;
+            Rectangle card;
+            if (narrow)
+            {
+                _queueTab = new Rectangle(bounds.Right - 110, 43, 101, 27);
+                using (var tabPath = RoundedRectangle(_queueTab, 8))
+                using (var tabShade = new SolidBrush(Color.FromArgb(255, 13, 17, 28)))
+                using (var tabFont = new Font("Segoe UI", 8f, FontStyle.Bold))
+                using (var tabBrush = new SolidBrush(Color.FromArgb(216, 232, 237, 246)))
+                using (var tabFormat = new StringFormat { Alignment = StringAlignment.Center,
+                    LineAlignment = StringAlignment.Center })
+                {
+                    g.FillPath(tabShade, tabPath);
+                    g.DrawString("QUEUE  " + (_queueExpanded ? "▲" : "▼"),
+                        tabFont, tabBrush, _queueTab, tabFormat);
+                }
+                if (!_queueExpanded) return;
+                card = new Rectangle(bounds.Right - Math.Min(214, bounds.Width / 2) - 9,
+                    _queueTab.Bottom + 4, Math.Min(214, bounds.Width / 2),
+                    Math.Min(148, Math.Max(91, bounds.Height - _queueTab.Bottom - 12)));
+            }
+            else
+            {
+                var height = Math.Min(compact ? 215 : 306,
+                    Math.Max(92, bounds.Height - top - bottom));
+                card = new Rectangle(bounds.Right - sideMargin + (compact ? 7 : 13),
+                    Math.Max(top, (bounds.Height - height) / 2),
+                    sideMargin - (compact ? 15 : 27), height);
+            }
             _queueCard = card;
+            var rowHeight = compact ? 43 : 55;
+            var rowTop = compact ? 36 : 42;
             var accent = _settings.TransparentCanvas ?
                 Color.FromArgb(186, 198, 215) : _palette.Border;
             using (var path = RoundedRectangle(card, 12))
@@ -761,16 +795,17 @@ namespace MusicBeePlugin
                 if (!_settings.TransparentCanvas) g.DrawPath(border, path);
                 g.SmoothingMode = smoothing;
                 g.DrawString("QUEUE", heading, headingBrush,
-                    new RectangleF(card.Left + 14, card.Top + 14, card.Width - 28, 19), format);
+                    new RectangleF(card.Left + 10, card.Top + 10, card.Width - 58, 19), format);
 
                 if (_queueTracks.Count == 0)
                 {
                     g.DrawString("No songs up next", artistFont, artistBrush,
-                        new RectangleF(card.Left + 14, card.Top + 52, card.Width - 28, 30), format);
+                        new RectangleF(card.Left + 10, card.Top + rowTop, card.Width - 20, 30), format);
                     return;
                 }
 
-                var visible = Math.Min(4, (height - 43) / 55);
+                var visible = Math.Max(1, Math.Min(compact ? 2 : 4,
+                    (card.Height - rowTop - 5) / rowHeight));
                 _queueVisibleCount = visible;
                 _queueScroll = Math.Max(0, Math.Min(_queueScroll,
                     Math.Max(0, _queueTracks.Count - visible)));
@@ -786,11 +821,12 @@ namespace MusicBeePlugin
                 }
                 for (var i = 0; i < visible; i++)
                 {
-                    var y = card.Top + 42 + i * 55;
+                    var y = card.Top + rowTop + i * rowHeight;
                     var index = _queueScroll + i;
                     if (index >= _queueTracks.Count) break;
                     var track = _queueTracks[index];
-                    var hit = new Rectangle(card.Left + 5, y - 2, card.Width - 16, 51);
+                    var hit = new Rectangle(card.Left + 5, y - 2, card.Width - 16,
+                        rowHeight - 4);
                     _queueHits.Add(new QueueHit { Area = hit, Track = track });
                     if (track.Offset == 0)
                         using (var playing = new SolidBrush(Color.FromArgb(58, accent)))
@@ -800,18 +836,20 @@ namespace MusicBeePlugin
                             g.FillRectangle(highlight, hit);
                     g.DrawString(track.Offset == 0 ? "▶  " + track.Title : track.Title,
                         titleFont, titleBrush,
-                        new RectangleF(card.Left + 14, y, card.Width - 34, 25), format);
+                        new RectangleF(card.Left + 10, y, card.Width - 26,
+                            compact ? 19 : 25), format);
                     if (!string.IsNullOrWhiteSpace(track.Artist))
                         g.DrawString(track.Artist, artistFont, artistBrush,
-                            new RectangleF(card.Left + 14, y + 24, card.Width - 34, 19), format);
+                            new RectangleF(card.Left + 10, y + (compact ? 20 : 24),
+                                card.Width - 26, 17), format);
                     if (i < visible - 1 && index + 1 < _queueTracks.Count)
-                        g.DrawLine(separator, card.Left + 14, y + 51,
-                            card.Right - 18, y + 51);
+                        g.DrawLine(separator, card.Left + 10, y + rowHeight - 3,
+                            card.Right - 14, y + rowHeight - 3);
                 }
                 if (_queueTracks.Count > visible)
                 {
-                    var rail = new Rectangle(card.Right - 9, card.Top + 45, 3,
-                        Math.Min(height - 55, visible * 55 - 7));
+                    var rail = new Rectangle(card.Right - 9, card.Top + rowTop + 3, 3,
+                        Math.Min(card.Height - rowTop - 12, visible * rowHeight - 7));
                     var thumbHeight = Math.Max(20, rail.Height * visible / _queueTracks.Count);
                     var maxScroll = _queueTracks.Count - visible;
                     var thumbTop = rail.Top + (rail.Height - thumbHeight) *
@@ -842,8 +880,10 @@ namespace MusicBeePlugin
             if (_settings.ShowVisualizer && !_settings.TransparentCanvas)
                 DrawSpectrum(g, bounds);
 
-            var topInset = _settings.ShowSongTitle ? 43f : 18f;
-            var bottomInset = _settings.ShowTransportControls ? 58f : 15f;
+            var topInset = _settings.ShowSongTitle ?
+                (_settings.TransparentCanvas ? (bounds.Height < 260 ? 52f : 65f) : 43f) : 18f;
+            var bottomInset = _settings.ShowTransportControls ?
+                (_settings.TransparentCanvas ? (bounds.Height < 260 ? 66f : 78f) : 58f) : 15f;
             var region = new RectangleF(0, topInset, bounds.Width,
                 Math.Max(24f, bounds.Height - topInset - bottomInset));
             // Give the cover its own vertical space. In a short window it can
@@ -860,7 +900,12 @@ namespace MusicBeePlugin
             var panelWidth = Math.Max(40, bounds.Width - panelLeft * 2);
             var content = new RectangleF(panelLeft + 9, region.Top,
                 Math.Max(1, panelWidth - 18), region.Height);
-            DrawUpcomingQueue(g, bounds, panelLeft);
+            // Keep the English line directly beneath the romaji. In a short
+            // window, omit the next-line preview to leave that pair readable.
+            var shownNext = bounds.Height < 300 && !string.IsNullOrWhiteSpace(_line2)
+                ? null : _nextLine;
+            var previousShownNext = bounds.Height < 300 &&
+                !string.IsNullOrWhiteSpace(_previousLine2) ? null : _previousNextLine;
 
             var progress = 1f;
             if (_transitionStarted != 0)
@@ -878,8 +923,8 @@ namespace MusicBeePlugin
             var gap = 6f * scale;
             var mainHeight = 58f * scale;
             var subHeight = 38f * scale;
-            var subCount = Math.Max(CountSubLines(_line2, _nextLine),
-                                    CountSubLines(_previousLine2, _previousNextLine));
+            var subCount = Math.Max(CountSubLines(_line2, shownNext),
+                                    CountSubLines(_previousLine2, previousShownNext));
             var groupHeight = mainHeight + subCount * (subHeight + gap);
             if (groupHeight > content.Height)
             {
@@ -890,33 +935,34 @@ namespace MusicBeePlugin
                 groupHeight = content.Height;
             }
             var eased = progress * progress * (3 - 2 * progress);
-            var promotePreview = progress < 1f && !string.IsNullOrEmpty(_previousNextLine) &&
-                                 _previousNextLine == _line1;
+            var promotePreview = progress < 1f && !string.IsNullOrEmpty(previousShownNext) &&
+                                 previousShownNext == _line1;
             if (_settings.TransparentCanvas)
                 DrawTransparentLyricPanel(g, content, panelLeft, panelWidth,
-                    mainHeight, subHeight, gap, scale, progress, eased);
+                    mainHeight, subHeight, gap, scale, progress, eased,
+                    shownNext, previousShownNext);
             else
             {
                 if (progress < 1f)
                     DrawLyricPanel(g, content, panelLeft, panelWidth,
                         mainHeight, subHeight, gap, _previousLine1,
-                        _previousLine2, _previousNextLine,
+                        _previousLine2, previousShownNext,
                         1 - eased, -18f * scale * eased);
                 DrawLyricPanel(g, content, panelLeft, panelWidth, mainHeight,
-                    subHeight, gap, _line1, _line2, _nextLine,
+                    subHeight, gap, _line1, _line2, shownNext,
                     eased, 18f * scale * (1 - eased));
             }
             if (progress < 1f)
                 DrawLyricGroup(g, content, mainHeight, subHeight, gap, scale,
-                    _previousLine1, _previousLine2, _previousNextLine,
+                    _previousLine1, _previousLine2, previousShownNext,
                     1 - eased, -18f * scale * eased, true, !promotePreview);
             DrawLyricGroup(g, content, mainHeight, subHeight, gap, scale,
-                _line1, _line2, _nextLine, eased, 18f * scale * (1 - eased),
+                _line1, _line2, shownNext, eased, 18f * scale * (1 - eased),
                 !promotePreview, true);
             if (promotePreview)
             {
-                var oldCount = CountSubLines(_previousLine2, _previousNextLine);
-                var newCount = CountSubLines(_line2, _nextLine);
+                var oldCount = CountSubLines(_previousLine2, previousShownNext);
+                var newCount = CountSubLines(_line2, shownNext);
                 var oldTop = content.Top + (content.Height -
                     (mainHeight + oldCount * (subHeight + gap))) / 2;
                 var newTop = content.Top + (content.Height -
@@ -932,6 +978,7 @@ namespace MusicBeePlugin
                 DrawLine(g, _line1, traveling, fontSize * (0.63f + 0.37f * eased),
                     (int)(145 + 110 * eased));
             }
+            DrawUpcomingQueue(g, bounds, panelLeft);
             DrawQueueNotice(g, content);
             DrawSongTitle(g, bounds);
             DrawTransport(g, bounds);
@@ -949,29 +996,30 @@ namespace MusicBeePlugin
 
         private void DrawTransparentLyricPanel(Graphics g, RectangleF content,
             int left, int width, float mainHeight, float subHeight, float gap,
-            float scale, float progress, float eased)
+            float scale, float progress, float eased, string shownNext,
+            string previousShownNext)
         {
             var hasOld = progress < 1f &&
                 (!string.IsNullOrWhiteSpace(_previousLine1) ||
                  !string.IsNullOrWhiteSpace(_previousLine2) ||
-                 !string.IsNullOrWhiteSpace(_previousNextLine));
+                 !string.IsNullOrWhiteSpace(previousShownNext));
             var hasNew = !string.IsNullOrWhiteSpace(_line1) ||
                 !string.IsNullOrWhiteSpace(_line2) ||
-                !string.IsNullOrWhiteSpace(_nextLine);
+                !string.IsNullOrWhiteSpace(shownNext);
             if (!hasOld && !hasNew) return;
             var top = float.MaxValue;
             var bottom = float.MinValue;
             if (hasOld)
             {
                 var height = mainHeight + CountSubLines(_previousLine2,
-                    _previousNextLine) * (subHeight + gap);
+                    previousShownNext) * (subHeight + gap);
                 var y = content.Top + (content.Height - height) / 2 - 18f * scale * eased;
                 top = Math.Min(top, y);
                 bottom = Math.Max(bottom, y + height);
             }
             if (hasNew)
             {
-                var height = mainHeight + CountSubLines(_line2, _nextLine) *
+                var height = mainHeight + CountSubLines(_line2, shownNext) *
                     (subHeight + gap);
                 var y = content.Top + (content.Height - height) / 2 +
                     18f * scale * (1 - eased);
@@ -1052,7 +1100,8 @@ namespace MusicBeePlugin
             var text = _songTitle.Trim();
             if (!string.IsNullOrWhiteSpace(_songArtist)) text += "  ·  " + _songArtist.Trim();
             var titleArea = _settings.TransparentCanvas ?
-                new RectangleF(Math.Max(8, bounds.Width / 2f - 230), 7,
+                new RectangleF(Math.Max(8, bounds.Width / 2f - 230),
+                    bounds.Height < 260 ? 18 : 26,
                     Math.Min(460, Math.Max(1, bounds.Width - 160)), 29) :
                 new RectangleF(120, 7, Math.Max(1, bounds.Width - 365), 29);
             if (_settings.TransparentCanvas)
@@ -1127,7 +1176,8 @@ namespace MusicBeePlugin
         {
             _previousButton = _playButton = _nextButton = Rectangle.Empty;
             if (!_settings.ShowTransportControls) return;
-            var y = bounds.Bottom - 43;
+            var y = bounds.Bottom - (_settings.TransparentCanvas ?
+                (bounds.Height < 260 ? 53 : 65) : 43);
             var center = bounds.Width / 2;
             _previousButton = new Rectangle(center - 70, y + 2, 34, 34);
             _playButton = new Rectangle(center - 19, y, 38, 38);
@@ -1444,6 +1494,7 @@ namespace MusicBeePlugin
                 }
             var hit = _menuButton.Contains(e.Location) ? "menu" :
                 _backgroundButton.Contains(e.Location) ? "background" :
+                _queueTab.Contains(e.Location) ? "queue-tab" :
                 _timingButton.Contains(e.Location) ? "timing" :
                 _lrcButton.Contains(e.Location) ? "lrclib" :
                 _previousButton.Contains(e.Location) ? "previous" :
@@ -1473,6 +1524,7 @@ namespace MusicBeePlugin
             base.OnMouseDown(e);
             if (!_settings.TransparentCanvas || e.Button != MouseButtons.Left ||
                 _resizeGrip.Contains(e.Location) || _queueCard.Contains(e.Location) ||
+                _queueTab.Contains(e.Location) ||
                 _menuButton.Contains(e.Location) ||
                 _backgroundButton.Contains(e.Location) ||
                 _previousButton.Contains(e.Location) ||
@@ -1496,7 +1548,12 @@ namespace MusicBeePlugin
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             base.OnMouseWheel(e);
-            if (_queueCard.Contains(e.Location))
+            if (_queueTab.Contains(e.Location) && !_queueExpanded)
+            {
+                _queueExpanded = true;
+                Invalidate();
+            }
+            else if (_queueCard.Contains(e.Location) || _queueTab.Contains(e.Location))
                 ScrollQueue(-Math.Sign(e.Delta) * Math.Max(1, Math.Abs(e.Delta) / 120));
         }
 
@@ -1504,6 +1561,12 @@ namespace MusicBeePlugin
         {
             base.OnMouseClick(e);
             if (e.Button != MouseButtons.Left) return;
+            if (_queueTab.Contains(e.Location))
+            {
+                _queueExpanded = !_queueExpanded;
+                Invalidate();
+                return;
+            }
             if (_queueUpButton.Contains(e.Location)) { ScrollQueue(-1); return; }
             if (_queueDownButton.Contains(e.Location)) { ScrollQueue(1); return; }
             foreach (var hit in _queueHits)

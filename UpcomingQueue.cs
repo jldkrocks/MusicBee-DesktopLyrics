@@ -17,6 +17,23 @@ namespace MusicBeePlugin
             public int Offset;
         }
 
+        // The local history is only useful while those files are still in
+        // MusicBee's Playing Tracks list. A successful empty query means the
+        // list was cleared; null means the snapshot failed and must not erase
+        // history on a transient API error.
+        public static HashSet<string> ReadPlayingListUrls(Plugin.MusicBeeApiInterface musicBee)
+        {
+            if (musicBee.NowPlayingList_QueryFilesEx == null) return null;
+            try
+            {
+                string[] urls;
+                if (!musicBee.NowPlayingList_QueryFilesEx(null, out urls) || urls == null)
+                    return null;
+                return new HashSet<string>(urls, StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception) { return null; }
+        }
+
         public static List<Track> Read(Plugin.MusicBeeApiInterface musicBee,
             int firstOffset = 1, int limit = 12)
         {

@@ -7,6 +7,7 @@ namespace MusicBeePlugin
         // Keep the legacy setting name for compatibility with saved settings.
         // A preview is now shown even when the active lyric has a translation.
         public bool NextLineWhenNoTranslation { get; set; }
+        public bool ShowTranslation { get; set; } = true;
 
         private readonly Plugin.MusicBeeApiInterface _interface;
         private string _lastLyrics;
@@ -151,7 +152,8 @@ namespace MusicBeePlugin
                     break;
                 }
             }
-            return new LyricView(currentEntry.LyricLine1, currentEntry.LyricLine2, nextLine);
+            return new LyricView(currentEntry.LyricLine1,
+                ShowTranslation ? currentEntry.LyricLine2 : null, nextLine);
         }
 
         public class LyricView

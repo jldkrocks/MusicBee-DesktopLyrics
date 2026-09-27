@@ -67,6 +67,17 @@ namespace MusicBeePlugin
             }
         }
 
+        public void RetainPlayingList(ISet<string> urls)
+        {
+            if (urls == null) return;
+            lock (_played)
+            {
+                _played.RemoveAll(track => !urls.Contains(track.FileUrl));
+                if (_current != null && !urls.Contains(_current.FileUrl))
+                    _current = null;
+            }
+        }
+
         public List<UpcomingQueue.Track> Timeline(IList<UpcomingQueue.Track> future)
         {
             var timeline = Snapshot();

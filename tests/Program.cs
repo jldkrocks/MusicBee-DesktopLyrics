@@ -29,6 +29,18 @@ namespace MusicBeePlugin
                 throw new Exception("An empty pause must not replace the active lyric.");
             if (lyrics.Entries[3].LyricLine2 != " Translation")
                 throw new Exception("A real translation must remain on the second line.");
+            var bilingual = new LyricsController(new Plugin.MusicBeeApiInterface
+            {
+                NowPlaying_GetFileUrl = () => "bilingual.mp3",
+                NowPlaying_GetFileTag = field => "Y",
+                Library_GetFileTag = (url, field) => lrc,
+                Player_GetPosition = () => 41000
+            });
+            if (bilingual.UpdateLyrics(false)?.LyricLine2 != " Translation")
+                throw new Exception("The translation must share its romaji timestamp.");
+            bilingual.ShowTranslation = false;
+            if (bilingual.UpdateLyrics(false)?.LyricLine2 != null)
+                throw new Exception("The flyout toggle must hide only the translation.");
             Console.WriteLine("LRC parser checks passed.");
 
             const string editable = "[ti:Test]\r\n[offset:+150]\r\n" +
@@ -275,6 +287,38 @@ namespace MusicBeePlugin
                 timeline[2].FileUrl != "second.mp3" || timeline[2].Offset != 1 ||
                 timeline[3].FileUrl != "fourth.mp3")
                 throw new Exception("Clicking around must not duplicate played or upcoming songs.");
+
+            var playingUrls = new[] { "first.mp3", "fourth.mp3" };
+            upcoming.NowPlayingList_QueryFilesEx = (string query, out string[] files) =>
+            {
+                files = playingUrls;
+                return true;
+            };
+            history.RetainPlayingList(UpcomingQueue.ReadPlayingListUrls(upcoming));
+            var revised = history.Timeline(new[]
+            {
+                new UpcomingQueue.Track { FileUrl = "fourth.mp3", Offset = 1 }
+            });
+            if (revised.Count != 2 || revised[0].FileUrl != "first.mp3" ||
+                revised[1].FileUrl != "fourth.mp3")
+                throw new Exception("Removed MusicBee tracks must leave the plugin history.");
+            upcoming.NowPlayingList_QueryFilesEx = (string query, out string[] files) =>
+            {
+                files = null;
+                return false;
+            };
+            history.RetainPlayingList(UpcomingQueue.ReadPlayingListUrls(upcoming));
+            if (history.Snapshot().Count != 1)
+                throw new Exception("A failed MusicBee query must not discard history.");
+            playingUrls = new string[0];
+            upcoming.NowPlayingList_QueryFilesEx = (string query, out string[] files) =>
+            {
+                files = playingUrls;
+                return true;
+            };
+            history.RetainPlayingList(UpcomingQueue.ReadPlayingListUrls(upcoming));
+            if (history.Snapshot().Count != 0)
+                throw new Exception("Clearing the Playing Tracks list must clear old history and current track.");
 
             var searchJson = "[{\"id\":1,\"trackName\":\"Anytime Anywhere\",\"artistName\":\"milet\",\"duration\":50," +
                 "\"syncedLyrics\":\"[00:01.00] Short\"},{\"id\":2,\"trackName\":\"Anytime Anywhere\"," +
