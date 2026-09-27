@@ -2,29 +2,31 @@ using System;
 
 namespace MusicBeePlugin
 {
-    // Estimates the beat from changes in MusicBee's low-frequency spectrum.
-    // This is intentionally transient: it never modifies the track's tags.
+    // Estimates one tempo from MusicBee's low-frequency spectrum, then locks it
+    // for the rest of the track. It never modifies the track's tags.
     internal sealed class PartyBeatTracker
     {
-        private readonly int[] _intervals = new int[7];
+        private readonly int[] _intervals = new int[8];
         private int _intervalCount, _intervalNext;
         private int _lastPosition = -1, _lastOnset = -1;
-        private double _baseline, _previousEnergy, _periodMs, _originMs;
+        private double _baseline, _previousEnergy;
 
-        internal double Bpm => _periodMs > 0 ? 60000d / _periodMs : 0;
-        internal int OriginMs => (int)Math.Round(_originMs);
+        internal double Bpm { get; private set; }
+        internal int OriginMs { get; private set; }
 
         internal void Reset()
         {
             _intervalCount = _intervalNext = 0;
             _lastPosition = _lastOnset = -1;
-            _baseline = _previousEnergy = _periodMs = _originMs = 0;
+            _baseline = _previousEnergy = Bpm = 0;
+            OriginMs = 0;
         }
 
         internal void Observe(int positionMs, double energy)
         {
             if (positionMs < 0 || double.IsNaN(energy) ||
                 double.IsInfinity(energy)) return;
+            if (Bpm > 0) return; // Seeking cannot change a locked song speed.
             energy = Math.Max(0, energy);
             if (_lastPosition >= 0 &&
                 (positionMs < _lastPosition - 100 || positionMs > _lastPosition + 1500))
@@ -51,30 +53,21 @@ namespace MusicBeePlugin
                 if (interval > 1100)
                 {
                     _intervalCount = _intervalNext = 0;
-                    _periodMs = 0;
-                    _originMs = positionMs;
                 }
                 else if (interval >= 250)
                 {
                     _intervals[_intervalNext] = interval;
                     _intervalNext = (_intervalNext + 1) % _intervals.Length;
                     _intervalCount = Math.Min(_intervalCount + 1, _intervals.Length);
-                    EstimatePeriod();
+                    TryLockTempo(positionMs);
                 }
             }
-            else _originMs = positionMs;
             _lastOnset = positionMs;
-
-            if (_periodMs <= 0) return;
-            var closestBeat = Math.Round((positionMs - _originMs) / _periodMs);
-            var error = positionMs - (_originMs + closestBeat * _periodMs);
-            if (Math.Abs(error) < Math.Min(110, _periodMs * 0.24))
-                _originMs += error * 0.25;
         }
 
-        private void EstimatePeriod()
+        private void TryLockTempo(int positionMs)
         {
-            if (_intervalCount < 3) return;
+            if (_intervalCount < 6) return;
             var sorted = new int[_intervalCount];
             Array.Copy(_intervals, sorted, _intervalCount);
             Array.Sort(sorted);
@@ -83,16 +76,22 @@ namespace MusicBeePlugin
             var matches = 0;
             foreach (var interval in sorted)
             {
-                if (Math.Abs(interval - median) > median * 0.18) continue;
+                if (Math.Abs(interval - median) > median * 0.12) continue;
                 total += interval;
                 matches++;
             }
-            if (matches < 3) return;
-            var candidate = total / matches;
-            if (_periodMs == 0) _periodMs = candidate;
-            else if (candidate > _periodMs * 0.75 && candidate < _periodMs * 1.33)
-                _periodMs += (candidate - _periodMs) * 0.18;
-            else if (matches >= 5) _periodMs = candidate;
+            if (matches < 5) return;
+            Bpm = 60000d * matches / total;
+
+            // Keep the current animation frame when changing from its native
+            // speed to the detected tempo. Subsequent frames use only the
+            // frozen BPM and MusicBee's playback position.
+            var nativeLoop = PartyAnimation.FrameCount * PartyAnimation.FrameDurationMs;
+            var nativePhase = (positionMs % nativeLoop) / (double)nativeLoop;
+            var tempoLoop = PartyAnimation.LoopDurationMs(Bpm);
+            var origin = (positionMs - nativePhase * tempoLoop) % tempoLoop;
+            if (origin < 0) origin += tempoLoop;
+            OriginMs = (int)Math.Round(origin);
         }
     }
 }

@@ -22,28 +22,54 @@ namespace MusicBeePlugin
                 throw new Exception("Party frames must loop at native speed or on song beats.");
 
             var workArea = new Rectangle(0, 0, 1920, 1040);
+            var monitors = new[] { new Rectangle(-1920, 0, 1920, 1040),
+                workArea, new Rectangle(1920, 0, 1920, 1040) };
             var medium = new Rectangle(360, 210, 1200, 570);
             var large = new Rectangle(110, 70, 1700, 900);
-            var mediumLeft = PartyLayout.Place(medium, workArea, true, false);
-            var largeLeft = PartyLayout.Place(large, workArea, true, false);
-            var maximizedLeft = PartyLayout.Place(workArea, workArea, true, true);
-            var maximizedRight = PartyLayout.Place(workArea, workArea, false, true);
+            var mediumLeft = PartyLayout.PlaceOutside(medium, monitors, true);
+            var largeLeft = PartyLayout.PlaceOutside(large, monitors, true);
+            var nearRight = PartyLayout.PlaceOutside(
+                new Rectangle(1100, 210, 800, 570), monitors, false);
+            var nearLeft = PartyLayout.PlaceOutside(
+                new Rectangle(20, 210, 800, 570), monitors, true);
+            var withoutNeighbor = PartyLayout.PlaceOutside(
+                new Rectangle(1100, 210, 800, 570), new[] { workArea }, false);
+            var gutter = PartyLayout.MaximizedGutter(workArea.Width);
+            var maximizedLeft = PartyLayout.PlaceMaximized(
+                workArea, workArea, true, gutter);
+            var maximizedRight = PartyLayout.PlaceMaximized(
+                workArea, workArea, false, gutter);
             if (mediumLeft.IsEmpty || largeLeft.Height <= mediumLeft.Height ||
+                nearRight.Left < 1920 || nearLeft.Right > 0 ||
+                !withoutNeighbor.IsEmpty || workArea.Width - gutter * 2 < 620 ||
                 maximizedLeft.IsEmpty || maximizedRight.IsEmpty ||
                 !workArea.Contains(maximizedLeft) || !workArea.Contains(maximizedRight) ||
-                maximizedLeft.Right > workArea.Width / 4 ||
-                maximizedRight.Left < workArea.Width * 3 / 4)
-                throw new Exception("Party dancers must scale and stay at both edges when maximized.");
+                maximizedLeft.Right > gutter ||
+                maximizedRight.Left < workArea.Right - gutter)
+                throw new Exception("Party dancers need external monitor space or dedicated maximized gutters.");
 
             var beat = new PartyBeatTracker();
+            var lockedAt = -1;
             for (var ms = 0; ms < 5000; ms += 30)
+            {
                 beat.Observe(ms, ms >= 510 && (ms - 510) % 510 < 45 ? 9 : 1);
-            if (Math.Abs(beat.Bpm - 60000d / 510) > 5 ||
-                Math.Abs(beat.OriginMs - 510) > 70)
-                throw new Exception("Untagged songs should find a steady live beat.");
-            beat.Observe(100, 1); // Seeking invalidates the previous song-position grid.
-            if (beat.Bpm != 0)
-                throw new Exception("A seek must clear the detected beat.");
+                if (lockedAt < 0 && beat.Bpm > 0)
+                {
+                    lockedAt = ms;
+                    if (PartyAnimation.FrameAt(ms, 0) !=
+                        PartyAnimation.FrameAt(ms - beat.OriginMs, beat.Bpm))
+                        throw new Exception("Locking the song tempo must preserve the current frame.");
+                }
+            }
+            if (lockedAt < 0 || Math.Abs(beat.Bpm - 60000d / 510) > 5)
+                throw new Exception("Untagged songs should settle on a steady tempo.");
+            var fixedBpm = beat.Bpm;
+            var fixedOrigin = beat.OriginMs;
+            for (var ms = 5010; ms < 8000; ms += 30)
+                beat.Observe(ms, ms % 300 < 45 ? 9 : 1);
+            beat.Observe(100, 1); // Seeking retains the song's locked speed.
+            if (beat.Bpm != fixedBpm || beat.OriginMs != fixedOrigin)
+                throw new Exception("A song's tempo and animation phase must not wander or stutter.");
 
             const string lrc = "[00:09.68] First line\n" +
                                "[00:17.30] \n" +

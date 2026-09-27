@@ -60,6 +60,10 @@ namespace MusicBeePlugin
         private readonly PartyBeatTracker _partyBeat = new PartyBeatTracker();
         private double _partyBpm;
         private long _lastPartyUpdate;
+        private Rectangle _partyLayoutWindow, _leftPartyBounds, _rightPartyBounds;
+        private Size _partyLayoutClientSize;
+        private FormWindowState _partyLayoutState;
+        private bool _partyLayoutValid;
         private string _hoverButton;
         private long _queueNoticeStarted;
         private string _queueNoticeText = "That's the end of the queue ♪";
@@ -250,7 +254,8 @@ namespace MusicBeePlugin
                 (now - _lastSpectrumSample) * 1000.0 / Stopwatch.Frequency >= 30)
             {
                 if ((_settings.ShowVisualizer && !_settings.TransparentCanvas) ||
-                    (_settings.PartyMode && _partyBpm == 0)) SampleSpectrum();
+                    (_settings.PartyMode && _partyBpm == 0 &&
+                     _partyBeat.Bpm == 0)) SampleSpectrum();
                 _lastSpectrumSample = now;
             }
             if (_lastPlayStateCheck == 0 ||
@@ -391,6 +396,7 @@ namespace MusicBeePlugin
             if (!_settings.PartyMode)
             {
                 DisposePartyDancers();
+                _partyLayoutValid = false;
                 return;
             }
             if (!Visible || WindowState == FormWindowState.Minimized)
@@ -410,8 +416,9 @@ namespace MusicBeePlugin
                 var frame = PartyAnimation.FrameAt(
                     position - (detectedBpm > 0 ? _partyBeat.OriginMs : 0),
                     _partyBpm > 0 ? _partyBpm : detectedBpm);
-                PlacePartyDancer(_leftDancer, true, frame);
-                PlacePartyDancer(_rightDancer, false, frame);
+                RefreshPartyLayout();
+                PlacePartyDancer(_leftDancer, _leftPartyBounds, frame);
+                PlacePartyDancer(_rightDancer, _rightPartyBounds, frame);
             }
             catch (Exception ex)
             {
@@ -424,11 +431,36 @@ namespace MusicBeePlugin
             }
         }
 
-        private void PlacePartyDancer(PartyDancerWindow dancer, bool left, int frame)
+        private void RefreshPartyLayout()
         {
-            var area = Screen.FromControl(this).WorkingArea;
-            var bounds = PartyLayout.Place(Bounds, area, left,
-                WindowState == FormWindowState.Maximized);
+            if (_partyLayoutValid && _partyLayoutWindow == Bounds &&
+                _partyLayoutClientSize == ClientSize &&
+                _partyLayoutState == WindowState) return;
+            _partyLayoutWindow = Bounds;
+            _partyLayoutClientSize = ClientSize;
+            _partyLayoutState = WindowState;
+            _partyLayoutValid = true;
+            if (WindowState == FormWindowState.Maximized)
+            {
+                var client = RectangleToScreen(ClientRectangle);
+                var area = Screen.FromControl(this).WorkingArea;
+                var gutter = PartyGutter;
+                _leftPartyBounds = PartyLayout.PlaceMaximized(client, area, true, gutter);
+                _rightPartyBounds = PartyLayout.PlaceMaximized(client, area, false, gutter);
+            }
+            else
+            {
+                var screens = Screen.AllScreens;
+                var areas = new Rectangle[screens.Length];
+                for (var i = 0; i < screens.Length; i++)
+                    areas[i] = screens[i].WorkingArea;
+                _leftPartyBounds = PartyLayout.PlaceOutside(Bounds, areas, true);
+                _rightPartyBounds = PartyLayout.PlaceOutside(Bounds, areas, false);
+            }
+        }
+
+        private void PlacePartyDancer(PartyDancerWindow dancer, Rectangle bounds, int frame)
+        {
             if (bounds.IsEmpty)
             {
                 dancer.Hide();
@@ -696,7 +728,8 @@ namespace MusicBeePlugin
 
             var validCount = Math.Min(Math.Max(0, count), _fft.Length);
             var upperBin = Math.Min(validCount / 2, 1024);
-            if (_settings.PartyMode && _partyBpm == 0 && upperBin > 8 &&
+            if (_settings.PartyMode && _partyBpm == 0 && _partyBeat.Bpm == 0 &&
+                upperBin > 8 &&
                 _playState == Plugin.PlayState.Playing)
             {
                 // Use the same mirrored-spectrum handling as the visualizer.
@@ -985,8 +1018,14 @@ namespace MusicBeePlugin
             g.Clear(_settings.TransparentCanvas ? ClearKey : BackColor);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            var bounds = ClientRectangle;
+            var client = ClientRectangle;
+            var gutter = PartyGutter;
+            var bounds = new Rectangle(0, 0, client.Width - gutter * 2, client.Height);
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
+            var state = g.Save();
+            if (gutter > 0) g.TranslateTransform(gutter, 0);
+            try
+            {
 
             DrawBackground(g, bounds);
 
@@ -1108,6 +1147,41 @@ namespace MusicBeePlugin
             DrawPartyButton(g, bounds);
             DrawMenuButton(g, bounds);
             DrawResizeGrip(g, bounds);
+            }
+            finally
+            {
+                g.Restore(state);
+                if (gutter > 0) OffsetHitTargets(gutter);
+            }
+        }
+
+        private int PartyGutter => _settings.PartyMode &&
+            WindowState == FormWindowState.Maximized
+                ? PartyLayout.MaximizedGutter(ClientSize.Width) : 0;
+
+        private static Rectangle ShiftHit(Rectangle area, int offset)
+        {
+            return area.IsEmpty ? area : new Rectangle(area.Left + offset,
+                area.Top, area.Width, area.Height);
+        }
+
+        private void OffsetHitTargets(int gutter)
+        {
+            _previousButton = ShiftHit(_previousButton, gutter);
+            _playButton = ShiftHit(_playButton, gutter);
+            _nextButton = ShiftHit(_nextButton, gutter);
+            _menuButton = ShiftHit(_menuButton, gutter);
+            _timingButton = ShiftHit(_timingButton, gutter);
+            _lrcButton = ShiftHit(_lrcButton, gutter);
+            _backgroundButton = ShiftHit(_backgroundButton, gutter);
+            _partyButton = ShiftHit(_partyButton, gutter);
+            _resizeGrip = ShiftHit(_resizeGrip, gutter);
+            _queueCard = ShiftHit(_queueCard, gutter);
+            _queueTab = ShiftHit(_queueTab, gutter);
+            _queueUpButton = ShiftHit(_queueUpButton, gutter);
+            _queueDownButton = ShiftHit(_queueDownButton, gutter);
+            foreach (var hit in _queueHits)
+                hit.Area = ShiftHit(hit.Area, gutter);
         }
 
         private void DrawTransparentLyricPanel(Graphics g, RectangleF content,
@@ -1496,7 +1570,7 @@ namespace MusicBeePlugin
         private void DrawResizeGrip(Graphics g, Rectangle bounds)
         {
             _resizeGrip = Rectangle.Empty;
-            if (!_settings.TransparentCanvas) return;
+            if (!_settings.TransparentCanvas || WindowState == FormWindowState.Maximized) return;
             _resizeGrip = new Rectangle(bounds.Right - 27, bounds.Bottom - 27, 20, 20);
             using (var background = new SolidBrush(Color.FromArgb(255, 13, 17, 28)))
             using (var pen = new Pen(Color.FromArgb(142, 170, 182, 199), 1.2f))

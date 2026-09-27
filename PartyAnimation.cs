@@ -25,17 +25,23 @@ namespace MusicBeePlugin
 
         internal static int FrameAt(int positionMs, double bpm)
         {
+            var loopMs = LoopDurationMs(bpm);
+            var phase = positionMs % loopMs;
+            if (phase < 0) phase += loopMs;
+            return Math.Min(FrameCount - 1, (int)(phase * FrameCount / loopMs));
+        }
+
+        internal static double LoopDurationMs(double bpm)
+        {
             var nativeLoopMs = FrameCount * FrameDurationMs;
-            var loopMs = (double)nativeLoopMs;
             if (bpm >= 40 && bpm <= 240)
             {
                 // Preserve the dance's rough speed while each complete loop
                 // starts on a beat. Playback position also handles seeking.
                 var beats = Math.Max(1, (int)Math.Round(nativeLoopMs * bpm / 60000d));
-                loopMs = beats * 60000d / bpm;
+                return beats * 60000d / bpm;
             }
-            var phase = Math.Max(0, positionMs) % loopMs;
-            return Math.Min(FrameCount - 1, (int)(phase * FrameCount / loopMs));
+            return nativeLoopMs;
         }
     }
 }
