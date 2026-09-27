@@ -1,3 +1,5 @@
+using System;
+
 namespace MusicBeePlugin
 {
     public class LyricsController
@@ -11,6 +13,9 @@ namespace MusicBeePlugin
         private LyricParser.Lyrics _lyrics;
         private string _editedTrackUrl, _editedLyrics;
         private bool _editedLyricsSaved;
+        private bool _savedTagSeen;
+        private string _tagTrackUrl, _taggedLyrics;
+        private DateTime _nextTagCheckUtc;
         public LyricsController(Plugin.MusicBeeApiInterface @interface)
         {
             _interface = @interface;
@@ -21,6 +26,7 @@ namespace MusicBeePlugin
             _editedTrackUrl = trackUrl;
             _editedLyrics = lyrics;
             _editedLyricsSaved = false;
+            _savedTagSeen = false;
         }
 
         public void KeepSavedLyrics(string trackUrl, string lyrics)
@@ -28,6 +34,13 @@ namespace MusicBeePlugin
             _editedTrackUrl = trackUrl;
             _editedLyrics = lyrics;
             _editedLyricsSaved = true;
+            _savedTagSeen = false;
+            InvalidateTag();
+        }
+
+        public void InvalidateTag()
+        {
+            _nextTagCheckUtc = DateTime.MinValue;
         }
 
         public void CancelPreview(string trackUrl)
@@ -36,6 +49,7 @@ namespace MusicBeePlugin
             _editedTrackUrl = _editedLyrics = null;
             _lastLyrics = null;
             _lyrics = null;
+            InvalidateTag();
         }
 
         public LyricView UpdateLyrics(bool useGeneratedWhenUnavailable)
@@ -47,24 +61,39 @@ namespace MusicBeePlugin
             {
                 _editedTrackUrl = _editedLyrics = null;
                 _editedLyricsSaved = false;
+                _savedTagSeen = false;
                 _lastLyrics = null;
                 _lyrics = null;
             }
-            string taggedLyrics = null;
-            try
+            if (_tagTrackUrl != currentUrl)
             {
-                if (!string.IsNullOrWhiteSpace(currentUrl))
-                    taggedLyrics = _interface.Library_GetFileTag?.Invoke(currentUrl,
-                        Plugin.MetaDataType.Lyrics);
+                _tagTrackUrl = currentUrl;
+                _taggedLyrics = null;
+                InvalidateTag();
             }
-            catch (System.Exception) { /* Streams may have no writable library tag. */ }
+            if (!string.IsNullOrWhiteSpace(currentUrl) &&
+                DateTime.UtcNow >= _nextTagCheckUtc)
+            {
+                _nextTagCheckUtc = DateTime.UtcNow.AddMilliseconds(400);
+                try
+                {
+                    _taggedLyrics = _interface.Library_GetFileTag?.Invoke(currentUrl,
+                        Plugin.MetaDataType.Lyrics);
+                }
+                catch (Exception) { /* Streams may have no writable library tag. */ }
+            }
+            var taggedLyrics = _taggedLyrics;
             // MusicBee may keep NowPlaying_GetLyrics cached until another song
             // starts. A new tag saved in its editor must take precedence.
-            if (_editedLyricsSaved && _editedTrackUrl == currentUrl &&
-                !string.IsNullOrWhiteSpace(taggedLyrics) && taggedLyrics != _editedLyrics)
+            if (_editedLyricsSaved && _editedTrackUrl == currentUrl)
             {
-                _editedTrackUrl = _editedLyrics = null;
-                _editedLyricsSaved = false;
+                if (taggedLyrics == _editedLyrics) _savedTagSeen = true;
+                else if (_savedTagSeen && taggedLyrics != null)
+                {
+                    _editedTrackUrl = _editedLyrics = null;
+                    _editedLyricsSaved = false;
+                    _savedTagSeen = false;
+                }
             }
             var hasLyrics = _interface.NowPlaying_GetFileTag(Plugin.MetaDataType.HasLyrics) ?? "";
             if (_editedTrackUrl != null || !string.IsNullOrWhiteSpace(taggedLyrics) ||

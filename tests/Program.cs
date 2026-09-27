@@ -147,11 +147,14 @@ namespace MusicBeePlugin
                 throw new Exception("No current track must not produce lyrics.");
 
             var currentTrack = "track.mp3";
+            string currentLyricsTag = null;
             var playback = new Plugin.MusicBeeApiInterface
             {
                 NowPlaying_GetFileUrl = () => currentTrack,
                 NowPlaying_GetFileTag = field => "Y",
                 NowPlaying_GetLyrics = () => "[00:52.27] Original\n[00:54.00] Later",
+                Library_GetFileTag = (url, field) => url == "track.mp3" ?
+                    currentLyricsTag : null,
                 Player_GetPosition = () => 53500
             };
             var controller = new LyricsController(playback);
@@ -162,13 +165,18 @@ namespace MusicBeePlugin
             controller.CancelPreview(currentTrack);
             if (controller.UpdateLyrics(false)?.LyricLine1 != " Original")
                 throw new Exception("Cancel must restore MusicBee's original timings.");
+            currentLyricsTag = "[00:52.27] Original\n[00:54.00] Later";
             controller.KeepSavedLyrics(currentTrack,
                 "[00:53.27] Adjusted\n[00:54.00] Later");
             controller.CancelPreview(currentTrack);
             if (controller.UpdateLyrics(false)?.LyricLine1 != " Adjusted")
                 throw new Exception("Saved timings must remain visible if MusicBee caches old lyrics.");
-            playback.Library_GetFileTag = (url, field) => url == "track.mp3" ?
-                "[00:53.27] New tag\n[00:54.00] Later" : null;
+            currentLyricsTag = "[00:53.27] Adjusted\n[00:54.00] Later";
+            controller.InvalidateTag();
+            if (controller.UpdateLyrics(false)?.LyricLine1 != " Adjusted")
+                throw new Exception("The newly saved tag must confirm the live lyrics.");
+            currentLyricsTag = "[00:53.27] New tag\n[00:54.00] Later";
+            controller.InvalidateTag();
             if (controller.UpdateLyrics(false)?.LyricLine1 != " New tag")
                 throw new Exception("A newly saved MusicBee Lyrics tag must appear without switching songs.");
             currentTrack = "different.mp3";

@@ -258,6 +258,7 @@ namespace MusicBeePlugin
                 case NotificationType.TagsChanged:
                     try
                     {
+                        lock (_lock) _lyricsCtrl.InvalidateTag();
                         UpdateLyrics(force: true);
                     }
                     catch (Exception e)
