@@ -74,7 +74,7 @@ namespace MusicBeePlugin
             root.Controls.Add(new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "Use the arrows beside a line. Each change plays from just before its new time. Save writes the Lyrics field in MusicBee.",
+                Text = "Click a lyric to play from that line, or use the arrows to adjust its time. Save writes the Lyrics field in MusicBee.",
                 ForeColor = Color.FromArgb(178, 187, 206),
                 TextAlign = ContentAlignment.MiddleLeft,
                 AutoEllipsis = true
@@ -155,6 +155,7 @@ namespace MusicBeePlugin
                 _rows.Rows[index].Cells[1].ToolTipText = entry.Text;
             }
             _rows.CellContentClick += RowClicked;
+            _rows.CellClick += LyricClicked;
             root.Controls.Add(_rows, 0, 3);
 
             var footer = new TableLayoutPanel
@@ -254,6 +255,14 @@ namespace MusicBeePlugin
             PreviewAndSeek(entry);
         }
 
+        private void LyricClicked(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || e.ColumnIndex > 1 ||
+                _trackChanged) return;
+            var entry = (LrcTimingDocument.TimingEntry)_rows.Rows[e.RowIndex].Tag;
+            SeekToEntry(entry, false);
+        }
+
         private void ShiftAll(int delta)
         {
             if (_trackChanged) return;
@@ -291,6 +300,11 @@ namespace MusicBeePlugin
             {
                 _status.Text = "Timing changed, but the visual preview is unavailable.";
             }
+            SeekToEntry(entry, true);
+        }
+
+        private void SeekToEntry(LrcTimingDocument.TimingEntry entry, bool timingChanged)
+        {
             try
             {
                 if (_musicBee.NowPlaying_GetFileUrl() != _trackUrl)
@@ -299,17 +313,26 @@ namespace MusicBeePlugin
                     return;
                 }
                 var state = _musicBee.Player_GetPlayState();
-                if (state == Plugin.PlayState.Paused || state == Plugin.PlayState.Stopped)
-                    _musicBee.Player_PlayPause();
                 var position = (int)Math.Max(0L, Math.Min(int.MaxValue,
                     (long)entry.TimeMs - _document.OffsetMs - 800));
                 if (_musicBee.Player_SetPosition == null ||
                     !_musicBee.Player_SetPosition(position))
-                    _status.Text = "Timing preview updated, but MusicBee could not seek playback.";
+                    _status.Text = timingChanged ?
+                        "Timing preview updated, but MusicBee could not seek playback." :
+                        "MusicBee could not seek to that line.";
+                else
+                {
+                    if (state == Plugin.PlayState.Paused || state == Plugin.PlayState.Stopped)
+                        _musicBee.Player_PlayPause?.Invoke();
+                    if (!timingChanged)
+                        _status.Text = "Playing from " + LrcTimingDocument.FormatTime(entry.TimeMs) + ".";
+                }
             }
             catch (Exception)
             {
-                _status.Text = "Timing preview updated, but playback could not be moved.";
+                _status.Text = timingChanged ?
+                    "Timing preview updated, but playback could not be moved." :
+                    "Playback could not be moved to that line.";
             }
         }
 

@@ -12,6 +12,7 @@ namespace MusicBeePlugin
         public Color BarTop;
         public Color BarBottom;
         public Color Border;
+        public Color Accent;
 
         public static ArtworkPalette Default => new ArtworkPalette
         {
@@ -19,7 +20,8 @@ namespace MusicBeePlugin
             Right = Color.FromArgb(31, 21, 51),
             BarTop = Color.FromArgb(135, 110, 242),
             BarBottom = Color.FromArgb(57, 193, 221),
-            Border = Color.FromArgb(180, 180, 235)
+            Border = Color.FromArgb(180, 180, 235),
+            Accent = Color.FromArgb(98, 150, 196)
         };
 
         public static ArtworkPalette Blend(ArtworkPalette first, ArtworkPalette second, float amount)
@@ -30,7 +32,8 @@ namespace MusicBeePlugin
                 Right = Mix(first.Right, second.Right, amount),
                 BarTop = Mix(first.BarTop, second.BarTop, amount),
                 BarBottom = Mix(first.BarBottom, second.BarBottom, amount),
-                Border = Mix(first.Border, second.Border, amount)
+                Border = Mix(first.Border, second.Border, amount),
+                Accent = Mix(first.Accent, second.Accent, amount)
             };
         }
 
@@ -157,6 +160,15 @@ namespace MusicBeePlugin
                     if (secondary < 0 || weights[i] > weights[secondary]) secondary = i;
                 }
 
+                var tertiary = -1;
+                for (var i = 0; i < binCount && secondary >= 0; i++)
+                {
+                    var fromPrimary = Math.Min(Math.Abs(primary - i), binCount - Math.Abs(primary - i));
+                    var fromSecondary = Math.Min(Math.Abs(secondary - i), binCount - Math.Abs(secondary - i));
+                    if (fromPrimary < 2 || fromSecondary < 2 || weights[i] <= 0) continue;
+                    if (tertiary < 0 || weights[i] > weights[tertiary]) tertiary = i;
+                }
+
                 if (pixelCount == 0) return false;
                 // Very dark, bright, or monochrome covers still get their own
                 // neutral palette instead of the default purple/blue gradient.
@@ -166,13 +178,15 @@ namespace MusicBeePlugin
                     Math.Max(65, Math.Min(205, (int)(neutralTotal / pixelCount))));
                 var first = primary < 0 ? neutral : Average(primary);
                 var second = secondary < 0 ? Mix(first, neutral, 0.25f) : Average(secondary);
+                var third = tertiary < 0 ? Mix(first, second, 0.5f) : Average(tertiary);
                 palette = new ArtworkPalette
                 {
                     Left = Mix(Color.FromArgb(8, 12, 20), first, 0.30f),
                     Right = Mix(Color.FromArgb(11, 13, 21), second, 0.34f),
                     BarTop = Mix(first, Color.White, 0.18f),
                     BarBottom = Mix(second, Color.White, 0.18f),
-                    Border = Mix(first, Color.White, 0.35f)
+                    Border = Mix(first, Color.White, 0.35f),
+                    Accent = third
                 };
                 var thumbnailCover = new Bitmap(256, 256);
                 try

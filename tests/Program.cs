@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Reflection;
 using System.Windows.Forms;
 
 namespace MusicBeePlugin
@@ -89,13 +90,27 @@ namespace MusicBeePlugin
                     "another change", out saveError) || storedLyrics != edited)
                     throw new Exception("Failed file writes must restore the old in-memory lyrics.");
 
+                var seekPosition = -1;
+                var resumeCalls = 0;
+                var previewCalls = 0;
+                api.NowPlaying_GetFileUrl = () => "track.mp3";
+                api.Player_GetPlayState = () => Plugin.PlayState.Paused;
+                api.Player_SetPosition = position => { seekPosition = position; return true; };
+                api.Player_PlayPause = () => { resumeCalls++; return true; };
                 using (var editor = new FrmTimingEditor(api, "track.mp3", "Test song",
-                    editable, timing, (url, text) => { }, url => { },
+                    editable, timing, (url, text) => previewCalls++, url => { },
                     (url, text) => { }))
                 {
                     var grid = FindGrid(editor.Controls);
                     if (grid == null || grid.Rows.Count != timing.Entries.Count)
                         throw new Exception("The timing mode must display every timestamped row.");
+                    var click = typeof(FrmTimingEditor).GetMethod("LyricClicked",
+                        BindingFlags.NonPublic | BindingFlags.Instance);
+                    click.Invoke(editor, new object[] { grid,
+                        new DataGridViewCellEventArgs(1, 0) });
+                    if (seekPosition != 51320 || resumeCalls != 1 ||
+                        previewCalls != 0 || timing.IsDirty)
+                        throw new Exception("Clicking a lyric must seek with a short lead-in without editing it.");
                 }
             }
             finally
@@ -158,6 +173,25 @@ namespace MusicBeePlugin
                 throw new Exception("A disabled Next button must not advance.");
             Console.WriteLine("End-of-queue checks passed.");
 
+            var upcoming = new Plugin.MusicBeeApiInterface
+            {
+                NowPlayingList_GetCurrentIndex = () => 5,
+                NowPlayingList_GetNextIndex = offset =>
+                    offset == 1 ? 10 : offset == 2 ? 7 : -1,
+                NowPlayingList_GetFileTag = (index, field) =>
+                    field == Plugin.MetaDataType.Artist ? "Artist " + index :
+                    index == 10 ? "Queued first" : null,
+                NowPlayingList_GetListFileUrl = index => @"C:\Music\Other title.mp3"
+            };
+            var queue = UpcomingQueue.Read(upcoming);
+            if (queue.Count != 2 || queue[0].Title != "Queued first" ||
+                queue[1].Title != "Other title" || queue[1].Artist != "Artist 7")
+                throw new Exception("The queue must use playback order and fall back to a file name.");
+            upcoming.NowPlayingList_GetNextIndex = offset => offset == 1 ? 5 : 7;
+            if (UpcomingQueue.Read(upcoming).Count != 0)
+                throw new Exception("The current track must not appear in the upcoming queue.");
+            Console.WriteLine("Upcoming queue checks passed.");
+
             var imagePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".png");
             try
             {
@@ -196,6 +230,23 @@ namespace MusicBeePlugin
                 if (!ArtworkPalette.TryLoad(Convert.ToBase64String(imageBytes), out encodedPalette) ||
                     encodedPalette.Left.ToArgb() != palette.Left.ToArgb())
                     throw new Exception("Encoded artwork should produce the same palette.");
+
+                File.Delete(imagePath);
+                using (var colourful = new Bitmap(48, 48))
+                {
+                    using (var graphics = Graphics.FromImage(colourful))
+                    {
+                        graphics.Clear(Color.FromArgb(210, 45, 55));
+                        graphics.FillRectangle(Brushes.RoyalBlue, 26, 0, 14, 48);
+                        graphics.FillRectangle(Brushes.LimeGreen, 40, 0, 8, 48);
+                    }
+                    colourful.Save(imagePath, ImageFormat.Png);
+                }
+                ArtworkPalette colourfulPalette;
+                if (!ArtworkPalette.TryLoad(imagePath, out colourfulPalette) ||
+                    colourfulPalette.Accent.G <= colourfulPalette.Accent.R ||
+                    colourfulPalette.Accent.G <= colourfulPalette.Accent.B)
+                    throw new Exception("A third artwork hue should colour the background lights.");
 
                 File.Delete(imagePath);
                 using (var neutralImage = new Bitmap(48, 48))

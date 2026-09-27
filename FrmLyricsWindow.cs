@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -34,7 +35,10 @@ namespace MusicBeePlugin
         private float _gain = 6f;
         private int _framePending;
         private long _lastFrameTimestamp;
+        private long _lastPaintRequest;
         private long _lastSpectrumSample;
+        private long _lastQueueCheck;
+        private bool _movingOrResizing;
         private bool _useArtworkColors;
         private string _artworkTrackUrl;
         private int _artworkRequestId;
@@ -44,6 +48,8 @@ namespace MusicBeePlugin
         private bool _loaded;
         private bool _animationDisposed;
         private Bitmap _albumArtwork;
+        private Bitmap _backgroundCache;
+        private ArtworkPalette _cachedBackgroundPalette;
         private string _songTitle = "", _songArtist = "";
         private Plugin.PlayState _playState = Plugin.PlayState.Undefined;
         private long _lastPlayStateCheck;
@@ -51,6 +57,19 @@ namespace MusicBeePlugin
         private string _hoverButton;
         private long _queueNoticeStarted;
         private FrmTimingEditor _timingEditor;
+        private List<UpcomingQueue.Track> _queueTracks = new List<UpcomingQueue.Track>();
+        private readonly List<TextGeometry> _textGeometries = new List<TextGeometry>();
+
+        private sealed class TextGeometry : IDisposable
+        {
+            public string Text, FontFamily;
+            public FontStyle FontStyle;
+            public float DesiredPoints, Width, Height, DpiY, FittedPoints;
+            public GraphicsPath Path;
+            public RectangleF Bounds;
+
+            public void Dispose() { Path?.Dispose(); }
+        }
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
@@ -103,6 +122,7 @@ namespace MusicBeePlugin
                 _loaded = true;
                 StartAnimation();
                 RefreshArtwork(true);
+                RefreshQueue();
             };
             VisibleChanged += (sender, args) =>
             {
@@ -112,6 +132,17 @@ namespace MusicBeePlugin
             };
             LocationChanged += (sender, args) => SaveBounds();
             SizeChanged += (sender, args) => SaveBounds();
+            ResizeBegin += (sender, args) =>
+            {
+                _movingOrResizing = true;
+                _animationTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            };
+            ResizeEnd += (sender, args) =>
+            {
+                _movingOrResizing = false;
+                if (Visible && !_animationDisposed) StartAnimation();
+                Invalidate();
+            };
         }
 
         private bool IsVisibleOnAnyScreen()
@@ -136,6 +167,7 @@ namespace MusicBeePlugin
         private void StartAnimation()
         {
             _lastFrameTimestamp = 0;
+            _lastPaintRequest = 0;
             _lastSpectrumSample = 0;
             // An 8 ms target gives the UI up to 120 frames per second. Slow
             // paints drop frames instead of building up a queue of old frames.
@@ -144,6 +176,7 @@ namespace MusicBeePlugin
 
         private void AnimationClockTick(object state)
         {
+            if (_movingOrResizing) return;
             if (Interlocked.CompareExchange(ref _framePending, 1, 0) != 0) return;
             try
             {
@@ -151,7 +184,7 @@ namespace MusicBeePlugin
                 {
                     try
                     {
-                        if (IsDisposed || !Visible) return;
+                        if (IsDisposed || !Visible || _movingOrResizing) return;
                         var now = Stopwatch.GetTimestamp();
                         var elapsedMs = _lastFrameTimestamp == 0 ? 8.0 : Math.Min(50.0,
                             (now - _lastFrameTimestamp) * 1000.0 / Stopwatch.Frequency);
@@ -168,10 +201,21 @@ namespace MusicBeePlugin
                             RefreshPlayState();
                             _lastPlayStateCheck = now;
                         }
+                        if (_settings.ShowSongQueue &&
+                            (_lastQueueCheck == 0 ||
+                             (now - _lastQueueCheck) * 1000.0 / Stopwatch.Frequency >= 5000))
+                            RefreshQueue();
                         StepSpectrum(elapsedMs);
                         AdvancePalette();
+                        // Keep transitions and live audio smooth, but do not
+                        // repaint a paused, static window 120 times a second.
+                        if (_playState != Plugin.PlayState.Playing &&
+                            _transitionStarted == 0 && _paletteStarted == 0 &&
+                            !HasQueueNotice && _lastPaintRequest != 0 &&
+                            (now - _lastPaintRequest) * 1000.0 / Stopwatch.Frequency < 40)
+                            return;
+                        _lastPaintRequest = now;
                         Invalidate();
-                        Update();
                     }
                     finally { Interlocked.Exchange(ref _framePending, 0); }
                 }));
@@ -182,6 +226,7 @@ namespace MusicBeePlugin
         public void UpdateFromSettings(SettingsObj settings)
         {
             _settings = settings;
+            ClearTextGeometries();
             if (_useArtworkColors != settings.UseArtworkColors)
             {
                 _useArtworkColors = settings.UseArtworkColors;
@@ -208,6 +253,8 @@ namespace MusicBeePlugin
                 value => _settings.ShowTransportControls = value);
             AddToggle(menu, "Show visualizer", () => _settings.ShowVisualizer,
                 value => _settings.ShowVisualizer = value);
+            AddToggle(menu, "Show upcoming songs", () => _settings.ShowSongQueue,
+                value => _settings.ShowSongQueue = value);
             AddToggle(menu, "Match album artwork colours", () => _settings.UseArtworkColors,
                 value => _settings.UseArtworkColors = value);
             AddToggle(menu, "Preview next lyric", () => _settings.NextLineWhenNoTranslation,
@@ -231,6 +278,7 @@ namespace MusicBeePlugin
                 setter(!getter());
                 UpdateFromSettings(_settings);
                 if (wasShowingArt != _settings.ShowAlbumArt) RefreshArtwork(true);
+                if (_settings.ShowSongQueue) RefreshQueue();
                 _settingsChanged?.Invoke(_settings);
                 Invalidate();
             };
@@ -288,6 +336,7 @@ namespace MusicBeePlugin
                 trackUrl != _timingEditor.TrackUrl)
                 _timingEditor.TrackChanged();
             _artworkTrackUrl = trackUrl;
+            if (trackChanged) RefreshQueue();
             if (trackChanged && !string.IsNullOrWhiteSpace(trackUrl))
                 _queueNoticeStarted = 0;
             var request = Interlocked.Increment(ref _artworkRequestId);
@@ -379,6 +428,14 @@ namespace MusicBeePlugin
                 }
                 catch (InvalidOperationException) { cover?.Dispose(); }
             });
+        }
+
+        public void RefreshQueue()
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            _queueTracks = UpcomingQueue.Read(_musicBee);
+            _lastQueueCheck = Stopwatch.GetTimestamp();
+            Invalidate();
         }
 
         private void SetPalette(ArtworkPalette target)
@@ -478,6 +535,134 @@ namespace MusicBeePlugin
             return float.IsNaN(value) || float.IsInfinity(value) ? 0 : Math.Abs(value);
         }
 
+        private void DrawBackground(Graphics g, Rectangle bounds)
+        {
+            // The gradient and soft radial lights do not change between
+            // tracks. Keep a rendered surface for the 120 Hz animation loop.
+            if (_movingOrResizing && _backgroundCache != null)
+            {
+                g.DrawImage(_backgroundCache, bounds);
+                return;
+            }
+            if (_paletteStarted != 0)
+            {
+                DrawBackgroundCore(g, bounds);
+                return;
+            }
+            if (_backgroundCache == null || _backgroundCache.Size != bounds.Size ||
+                _cachedBackgroundPalette.Left != _palette.Left ||
+                _cachedBackgroundPalette.Right != _palette.Right ||
+                _cachedBackgroundPalette.Accent != _palette.Accent ||
+                _cachedBackgroundPalette.BarBottom != _palette.BarBottom)
+            {
+                _backgroundCache?.Dispose();
+                _backgroundCache = new Bitmap(bounds.Width, bounds.Height);
+                using (var surface = Graphics.FromImage(_backgroundCache))
+                {
+                    surface.SmoothingMode = SmoothingMode.AntiAlias;
+                    DrawBackgroundCore(surface, new Rectangle(Point.Empty, bounds.Size));
+                }
+                _cachedBackgroundPalette = _palette;
+            }
+            g.DrawImageUnscaled(_backgroundCache, bounds.Location);
+        }
+
+        private void DrawBackgroundCore(Graphics g, Rectangle bounds)
+        {
+            var accent = _palette.Accent;
+            var upper = MixColor(_palette.Left, accent, 0.32f);
+            var lower = MixColor(_palette.Right, _palette.BarBottom, 0.17f);
+            using (var background = new LinearGradientBrush(bounds,
+                       _palette.Left, _palette.Right, LinearGradientMode.Horizontal))
+            {
+                background.InterpolationColors = new ColorBlend
+                {
+                    Colors = new[] { _palette.Left, upper, lower, _palette.Right },
+                    Positions = new[] { 0f, 0.32f, 0.72f, 1f }
+                };
+                g.FillRectangle(background, bounds);
+            }
+            // Broad, low-contrast light from two other cover hues lends depth
+            // without putting a pattern directly under the lyric text.
+            DrawGlow(g, new RectangleF(-bounds.Width * 0.12f, -bounds.Height * 0.48f,
+                bounds.Width * 0.83f, bounds.Height * 1.17f), accent, 34);
+            DrawGlow(g, new RectangleF(bounds.Width * 0.52f, bounds.Height * 0.32f,
+                bounds.Width * 0.64f, bounds.Height * 0.96f), _palette.BarBottom, 25);
+        }
+
+        private static Color MixColor(Color first, Color second, float amount)
+        {
+            return Color.FromArgb(
+                (int)(first.R + (second.R - first.R) * amount),
+                (int)(first.G + (second.G - first.G) * amount),
+                (int)(first.B + (second.B - first.B) * amount));
+        }
+
+        private static void DrawGlow(Graphics g, RectangleF area, Color color, int alpha)
+        {
+            using (var path = new GraphicsPath())
+            {
+                path.AddEllipse(area);
+                using (var glow = new PathGradientBrush(path))
+                {
+                    glow.CenterColor = Color.FromArgb(alpha, color);
+                    glow.SurroundColors = new[] { Color.FromArgb(0, color) };
+                    g.FillPath(glow, path);
+                }
+            }
+        }
+
+        private void DrawUpcomingQueue(Graphics g, Rectangle bounds, int sideMargin)
+        {
+            if (!_settings.ShowSongQueue || sideMargin < 198 || bounds.Height < 265)
+                return;
+            var top = _settings.ShowSongTitle ? 43 : 16;
+            var bottom = _settings.ShowTransportControls ? 55 : 16;
+            var height = Math.Min(306, bounds.Height - top - bottom);
+            var card = new Rectangle(bounds.Right - sideMargin + 13,
+                Math.Max(top, (bounds.Height - height) / 2), sideMargin - 27, height);
+            using (var path = RoundedRectangle(card, 12))
+            using (var shade = new SolidBrush(Color.FromArgb(71, 10, 13, 25)))
+            using (var border = new Pen(Color.FromArgb(43, _palette.Border)))
+            using (var heading = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Point))
+            using (var titleFont = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point))
+            using (var artistFont = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point))
+            using (var headingBrush = new SolidBrush(Color.FromArgb(171, _palette.Border)))
+            using (var titleBrush = new SolidBrush(Color.FromArgb(214, 235, 238, 246)))
+            using (var artistBrush = new SolidBrush(Color.FromArgb(131, 207, 214, 230)))
+            using (var separator = new Pen(Color.FromArgb(32, _palette.Border)))
+            using (var format = new StringFormat(StringFormatFlags.NoWrap)
+                   { Trimming = StringTrimming.EllipsisCharacter })
+            {
+                g.FillPath(shade, path);
+                g.DrawPath(border, path);
+                g.DrawString("UP NEXT", heading, headingBrush,
+                    new RectangleF(card.Left + 14, card.Top + 14, card.Width - 28, 19), format);
+
+                if (_queueTracks.Count == 0)
+                {
+                    g.DrawString("No songs up next", artistFont, artistBrush,
+                        new RectangleF(card.Left + 14, card.Top + 52, card.Width - 28, 30), format);
+                    return;
+                }
+
+                var visible = Math.Min(_queueTracks.Count, Math.Min(4, (height - 43) / 55));
+                for (var i = 0; i < visible; i++)
+                {
+                    var y = card.Top + 42 + i * 55;
+                    var track = _queueTracks[i];
+                    g.DrawString(track.Title, titleFont, titleBrush,
+                        new RectangleF(card.Left + 14, y, card.Width - 28, 25), format);
+                    if (!string.IsNullOrWhiteSpace(track.Artist))
+                        g.DrawString(track.Artist, artistFont, artistBrush,
+                            new RectangleF(card.Left + 14, y + 24, card.Width - 28, 19), format);
+                    if (i < visible - 1)
+                        g.DrawLine(separator, card.Left + 14, y + 51,
+                            card.Right - 14, y + 51);
+                }
+            }
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
@@ -486,10 +671,7 @@ namespace MusicBeePlugin
             var bounds = ClientRectangle;
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
 
-            using (var background = new LinearGradientBrush(bounds,
-                       _palette.Left, _palette.Right,
-                       LinearGradientMode.Horizontal))
-                g.FillRectangle(background, bounds);
+            DrawBackground(g, bounds);
 
             if (_settings.ShowVisualizer) DrawSpectrum(g, bounds);
 
@@ -511,6 +693,7 @@ namespace MusicBeePlugin
             var panelWidth = Math.Max(40, bounds.Width - panelLeft * 2);
             var content = new RectangleF(panelLeft + 9, region.Top,
                 Math.Max(1, panelWidth - 18), region.Height);
+            DrawUpcomingQueue(g, bounds, panelLeft);
 
             var progress = 1f;
             if (_transitionStarted != 0)
@@ -709,6 +892,7 @@ namespace MusicBeePlugin
             {
                 g.FillEllipse(background, area);
                 var middle = area.Top + area.Height / 2f;
+                var centerX = area.Left + area.Width / 2f;
                 if (action == "play")
                 {
                     if (_playState == Plugin.PlayState.Playing)
@@ -726,35 +910,35 @@ namespace MusicBeePlugin
                 }
                 else if (action == "previous")
                 {
-                    g.FillRectangle(symbol, area.Left + 9, middle - 7, 2, 14);
+                    g.FillRectangle(symbol, centerX - 10, middle - 7, 2, 14);
                     g.FillPolygon(symbol, new[]
                     {
-                        new PointF(area.Left + 12, middle),
-                        new PointF(area.Left + 21, middle - 8),
-                        new PointF(area.Left + 21, middle + 8)
+                        new PointF(centerX - 7, middle),
+                        new PointF(centerX + 2, middle - 8),
+                        new PointF(centerX + 2, middle + 8)
                     });
                     g.FillPolygon(symbol, new[]
                     {
-                        new PointF(area.Left + 20, middle),
-                        new PointF(area.Left + 29, middle - 8),
-                        new PointF(area.Left + 29, middle + 8)
+                        new PointF(centerX + 1, middle),
+                        new PointF(centerX + 10, middle - 8),
+                        new PointF(centerX + 10, middle + 8)
                     });
                 }
                 else
                 {
                     g.FillPolygon(symbol, new[]
                     {
-                        new PointF(area.Left + 5, middle - 8),
-                        new PointF(area.Left + 5, middle + 8),
-                        new PointF(area.Left + 14, middle)
+                        new PointF(centerX - 10, middle - 8),
+                        new PointF(centerX - 10, middle + 8),
+                        new PointF(centerX - 1, middle)
                     });
                     g.FillPolygon(symbol, new[]
                     {
-                        new PointF(area.Left + 13, middle - 8),
-                        new PointF(area.Left + 13, middle + 8),
-                        new PointF(area.Left + 22, middle)
+                        new PointF(centerX - 2, middle - 8),
+                        new PointF(centerX - 2, middle + 8),
+                        new PointF(centerX + 7, middle)
                     });
-                    g.FillRectangle(symbol, area.Left + 23, middle - 7, 2, 14);
+                    g.FillRectangle(symbol, centerX + 8, middle - 7, 2, 14);
                 }
             }
         }
@@ -960,7 +1144,43 @@ namespace MusicBeePlugin
         private void DrawLine(Graphics g, string lyric, RectangleF area, float desiredPoints, int alpha)
         {
             if (string.IsNullOrEmpty(lyric) || alpha <= 0) return;
+            var geometry = GetTextGeometry(g, lyric, area, desiredPoints);
+            if (geometry == null) return;
+            using (var shadow = new SolidBrush(Color.FromArgb(alpha * 2 / 3, 0, 0, 0)))
+            using (var outline = new Pen(Color.FromArgb(alpha, _settings.BorderColor),
+                       Math.Max(1.5f, Math.Min(3f, geometry.FittedPoints / 20f))))
+            using (var foreground = CreateTextBrush(geometry.Bounds, alpha))
+            {
+                var state = g.Save();
+                try
+                {
+                    // The glyph path is stored at the origin. Movement during
+                    // a lyric transition needs only a graphics translation.
+                    g.TranslateTransform(area.Left, area.Top);
+                    g.TranslateTransform(1f, 2f);
+                    g.FillPath(shadow, geometry.Path);
+                    g.TranslateTransform(-1f, -2f);
+                    outline.LineJoin = LineJoin.Round;
+                    g.DrawPath(outline, geometry.Path);
+                    g.FillPath(foreground, geometry.Path);
+                }
+                finally { g.Restore(state); }
+            }
+        }
+
+        private TextGeometry GetTextGeometry(Graphics g, string lyric,
+            RectangleF area, float desiredPoints)
+        {
             var selected = _settings.Font ?? SystemFonts.DefaultFont;
+            var family = selected.FontFamily.Name;
+            foreach (var cached in _textGeometries)
+                if (cached.Text == lyric && cached.FontFamily == family &&
+                    cached.FontStyle == selected.Style &&
+                    cached.DesiredPoints == desiredPoints &&
+                    cached.Width == area.Width && cached.Height == area.Height &&
+                    cached.DpiY == g.DpiY)
+                    return cached;
+
             var size = Math.Max(10f, Math.Min(desiredPoints, area.Height * 0.74f));
             using (var format = new StringFormat(StringFormatFlags.NoWrap)
                    {
@@ -978,29 +1198,38 @@ namespace MusicBeePlugin
                     fitted = new Font(selected.FontFamily, size, selected.Style, GraphicsUnit.Point);
                 }
                 using (fitted)
-                using (var textPath = new GraphicsPath())
-                using (var shadow = new SolidBrush(Color.FromArgb(alpha * 2 / 3, 0, 0, 0)))
-                using (var outline = new Pen(Color.FromArgb(alpha, _settings.BorderColor),
-                           Math.Max(1.5f, Math.Min(3f, size / 20f))))
                 {
-                    textPath.AddString(lyric, fitted.FontFamily, (int)fitted.Style,
-                        fitted.SizeInPoints * g.DpiY / 72f, area, format);
-                    if (textPath.PointCount == 0) return;
-                    using (var shadowPath = (GraphicsPath)textPath.Clone())
-                    using (var offset = new Matrix())
+                    var path = new GraphicsPath();
+                    path.AddString(lyric, fitted.FontFamily, (int)fitted.Style,
+                        fitted.SizeInPoints * g.DpiY / 72f,
+                        new RectangleF(0, 0, area.Width, area.Height), format);
+                    if (path.PointCount == 0)
                     {
-                        offset.Translate(1f, 2f);
-                        shadowPath.Transform(offset);
-                        g.FillPath(shadow, shadowPath);
+                        path.Dispose();
+                        return null;
                     }
-                    outline.LineJoin = LineJoin.Round;
-                    g.DrawPath(outline, textPath);
-                    // Fit the gradient to the actual glyphs, not the taller
-                    // layout row, so both selected colours appear clearly.
-                    using (var foreground = CreateTextBrush(textPath.GetBounds(), alpha))
-                        g.FillPath(foreground, textPath);
+                    var geometry = new TextGeometry
+                    {
+                        Text = lyric, FontFamily = family, FontStyle = selected.Style,
+                        DesiredPoints = desiredPoints, Width = area.Width, Height = area.Height,
+                        DpiY = g.DpiY, FittedPoints = size, Path = path,
+                        Bounds = path.GetBounds()
+                    };
+                    _textGeometries.Add(geometry);
+                    if (_textGeometries.Count > 20)
+                    {
+                        _textGeometries[0].Dispose();
+                        _textGeometries.RemoveAt(0);
+                    }
+                    return geometry;
                 }
             }
+        }
+
+        private void ClearTextGeometries()
+        {
+            foreach (var geometry in _textGeometries) geometry.Dispose();
+            _textGeometries.Clear();
         }
 
         private Brush CreateTextBrush(RectangleF area, int alpha)
@@ -1040,6 +1269,8 @@ namespace MusicBeePlugin
                 Interlocked.Increment(ref _artworkRequestId);
                 _animationTimer?.Dispose();
                 _albumArtwork?.Dispose();
+                _backgroundCache?.Dispose();
+                ClearTextGeometries();
                 if (_timingEditor != null && !_timingEditor.IsDisposed)
                     _timingEditor.ForceClose();
                 _flyoutMenu?.Dispose();

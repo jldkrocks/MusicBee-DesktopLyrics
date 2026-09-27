@@ -206,6 +206,8 @@ namespace MusicBeePlugin
         public bool ShowSongTitle;
         public bool ShowAlbumArt;
         public bool ShowVisualizer;
+        public bool ShowSongQueue;
+        public bool SongQueuePreferenceSet;
         public bool WindowFeaturesPreferenceSet;
         public int WindowPosX = -1;
         public int WindowPosY = -1;
@@ -238,6 +240,8 @@ namespace MusicBeePlugin
                 ShowSongTitle = true,
                 ShowAlbumArt = true,
                 ShowVisualizer = true,
+                ShowSongQueue = true,
+                SongQueuePreferenceSet = true,
                 WindowFeaturesPreferenceSet = true,
             };
         }

@@ -178,6 +178,13 @@ namespace MusicBeePlugin
                             SaveSettings(_settings);
                         }
 
+                        if (!_settings.SongQueuePreferenceSet)
+                        {
+                            _settings.ShowSongQueue = true;
+                            _settings.SongQueuePreferenceSet = true;
+                            SaveSettings(_settings);
+                        }
+
                         LyricParser.PreserveSlash = _settings.PreserveSlash;
                         _lyricsCtrl.NextLineWhenNoTranslation = _settings.NextLineWhenNoTranslation;
 
@@ -211,6 +218,19 @@ namespace MusicBeePlugin
                             if (!artworkView.IsDisposed) artworkView.RefreshArtwork(true);
                         })); }
                         catch (InvalidOperationException) { /* Window closed during a track change. */ }
+                    break;
+                case NotificationType.PlayingTracksChanged:
+                case NotificationType.PlayingTracksQueueChanged:
+#pragma warning disable 618
+                case NotificationType.NowPlayingListChanged:
+#pragma warning restore 618
+                    var queueView = _frmLyrics as FrmLyricsWindow;
+                    if (queueView != null && !queueView.IsDisposed && queueView.IsHandleCreated)
+                        try { queueView.BeginInvoke(new Action(() =>
+                        {
+                            if (!queueView.IsDisposed) queueView.RefreshQueue();
+                        })); }
+                        catch (InvalidOperationException) { /* Window closed while queue changed. */ }
                     break;
                 case NotificationType.NowPlayingListEnded:
                     var endedView = _frmLyrics as FrmLyricsWindow;
