@@ -18,6 +18,8 @@
     <Compile Include="..\ArtworkPalette.cs"><Link>ArtworkPalette.cs</Link></Compile>
     <Compile Include="..\LyricCardLayout.cs"><Link>LyricCardLayout.cs</Link></Compile>
     <Compile Include="..\PartyAnimation.cs"><Link>PartyAnimation.cs</Link></Compile>
+    <Compile Include="..\PartyBeatTracker.cs"><Link>PartyBeatTracker.cs</Link></Compile>
+    <Compile Include="..\PartyLayout.cs"><Link>PartyLayout.cs</Link></Compile>
     <Compile Include="..\LyricParser.cs"><Link>LyricParser.cs</Link></Compile>
     <Compile Include="..\LrcTimingDocument.cs"><Link>LrcTimingDocument.cs</Link></Compile>
     <Compile Include="..\UntimedTimingDocument.cs"><Link>UntimedTimingDocument.cs</Link></Compile>

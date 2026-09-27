@@ -21,6 +21,30 @@ namespace MusicBeePlugin
                 PartyAnimation.FrameAt(1500, 120) != 0)
                 throw new Exception("Party frames must loop at native speed or on song beats.");
 
+            var workArea = new Rectangle(0, 0, 1920, 1040);
+            var medium = new Rectangle(360, 210, 1200, 570);
+            var large = new Rectangle(110, 70, 1700, 900);
+            var mediumLeft = PartyLayout.Place(medium, workArea, true, false);
+            var largeLeft = PartyLayout.Place(large, workArea, true, false);
+            var maximizedLeft = PartyLayout.Place(workArea, workArea, true, true);
+            var maximizedRight = PartyLayout.Place(workArea, workArea, false, true);
+            if (mediumLeft.IsEmpty || largeLeft.Height <= mediumLeft.Height ||
+                maximizedLeft.IsEmpty || maximizedRight.IsEmpty ||
+                !workArea.Contains(maximizedLeft) || !workArea.Contains(maximizedRight) ||
+                maximizedLeft.Right > workArea.Width / 4 ||
+                maximizedRight.Left < workArea.Width * 3 / 4)
+                throw new Exception("Party dancers must scale and stay at both edges when maximized.");
+
+            var beat = new PartyBeatTracker();
+            for (var ms = 0; ms < 5000; ms += 30)
+                beat.Observe(ms, ms >= 510 && (ms - 510) % 510 < 45 ? 9 : 1);
+            if (Math.Abs(beat.Bpm - 60000d / 510) > 5 ||
+                Math.Abs(beat.OriginMs - 510) > 70)
+                throw new Exception("Untagged songs should find a steady live beat.");
+            beat.Observe(100, 1); // Seeking invalidates the previous song-position grid.
+            if (beat.Bpm != 0)
+                throw new Exception("A seek must clear the detected beat.");
+
             const string lrc = "[00:09.68] First line\n" +
                                "[00:17.30] \n" +
                                "[00:17.30] Second line\n" +

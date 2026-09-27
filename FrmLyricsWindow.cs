@@ -57,6 +57,7 @@ namespace MusicBeePlugin
         private Rectangle _previousButton, _playButton, _nextButton, _menuButton,
             _timingButton, _lrcButton, _backgroundButton, _partyButton, _resizeGrip;
         private PartyDancerWindow _leftDancer, _rightDancer;
+        private readonly PartyBeatTracker _partyBeat = new PartyBeatTracker();
         private double _partyBpm;
         private long _lastPartyUpdate;
         private string _hoverButton;
@@ -248,7 +249,8 @@ namespace MusicBeePlugin
             if (_lastSpectrumSample == 0 ||
                 (now - _lastSpectrumSample) * 1000.0 / Stopwatch.Frequency >= 30)
             {
-                if (_settings.ShowVisualizer && !_settings.TransparentCanvas) SampleSpectrum();
+                if ((_settings.ShowVisualizer && !_settings.TransparentCanvas) ||
+                    (_settings.PartyMode && _partyBpm == 0)) SampleSpectrum();
                 _lastSpectrumSample = now;
             }
             if (_lastPlayStateCheck == 0 ||
@@ -404,7 +406,10 @@ namespace MusicBeePlugin
                 if (_rightDancer == null)
                     _rightDancer = new PartyDancerWindow("MusicBeePlugin.PartyRam.png");
                 var position = _musicBee.Player_GetPosition();
-                var frame = PartyAnimation.FrameAt(position, _partyBpm);
+                var detectedBpm = _partyBpm == 0 ? _partyBeat.Bpm : 0;
+                var frame = PartyAnimation.FrameAt(
+                    position - (detectedBpm > 0 ? _partyBeat.OriginMs : 0),
+                    _partyBpm > 0 ? _partyBpm : detectedBpm);
                 PlacePartyDancer(_leftDancer, true, frame);
                 PlacePartyDancer(_rightDancer, false, frame);
             }
@@ -422,19 +427,14 @@ namespace MusicBeePlugin
         private void PlacePartyDancer(PartyDancerWindow dancer, bool left, int frame)
         {
             var area = Screen.FromControl(this).WorkingArea;
-            var space = left ? Left - area.Left - 8 : area.Right - Right - 8;
-            if (space < 65)
+            var bounds = PartyLayout.Place(Bounds, area, left,
+                WindowState == FormWindowState.Maximized);
+            if (bounds.IsEmpty)
             {
                 dancer.Hide();
                 return;
             }
-            var desiredHeight = Math.Min(320, Math.Max(150, Height - 10));
-            var width = Math.Min(space, (int)Math.Round(desiredHeight * 180d / 353));
-            var height = (int)Math.Round(width * 353d / 180);
-            var y = Math.Max(area.Top, Math.Min(area.Bottom - height,
-                Top + (Height - height) / 2));
-            var x = left ? Left - width - 8 : Right + 8;
-            dancer.Present(new Rectangle(x, y, width, height), frame);
+            dancer.Present(bounds, frame);
             if (!dancer.Visible) dancer.Show(this);
         }
 
@@ -496,6 +496,7 @@ namespace MusicBeePlugin
                         _musicBee.NowPlaying_GetFileTag(Plugin.MetaDataType.BeatsPerMin));
                 }
                 catch (Exception) { _partyBpm = 0; }
+                _partyBeat.Reset();
                 _lastPartyUpdate = 0;
             }
             if (trackChanged && !string.IsNullOrWhiteSpace(trackUrl))
@@ -695,6 +696,25 @@ namespace MusicBeePlugin
 
             var validCount = Math.Min(Math.Max(0, count), _fft.Length);
             var upperBin = Math.Min(validCount / 2, 1024);
+            if (_settings.PartyMode && _partyBpm == 0 && upperBin > 8 &&
+                _playState == Plugin.PlayState.Playing)
+            {
+                // Use the same mirrored-spectrum handling as the visualizer.
+                // Bass transients reveal an approximate pulse even when the
+                // user's library has no BPM tags or the bars are hidden.
+                double bassEnergy = 0;
+                for (var bin = 2; bin < Math.Min(96, upperBin); bin++)
+                {
+                    var magnitude = Math.Max(
+                        Math.Max(SafeMagnitude(_fft[bin]),
+                            SafeMagnitude(_fft[validCount - 1 - bin])),
+                        Math.Max(SafeMagnitude(_fft[validCount / 2 + bin]),
+                            SafeMagnitude(_fft[validCount / 2 - 1 - bin])));
+                    bassEnergy += magnitude / Math.Sqrt(bin);
+                }
+                try { _partyBeat.Observe(_musicBee.Player_GetPosition(), bassEnergy); }
+                catch (Exception) { /* Playback position can be unavailable between songs. */ }
+            }
             var total = 0f;
             for (var bar = 0; bar < BarCount; bar++)
             {
