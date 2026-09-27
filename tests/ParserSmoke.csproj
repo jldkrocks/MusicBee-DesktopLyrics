@@ -11,6 +11,7 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.Security" />
     <Reference Include="System.Windows.Forms" />
     <PackageReference Include="Newtonsoft.Json">
       <Version>13.0.1</Version>
@@ -21,6 +22,7 @@
     <Compile Include="..\PartyAnimation.cs"><Link>PartyAnimation.cs</Link></Compile>
     <Compile Include="..\PartyBeatTracker.cs"><Link>PartyBeatTracker.cs</Link></Compile>
     <Compile Include="..\PartyTempoStore.cs"><Link>PartyTempoStore.cs</Link></Compile>
+    <Compile Include="..\GetSongBpmClient.cs"><Link>GetSongBpmClient.cs</Link></Compile>
     <Compile Include="..\PartyLayout.cs"><Link>PartyLayout.cs</Link></Compile>
     <Compile Include="..\LyricParser.cs"><Link>LyricParser.cs</Link></Compile>
     <Compile Include="..\LrcTimingDocument.cs"><Link>LrcTimingDocument.cs</Link></Compile>

@@ -63,6 +63,9 @@ namespace MusicBeePlugin
         private double _partyBpm, _partyTagBpm;
         private int _partyOriginMs;
         private PartyTempoSource _partyTempoSource;
+        private string _partyApiKey, _songAlbum = "", _lastOnlineAttemptTrack, _partyLookupError;
+        private CancellationTokenSource _partyLookupCancellation;
+        private PartyOnlineStatus _partyOnlineStatus;
         private int _partySpectrumMisses;
         private long _lastPartyUpdate;
         private Rectangle _partyLayoutWindow, _leftPartyBounds, _rightPartyBounds;
@@ -88,7 +91,8 @@ namespace MusicBeePlugin
         private readonly List<TextGeometry> _textGeometries = new List<TextGeometry>();
         private static readonly Color ClearKey = Color.Fuchsia;
 
-        private enum PartyTempoSource { None, Tag, Saved, Manual }
+        private enum PartyTempoSource { None, Tag, Saved, Manual, Online }
+        private enum PartyOnlineStatus { None, Searching, NoMatch, Error }
 
         private sealed class QueueHit
         {
@@ -140,6 +144,7 @@ namespace MusicBeePlugin
             _savedTiming = savedTiming;
             _englishStore = englishStore;
             _partyTempoStore = partyTempoStore;
+            _partyApiKey = _partyTempoStore.LoadApiKey();
             _englishSaved = englishSaved;
             _useArtworkColors = settings.UseArtworkColors;
             Text = "Desktop Lyrics";
@@ -263,7 +268,8 @@ namespace MusicBeePlugin
             {
                 if ((_settings.ShowVisualizer && !_settings.TransparentCanvas) ||
                     (_settings.PartyMode && _partyBpm == 0 &&
-                     _partyBeat.Bpm == 0)) SampleSpectrum();
+                     _partyBeat.Bpm == 0 && string.IsNullOrEmpty(_partyApiKey)))
+                    SampleSpectrum();
                 _lastSpectrumSample = now;
             }
             if (_lastPlayStateCheck == 0 ||
@@ -351,6 +357,8 @@ namespace MusicBeePlugin
                 BeginInvoke(new Action(OpenLrcLibPicker)));
             var tempoAction = menu.Items.Add("Adjust Party BPM…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyTempoEditor)));
+            menu.Items.Add("Online Party BPM…", null, (sender, args) =>
+                BeginInvoke(new Action(OpenPartyOnlineSettings)));
             menu.Opening += (sender, args) =>
             {
                 timingAction.Visible = _timingButton.IsEmpty;
@@ -404,7 +412,8 @@ namespace MusicBeePlugin
         private void LoadPartyTempo(string trackUrl)
         {
             var saved = _partyTempoStore.Load(trackUrl);
-            if (saved != null && (saved.Manual || _partyTagBpm == 0))
+            if (saved != null && (saved.Manual ||
+                (_partyTagBpm == 0 && (saved.Online || string.IsNullOrEmpty(_partyApiKey)))))
             {
                 _partyBpm = saved.Bpm;
                 _partyOriginMs = saved.OriginMs;
@@ -418,6 +427,180 @@ namespace MusicBeePlugin
                     PartyAnimation.OriginForBeat(0, _partyBpm) : 0;
                 _partyTempoSource = _partyBpm > 0 ? PartyTempoSource.Tag :
                     PartyTempoSource.None;
+            }
+        }
+
+        private void CancelPartyLookup()
+        {
+            var pending = _partyLookupCancellation;
+            _partyLookupCancellation = null;
+            pending?.Cancel();
+        }
+
+        private void StartPartyOnlineLookup(bool retry = false)
+        {
+            if (_animationDisposed || !_settings.PartyMode ||
+                string.IsNullOrWhiteSpace(_partyApiKey) ||
+                string.IsNullOrWhiteSpace(_artworkTrackUrl)) return;
+            var saved = _partyTempoStore.Load(_artworkTrackUrl);
+            if (_partyTagBpm > 0 || (saved != null && (saved.Manual || saved.Online)))
+                return;
+            if (string.IsNullOrWhiteSpace(_songTitle) ||
+                string.IsNullOrWhiteSpace(_songArtist))
+            {
+                _partyOnlineStatus = PartyOnlineStatus.NoMatch;
+                Invalidate();
+                return;
+            }
+            if (!retry && _lastOnlineAttemptTrack == _artworkTrackUrl) return;
+            CancelPartyLookup();
+            var pending = new CancellationTokenSource();
+            _partyLookupCancellation = pending;
+            _lastOnlineAttemptTrack = _artworkTrackUrl;
+            _partyOnlineStatus = PartyOnlineStatus.Searching;
+            _partyLookupError = null;
+            Invalidate();
+            LookupPartyTempoAsync(_artworkTrackUrl, _songTitle, _songArtist,
+                _songAlbum, _partyApiKey, pending);
+        }
+
+        private async void LookupPartyTempoAsync(string trackUrl, string title,
+            string artist, string album, string apiKey, CancellationTokenSource pending)
+        {
+            double bpm = 0;
+            string error = null;
+            var wasCurrent = false;
+            try
+            {
+                bpm = await GetSongBpmClient.SearchAsync(title, artist, album,
+                    apiKey, pending.Token);
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex) { error = ex.Message; }
+            finally
+            {
+                wasCurrent = ReferenceEquals(_partyLookupCancellation, pending) &&
+                    !pending.IsCancellationRequested;
+                if (ReferenceEquals(_partyLookupCancellation, pending))
+                    _partyLookupCancellation = null;
+                pending.Dispose();
+            }
+            if (!wasCurrent || _animationDisposed || IsDisposed || !_settings.PartyMode ||
+                trackUrl != _artworkTrackUrl || _partyTagBpm > 0 ||
+                apiKey != _partyApiKey) return;
+            var saved = _partyTempoStore.Load(trackUrl);
+            if (saved != null && saved.Manual) return;
+            if (error != null)
+            {
+                _partyLookupError = error;
+                _partyOnlineStatus = PartyOnlineStatus.Error;
+            }
+            else if (bpm == 0) _partyOnlineStatus = PartyOnlineStatus.NoMatch;
+            else
+            {
+                try
+                {
+                    var origin = saved != null ? PartyAnimation.OriginForPhase(
+                        Math.Max(0, _musicBee.Player_GetPosition()),
+                        saved.Bpm, saved.OriginMs, bpm) :
+                        PartyAnimation.OriginForBeat(0, bpm);
+                    _partyTempoStore.Save(trackUrl, bpm, origin, false, true);
+                    _partyBpm = bpm;
+                    _partyOriginMs = origin;
+                    _partyTempoSource = PartyTempoSource.Online;
+                    _partyOnlineStatus = PartyOnlineStatus.None;
+                    _partyBeat.Reset();
+                }
+                catch (Exception ex)
+                {
+                    _partyLookupError = "Could not save this BPM: " + ex.Message;
+                    _partyOnlineStatus = PartyOnlineStatus.Error;
+                }
+            }
+            _lastPartyUpdate = 0;
+            UpdatePartyDancers();
+            Invalidate();
+        }
+
+        private void OpenPartyOnlineSettings()
+        {
+            using (var dialog = new Form
+            {
+                Text = "Online Party BPM", ClientSize = new Size(420, 222),
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterParent,
+                ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false,
+                TopMost = true
+            })
+            {
+                var label = new Label
+                {
+                    Text = "GetSongBPM API key (stored for your Windows account)",
+                    Bounds = new Rectangle(16, 14, 388, 24)
+                };
+                var input = new TextBox
+                {
+                    Text = _partyApiKey, UseSystemPasswordChar = true,
+                    Bounds = new Rectangle(16, 42, 388, 25)
+                };
+                var explanation = new Label
+                {
+                    Text = _partyLookupError ??
+                        "On each song, Party mode searches for a matching artist and title. " +
+                        "Manual BPM and song tags still take priority. Unmatched songs are left for manual adjustment.",
+                    Bounds = new Rectangle(16, 79, 388, 68)
+                };
+                var credit = new LinkLabel
+                {
+                    Text = "GetSongBPM — obtain an API key",
+                    Bounds = new Rectangle(16, 154, 275, 24)
+                };
+                credit.LinkClicked += (sender, args) =>
+                {
+                    try { Process.Start("https://getsongbpm.com/api"); }
+                    catch (Exception) { /* The key can still be pasted manually. */ }
+                };
+                var remove = new Button
+                {
+                    Text = "Remove key", DialogResult = DialogResult.No,
+                    Bounds = new Rectangle(16, 184, 100, 28)
+                };
+                var cancel = new Button
+                {
+                    Text = "Cancel", DialogResult = DialogResult.Cancel,
+                    Bounds = new Rectangle(238, 184, 76, 28)
+                };
+                var save = new Button
+                {
+                    Text = "Save", DialogResult = DialogResult.OK,
+                    Bounds = new Rectangle(322, 184, 82, 28)
+                };
+                dialog.Controls.AddRange(new Control[]
+                    { label, input, explanation, credit, remove, cancel, save });
+                dialog.AcceptButton = save;
+                dialog.CancelButton = cancel;
+                var result = dialog.ShowDialog(this);
+                if (result != DialogResult.OK && result != DialogResult.No) return;
+                try
+                {
+                    var key = result == DialogResult.No ? "" : input.Text.Trim();
+                    _partyTempoStore.SaveApiKey(key);
+                    CancelPartyLookup();
+                    _partyApiKey = key;
+                    _partyOnlineStatus = PartyOnlineStatus.None;
+                    _partyLookupError = null;
+                    _lastOnlineAttemptTrack = null;
+                    LoadPartyTempo(_artworkTrackUrl);
+                    StartPartyOnlineLookup();
+                    _lastPartyUpdate = 0;
+                    UpdatePartyDancers();
+                    Invalidate();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Could not save the API key: " + ex.Message,
+                        "Online Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
         }
 
@@ -513,6 +696,8 @@ namespace MusicBeePlugin
                         _partyTempoStore.Delete(trackUrl);
                         _partyBeat.Reset();
                         LoadPartyTempo(trackUrl);
+                        _lastOnlineAttemptTrack = null;
+                        StartPartyOnlineLookup();
                     }
                     else
                     {
@@ -529,6 +714,7 @@ namespace MusicBeePlugin
                                 oldBpm, oldOrigin, bpm);
                         }
                         _partyTempoStore.Save(trackUrl, bpm, origin, true);
+                        CancelPartyLookup();
                         _partyBpm = bpm;
                         _partyOriginMs = origin;
                         _partyTempoSource = PartyTempoSource.Manual;
@@ -677,6 +863,10 @@ namespace MusicBeePlugin
             _artworkTrackUrl = trackUrl;
             if (trackChanged)
             {
+                CancelPartyLookup();
+                _lastOnlineAttemptTrack = null;
+                _partyOnlineStatus = PartyOnlineStatus.None;
+                _partyLookupError = null;
                 _queueTracks.Clear();
                 _lastFutureOffset = 0;
                 try
@@ -700,8 +890,10 @@ namespace MusicBeePlugin
             {
                 _songTitle = _musicBee.NowPlaying_GetFileTag(Plugin.MetaDataType.TrackTitle) ?? "";
                 _songArtist = _musicBee.NowPlaying_GetFileTag(Plugin.MetaDataType.Artist) ?? "";
+                _songAlbum = _musicBee.NowPlaying_GetFileTag(Plugin.MetaDataType.Album) ?? "";
             }
-            catch (Exception) { _songTitle = _songArtist = ""; }
+            catch (Exception) { _songTitle = _songArtist = _songAlbum = ""; }
+            if (trackChanged) StartPartyOnlineLookup();
             if (_history.Observe(trackUrl, _songTitle, _songArtist) || trackChanged)
             {
                 _queueScroll = Math.Max(0, _history.Snapshot().Count - 2);
@@ -887,11 +1079,13 @@ namespace MusicBeePlugin
 
             var validCount = Math.Min(Math.Max(0, count), _fft.Length);
             var upperBin = Math.Min(validCount / 2, 1024);
-            if (_settings.PartyMode && _partyBpm == 0 && _partyBeat.Bpm == 0 &&
+            if (_settings.PartyMode && string.IsNullOrEmpty(_partyApiKey) &&
+                _partyBpm == 0 && _partyBeat.Bpm == 0 &&
                 _playState == Plugin.PlayState.Playing)
                 _partySpectrumMisses = upperBin > 8 ? 0 :
                     Math.Min(30, _partySpectrumMisses + 1);
-            if (_settings.PartyMode && _partyBpm == 0 && _partyBeat.Bpm == 0 &&
+            if (_settings.PartyMode && string.IsNullOrEmpty(_partyApiKey) &&
+                _partyBpm == 0 && _partyBeat.Bpm == 0 &&
                 upperBin > 8 &&
                 _playState == Plugin.PlayState.Playing)
             {
@@ -1745,9 +1939,14 @@ namespace MusicBeePlugin
                     g.DrawString("PARTY", font, brush, new Rectangle(
                         _partyButton.Left, _partyButton.Top + 2, _partyButton.Width, 17), format);
                     var source = _partyTempoSource == PartyTempoSource.Manual ? "SET " :
-                        _partyTempoSource == PartyTempoSource.Saved ? "SAVED " : "TAG ";
+                        _partyTempoSource == PartyTempoSource.Saved ? "SAVED " :
+                        _partyTempoSource == PartyTempoSource.Online ? "WEB " : "TAG ";
                     var tempo = _partyBpm > 0 ? source +
                         _partyBpm.ToString("0.#", CultureInfo.InvariantCulture) :
+                        !string.IsNullOrEmpty(_partyApiKey) ?
+                            _partyOnlineStatus == PartyOnlineStatus.Searching ? "SEARCHING..." :
+                            _partyOnlineStatus == PartyOnlineStatus.Error ? "API ERROR" :
+                            "NO MATCH" :
                         _partyBeat.Bpm > 0 ? "AUTO " +
                             _partyBeat.Bpm.ToString("0.#", CultureInfo.InvariantCulture) :
                         _partySpectrumMisses >= 30 ? "NO SIGNAL" : "LISTENING...";
@@ -2063,6 +2262,8 @@ namespace MusicBeePlugin
             if (_partyButton.Contains(e.Location))
             {
                 _settings.PartyMode = !_settings.PartyMode;
+                if (_settings.PartyMode) StartPartyOnlineLookup(true);
+                else CancelPartyLookup();
                 UpdatePartyDancers();
                 _settingsChanged?.Invoke(_settings);
                 Invalidate();
@@ -2292,6 +2493,7 @@ namespace MusicBeePlugin
             if (disposing)
             {
                 _animationDisposed = true;
+                CancelPartyLookup();
                 Interlocked.Increment(ref _artworkRequestId);
                 _animationTimer?.Dispose();
                 DisposePartyDancers();

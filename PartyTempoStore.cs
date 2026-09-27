@@ -12,6 +12,7 @@ namespace MusicBeePlugin
         public double Bpm;
         public int OriginMs;
         public bool Manual;
+        public bool Online;
         public bool TwoBeatPhase;
         public int BeatPatternVersion;
     }
@@ -21,6 +22,9 @@ namespace MusicBeePlugin
     internal sealed class PartyTempoStore
     {
         private readonly string _folder;
+        private const string KeyFileName = "getsongbpm-key.bin";
+        private static readonly byte[] KeyEntropy =
+            Encoding.UTF8.GetBytes("MusicBee-DesktopLyrics:GetSongBPM:v1");
 
         internal PartyTempoStore(string persistentStoragePath)
         {
@@ -63,7 +67,8 @@ namespace MusicBeePlugin
             catch (Exception) { return null; } // Inaccessible or invalid cache.
         }
 
-        internal void Save(string trackUrl, double bpm, int originMs, bool manual)
+        internal void Save(string trackUrl, double bpm, int originMs, bool manual,
+            bool online = false)
         {
             if (string.IsNullOrWhiteSpace(trackUrl) || bpm < 40 || bpm > 240 ||
                 double.IsNaN(bpm) || double.IsInfinity(bpm) ||
@@ -77,7 +82,8 @@ namespace MusicBeePlugin
                 File.WriteAllText(temporary, JsonConvert.SerializeObject(new PartyTempoEntry
                 {
                     TrackUrl = trackUrl, Bpm = bpm, OriginMs = originMs,
-                    Manual = manual, TwoBeatPhase = true, BeatPatternVersion = 2
+                    Manual = manual, Online = online, TwoBeatPhase = true,
+                    BeatPatternVersion = 2
                 }), new UTF8Encoding(false));
                 if (File.Exists(filename)) File.Replace(temporary, filename, null);
                 else File.Move(temporary, filename);
@@ -93,6 +99,43 @@ namespace MusicBeePlugin
             if (string.IsNullOrWhiteSpace(trackUrl)) return;
             var filename = FileName(trackUrl);
             if (File.Exists(filename)) File.Delete(filename);
+        }
+
+        internal string LoadApiKey()
+        {
+            try
+            {
+                var filename = Path.Combine(_folder, KeyFileName);
+                return File.Exists(filename) ? Encoding.UTF8.GetString(
+                    ProtectedData.Unprotect(File.ReadAllBytes(filename), KeyEntropy,
+                        DataProtectionScope.CurrentUser)) : "";
+            }
+            catch (Exception) { return ""; }
+        }
+
+        internal void SaveApiKey(string apiKey)
+        {
+            var filename = Path.Combine(_folder, KeyFileName);
+            apiKey = apiKey?.Trim() ?? "";
+            if (apiKey.Length == 0)
+            {
+                if (File.Exists(filename)) File.Delete(filename);
+                return;
+            }
+            Directory.CreateDirectory(_folder);
+            var encrypted = ProtectedData.Protect(Encoding.UTF8.GetBytes(apiKey),
+                KeyEntropy, DataProtectionScope.CurrentUser);
+            var temporary = filename + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllBytes(temporary, encrypted);
+                if (File.Exists(filename)) File.Replace(temporary, filename, null);
+                else File.Move(temporary, filename);
+            }
+            finally
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
+            }
         }
 
         private string FileName(string trackUrl)

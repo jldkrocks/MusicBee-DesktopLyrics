@@ -158,11 +158,36 @@ namespace MusicBeePlugin
                     PartyAnimation.OriginForBeat(0, 120) ||
                     PartyAnimation.FrameAt(-loaded.OriginMs, loaded.Bpm) != 6)
                     throw new Exception("Two-beat saves must retain their beat grid at half-time.");
+                tempoStore.Save("online.mp3", 127,
+                    PartyAnimation.OriginForBeat(0, 127), false, true);
+                loaded = tempoStore.Load("online.mp3");
+                if (loaded == null || !loaded.Online || loaded.Manual || loaded.Bpm != 127)
+                    throw new Exception("A confirmed online tempo must persist per song.");
+                tempoStore.SaveApiKey("local-test-key-not-a-real-credential");
+                if (tempoStore.LoadApiKey() != "local-test-key-not-a-real-credential" ||
+                    System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(
+                        tempoRoot, "DesktopLyrics-PartyTempo", "getsongbpm-key.bin")))
+                        .Contains("local-test-key-not-a-real-credential"))
+                    throw new Exception("The API key must be recoverable locally but encrypted on disk.");
+                tempoStore.SaveApiKey("");
+                if (tempoStore.LoadApiKey() != "")
+                    throw new Exception("Removing the API key must stop online lookup.");
             }
             finally
             {
                 if (Directory.Exists(tempoRoot)) Directory.Delete(tempoRoot, true);
             }
+
+            var bpmResults = "{\"search\":[" +
+                "{\"title\":\"~Asterisk~\",\"tempo\":\"127\",\"artist\":{\"name\":\"ORANGE RANGE\"}," +
+                "\"album\":{\"title\":\"Natural\"}}," +
+                "{\"title\":\"~Asterisk~\",\"tempo\":\"128\",\"artist\":{\"name\":\"ORANGE RANGE\"}," +
+                "\"album\":{\"title\":\"Live\"}}]}";
+            if (GetSongBpmClient.MatchTempo(bpmResults, "* ~Asterisk~", "Orange Range", "Natural") != 127 ||
+                GetSongBpmClient.MatchTempo(bpmResults, "~Asterisk~", "ORANGE RANGE", "") != 0 ||
+                GetSongBpmClient.MatchTempo(bpmResults, "~Asterisk~", "Other Artist", "Natural") != 0 ||
+                GetSongBpmClient.MatchTempo("{\"search\":[]}", "~Asterisk~", "ORANGE RANGE", "") != 0)
+                throw new Exception("Online BPM must require a confident artist, title and version match.");
 
             const string lrc = "[00:09.68] First line\n" +
                                "[00:17.30] \n" +
