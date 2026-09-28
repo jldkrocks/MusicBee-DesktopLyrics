@@ -280,7 +280,7 @@ namespace MusicBeePlugin
                 _lastPlayStateCheck = now;
             }
             if (_settings.PartyMode && (_lastPartyUpdate == 0 ||
-                (now - _lastPartyUpdate) * 1000.0 / Stopwatch.Frequency >= 35))
+                (now - _lastPartyUpdate) * 1000.0 / Stopwatch.Frequency >= 15))
             {
                 UpdatePartyDancers();
                 _lastPartyUpdate = now;
@@ -819,8 +819,8 @@ namespace MusicBeePlugin
                 var position = _musicBee.Player_GetPosition();
                 var detectedBpm = _partyBpm == 0 ? _partyBeat.Bpm : 0;
                 var bpm = _partyBpm > 0 ? _partyBpm : detectedBpm;
-                var phasePosition = position - (_partyBpm > 0 ?
-                    _partyOriginMs : _partyBeat.OriginMs);
+                var phasePosition = PartyAnimation.DisplayPhaseAt(position,
+                    _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs, bpm);
                 var frame = PartyAnimation.FrameAt(phasePosition, bpm);
                 var impact = PartyAnimation.SideImpactAt(phasePosition, bpm);
                 var sway = PartyAnimation.SwayAt(phasePosition, bpm);

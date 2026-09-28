@@ -7,6 +7,16 @@ namespace MusicBeePlugin
     {
         internal const int FrameCount = 12;
         internal const int FrameDurationMs = 140;
+        internal const int VisualLeadMs = 40;
+
+        internal static int DisplayPhaseAt(int positionMs, int originMs, double bpm)
+        {
+            // MusicBee's position is sampled before the layered dancers are
+            // drawn. Lead the display slightly to offset the timer and draw
+            // latency without changing the saved beat origin for the song.
+            return positionMs - originMs +
+                (bpm >= 40 && bpm <= 240 ? VisualLeadMs : 0);
+        }
 
         internal static double ReadBpm(string tag)
         {

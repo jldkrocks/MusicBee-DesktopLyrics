@@ -81,6 +81,26 @@ namespace MusicBeePlugin
                 PartyAnimation.SideImpactAt(0, 0) != 0)
                 throw new Exception("Only the side beat should have the short impact accent.");
 
+            // The display compensates for timer and layered-window latency.
+            // Keep the saved origin at the audible beat and test the frame
+            // just before and at the compensated arrival at several tempos.
+            foreach (var tempo in new[] { 80d, 120d, 240d })
+            {
+                var origin = PartyAnimation.OriginForBeat(1000, tempo);
+                var before = PartyAnimation.DisplayPhaseAt(
+                    1000 - PartyAnimation.VisualLeadMs - 1, origin, tempo);
+                var arrival = PartyAnimation.DisplayPhaseAt(
+                    1000 - PartyAnimation.VisualLeadMs, origin, tempo);
+                if (PartyAnimation.FrameAt(before, tempo) != 3 ||
+                    PartyAnimation.FrameAt(arrival, tempo) != 6 ||
+                    PartyAnimation.SideImpactAt(arrival, tempo) < 0.99f ||
+                    PartyAnimation.FrameAt(PartyAnimation.DisplayPhaseAt(
+                        1000, origin, tempo), tempo) != 6)
+                    throw new Exception("The visual lead must bring the side hit forward without changing its beat origin.");
+            }
+            if (PartyAnimation.DisplayPhaseAt(250, 10, 0) != 240)
+                throw new Exception("The unsynchronized fallback should keep its original loop timing.");
+
             var beatOrigin = PartyAnimation.OriginForBeat(750, 120);
             if (PartyAnimation.FrameAt(750 - beatOrigin, 120) != 6 ||
                 PartyAnimation.FrameAt(1250 - beatOrigin, 120) == 0 ||
