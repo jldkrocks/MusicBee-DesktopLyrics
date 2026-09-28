@@ -21,6 +21,8 @@ namespace MusicBeePlugin
                 PartyAnimation.FrameAt(1680, 0) != 0 ||
                 PartyAnimation.FrameAt(0, 120) != 0 ||
                 PartyAnimation.FrameAt(250, 120) != 0 ||
+                PartyAnimation.FrameAt(500, 120) != 3 ||
+                PartyAnimation.FrameAt(1500, 120) != 9 ||
                 PartyAnimation.FrameAt(1000, 120) != 6 ||
                 PartyAnimation.FrameAt(1250, 120) != 6 ||
                 PartyAnimation.FrameAt(2000, 120) != 0 ||
@@ -40,6 +42,16 @@ namespace MusicBeePlugin
                 foreach (var frame in seen)
                     if (!frame) throw new Exception("Travel must show every in-between drawing.");
             }
+
+            // Side poses still land on alternating beats. The intervening
+            // beats at 120 BPM should visibly settle on the centre drawings.
+            if (PartyAnimation.FrameAt(450, 120) != 3 ||
+                PartyAnimation.FrameAt(550, 120) != 3 ||
+                PartyAnimation.FrameAt(1450, 120) != 9 ||
+                PartyAnimation.FrameAt(1550, 120) != 9 ||
+                PartyAnimation.FrameAt(375, 80) != 3 ||
+                PartyAnimation.FrameAt(500, 240) != 3)
+                throw new Exception("The middle pose must accent the intervening beat without losing the side holds.");
 
             var beatOrigin = PartyAnimation.OriginForBeat(750, 120);
             if (PartyAnimation.FrameAt(750 - beatOrigin, 120) != 6 ||
