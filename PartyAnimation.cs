@@ -7,8 +7,6 @@ namespace MusicBeePlugin
     {
         internal const int FrameCount = 12;
         internal const int FrameDurationMs = 140;
-        private const double SideTravelMs = 220;
-        private const double CentreToSideTravelMs = 175;
 
         internal static double ReadBpm(string tag)
         {
@@ -30,25 +28,28 @@ namespace MusicBeePlugin
             var loopMs = LoopDurationMs(bpm);
             var phase = positionMs % loopMs;
             if (phase < 0) phase += loopMs;
-            // Four clear accents per loop: side, centre, opposite side,
-            // centre. At half-time tempos the centre pose arrives ON the
-            // intervening beat instead of appearing before it.
-            var poseSegmentMs = loopMs / 4;
-            var segment = (int)(phase / poseSegmentMs);
-            var elapsed = phase - segment * poseSegmentMs;
-            var poseFrame = segment * 3;
-            // Keep the travel drawings brief even on slow tracks. Stretching
-            // each of the twelve sprites across four slow beats made the
-            // intermediate poses hang for hundreds of milliseconds.
-            var toSide = segment % 2 != 0;
-            var travelMs = Math.Min(toSide ? CentreToSideTravelMs : SideTravelMs,
-                poseSegmentMs * 0.7);
-            var holdMs = poseSegmentMs - travelMs;
-            if (elapsed < holdMs) return poseFrame;
-            var travel = (elapsed - holdMs) / travelMs;
-            // The final drawing before the stronger side hit is a short
-            // anticipation, followed by frame 0 or 6 right on the beat.
-            return poseFrame + (travel < (toSide ? 0.6 : 0.5) ? 1 : 2);
+            // The four key drawings each land on a beat and stay until the
+            // next one. Frames 0 and 6 are the side hits; 3 and 9 are the
+            // intervening middle poses. The other sprite drawings are skipped.
+            // The tiny tolerance keeps a fractional BPM's exact beat from
+            // falling one drawing short due to floating-point rounding.
+            return Math.Min(3, (int)Math.Floor(phase / (loopMs / 4) + 1e-9)) * 3;
+        }
+
+        internal static float SwayAt(int positionMs, double bpm)
+        {
+            if (bpm < 40 || bpm >= 120) return 0;
+            var beatMs = 60000d / bpm;
+            var loopMs = LoopDurationMs(bpm);
+            var phase = positionMs % loopMs;
+            if (phase < 0) phase += loopMs;
+            var beat = Math.Min(3, (int)Math.Floor(phase / beatMs + 1e-9));
+            var progress = Math.Max(0, (phase - beat * beatMs) / beatMs);
+            // A small arc returns to centre on each beat, so changing poses
+            // never jumps sideways. It tapers away on faster songs.
+            var amount = Math.Min(1d, (120 - bpm) / 20d);
+            return (float)(0.014 * amount * Math.Sin(Math.PI * progress) *
+                (beat % 2 == 0 ? 1 : -1));
         }
 
         internal static double LoopDurationMs(double bpm)

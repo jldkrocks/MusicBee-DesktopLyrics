@@ -22,14 +22,14 @@ namespace MusicBeePlugin
                 PartyAnimation.FrameAt(0, 120) != 0 ||
                 PartyAnimation.FrameAt(150, 120) != 0 ||
                 PartyAnimation.FrameAt(250, 120) != 0 ||
-                PartyAnimation.FrameAt(350, 120) != 1 ||
-                PartyAnimation.FrameAt(450, 120) != 2 ||
+                PartyAnimation.FrameAt(350, 120) != 0 ||
+                PartyAnimation.FrameAt(450, 120) != 0 ||
                 PartyAnimation.FrameAt(500, 120) != 3 ||
                 PartyAnimation.FrameAt(1500, 120) != 9 ||
                 PartyAnimation.FrameAt(1000, 120) != 6 ||
                 PartyAnimation.FrameAt(1150, 120) != 6 ||
                 PartyAnimation.FrameAt(1250, 120) != 6 ||
-                PartyAnimation.FrameAt(1350, 120) != 7 ||
+                PartyAnimation.FrameAt(1350, 120) != 6 ||
                 PartyAnimation.FrameAt(2000, 120) != 0 ||
                 PartyAnimation.FrameAt(750, 80) != 3 ||
                 Math.Abs(PartyAnimation.LoopDurationMs(80) - 3000) > 0.001 ||
@@ -39,29 +39,41 @@ namespace MusicBeePlugin
                 Math.Abs(PartyAnimation.LoopDurationMs(240) - 1000) > 0.001)
                 throw new Exception("Party dancers should use two beats per side at every BPM.");
 
-            for (var side = 0; side < 2; side++)
+            foreach (var bpm in new[] { 40d, 80d, 120d, 240d })
             {
-                var seen = new bool[6];
-                for (var ms = side * 1000; ms < (side + 1) * 1000; ms += 5)
-                    seen[PartyAnimation.FrameAt(ms, 120) - side * 6] = true;
-                foreach (var frame in seen)
-                    if (!frame) throw new Exception("Travel must show every in-between drawing.");
+                var beatMs = 60000d / bpm;
+                for (var beat = 0; beat < 4; beat++)
+                    for (var within = 0; within < 20; within++)
+                    {
+                        var position = (int)Math.Ceiling((beat + within / 20d) * beatMs);
+                        if (PartyAnimation.FrameAt(position, bpm) != beat * 3)
+                            throw new Exception("Only the four main drawings should be held between beats.");
+                    }
             }
 
-            // Each accented pose arrives on its beat. Approaching frames
-            // remain visible up to that boundary; the middle pose never
-            // appears early and both kinds of accented pose linger after it.
-            if (PartyAnimation.FrameAt(490, 120) != 2 ||
+            // The middle and side poses change exactly at the beat, with no
+            // in-between sprite frames even at very slow and fast tempos.
+            if (PartyAnimation.FrameAt(490, 120) != 0 ||
                 PartyAnimation.FrameAt(550, 120) != 3 ||
                 PartyAnimation.FrameAt(620, 120) != 3 ||
                 PartyAnimation.FrameAt(650, 120) != 3 ||
-                PartyAnimation.FrameAt(850, 120) != 4 ||
-                PartyAnimation.FrameAt(960, 120) != 5 ||
-                PartyAnimation.FrameAt(1490, 120) != 8 ||
+                PartyAnimation.FrameAt(850, 120) != 3 ||
+                PartyAnimation.FrameAt(960, 120) != 3 ||
+                PartyAnimation.FrameAt(1490, 120) != 6 ||
                 PartyAnimation.FrameAt(1550, 120) != 9 ||
                 PartyAnimation.FrameAt(750, 80) != 3 ||
+                PartyAnimation.FrameAt(1512, 119) != 6 ||
+                PartyAnimation.FrameAt(1513, 119) != 9 ||
                 PartyAnimation.FrameAt(250, 240) != 3)
-                throw new Exception("The middle pose must accent the intervening beat without losing the side holds.");
+                throw new Exception("The middle and side poses should land on successive beats.");
+            if (PartyAnimation.SwayAt(0, 80) != 0 ||
+                PartyAnimation.SwayAt(750, 80) != 0 ||
+                PartyAnimation.SwayAt(375, 80) < 0.013f ||
+                PartyAnimation.SwayAt(1125, 80) > -0.013f ||
+                PartyAnimation.SwayAt(250, 100) <= 0 ||
+                PartyAnimation.SwayAt(250, 120) != 0 ||
+                PartyAnimation.SwayAt(250, 0) != 0)
+                throw new Exception("Slow-song sway should stay subtle, return on the beat, and fade at higher BPM.");
             if (PartyAnimation.SideImpactAt(0, 120) < 0.99f ||
                 PartyAnimation.SideImpactAt(60, 120) <= 0 ||
                 PartyAnimation.SideImpactAt(500, 120) != 0 ||

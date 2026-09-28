@@ -818,15 +818,15 @@ namespace MusicBeePlugin
                     _rightDancer = new PartyDancerWindow("MusicBeePlugin.PartyRam.png");
                 var position = _musicBee.Player_GetPosition();
                 var detectedBpm = _partyBpm == 0 ? _partyBeat.Bpm : 0;
-                var frame = PartyAnimation.FrameAt(
-                    position - (_partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs),
-                    _partyBpm > 0 ? _partyBpm : detectedBpm);
-                var impact = PartyAnimation.SideImpactAt(
-                    position - (_partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs),
-                    _partyBpm > 0 ? _partyBpm : detectedBpm);
+                var bpm = _partyBpm > 0 ? _partyBpm : detectedBpm;
+                var phasePosition = position - (_partyBpm > 0 ?
+                    _partyOriginMs : _partyBeat.OriginMs);
+                var frame = PartyAnimation.FrameAt(phasePosition, bpm);
+                var impact = PartyAnimation.SideImpactAt(phasePosition, bpm);
+                var sway = PartyAnimation.SwayAt(phasePosition, bpm);
                 RefreshPartyLayout();
-                PlacePartyDancer(_leftDancer, _leftPartyBounds, frame, impact);
-                PlacePartyDancer(_rightDancer, _rightPartyBounds, frame, impact);
+                PlacePartyDancer(_leftDancer, _leftPartyBounds, frame, impact, sway);
+                PlacePartyDancer(_rightDancer, _rightPartyBounds, frame, impact, sway);
             }
             catch (Exception ex)
             {
@@ -868,14 +868,14 @@ namespace MusicBeePlugin
         }
 
         private void PlacePartyDancer(PartyDancerWindow dancer, Rectangle bounds,
-            int frame, float impact)
+            int frame, float impact, float sway)
         {
             if (bounds.IsEmpty)
             {
                 dancer.Hide();
                 return;
             }
-            dancer.Present(bounds, frame, impact);
+            dancer.Present(bounds, frame, impact, sway);
             if (!dancer.Visible) dancer.Show(this);
         }
 
