@@ -9,8 +9,8 @@ namespace MusicBeePlugin
         internal const int FrameDurationMs = 140;
         internal const int HalfTimeFromBpm = 110;
         internal const int QuarterTimeFromBpm = 220;
-        private const double PoseHold = 0.18;
-        private const double MiddleHold = 0.12;
+        private const double SidePoseHold = 0.42;
+        private const double CentrePoseHold = 0.26;
 
         internal static double ReadBpm(string tag)
         {
@@ -32,25 +32,20 @@ namespace MusicBeePlugin
             var loopMs = LoopDurationMs(bpm);
             var phase = positionMs % loopMs;
             if (phase < 0) phase += loopMs;
-            var halfLoop = loopMs / 2;
-            var startingFrame = phase < halfLoop ? 0 : FrameCount / 2;
-            var travel = (phase % halfLoop) / halfLoop;
-            if (travel <= PoseHold) return startingFrame;
-            // Frame 3 (or 9) is the centred pose. At half-time tempos the
-            // intervening beat falls halfway between the two side poses, so
-            // give that frame a short hold centred exactly on that beat.
-            var middleStart = (1 - MiddleHold) / 2;
-            var middleEnd = (1 + MiddleHold) / 2;
-            if (travel < middleStart)
-            {
-                var t = (travel - PoseHold) / (middleStart - PoseHold);
-                var eased = t * t * (3 - 2 * t);
-                return startingFrame + Math.Min(2, (int)(eased * 3));
-            }
-            if (travel <= middleEnd) return startingFrame + 3;
-            var returnTravel = (travel - middleEnd) / (1 - middleEnd);
-            var returnEased = returnTravel * returnTravel * (3 - 2 * returnTravel);
-            return startingFrame + 4 + Math.Min(1, (int)(returnEased * 2));
+            // Four clear accents per loop: side, centre, opposite side,
+            // centre. At half-time tempos the centre pose arrives ON the
+            // intervening beat instead of appearing before it.
+            var poseSegmentMs = loopMs / 4;
+            var segment = (int)(phase / poseSegmentMs);
+            var progress = (phase - segment * poseSegmentMs) / poseSegmentMs;
+            var poseFrame = segment * 3;
+            var hold = segment % 2 == 0 ? SidePoseHold : CentrePoseHold;
+            if (progress < hold) return poseFrame;
+
+            // Give the two travel drawings equal time within each segment.
+            // The next accented pose arrives at the next segment boundary.
+            var travel = (progress - hold) / (1 - hold);
+            return poseFrame + (travel < 0.5 ? 1 : 2);
         }
 
         internal static double LoopDurationMs(double bpm)

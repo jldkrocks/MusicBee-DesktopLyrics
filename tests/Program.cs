@@ -20,11 +20,13 @@ namespace MusicBeePlugin
                 PartyAnimation.FrameAt(0, 0) != 0 ||
                 PartyAnimation.FrameAt(1680, 0) != 0 ||
                 PartyAnimation.FrameAt(0, 120) != 0 ||
-                PartyAnimation.FrameAt(250, 120) != 0 ||
+                PartyAnimation.FrameAt(150, 120) != 0 ||
+                PartyAnimation.FrameAt(250, 120) != 1 ||
                 PartyAnimation.FrameAt(500, 120) != 3 ||
                 PartyAnimation.FrameAt(1500, 120) != 9 ||
                 PartyAnimation.FrameAt(1000, 120) != 6 ||
-                PartyAnimation.FrameAt(1250, 120) != 6 ||
+                PartyAnimation.FrameAt(1150, 120) != 6 ||
+                PartyAnimation.FrameAt(1250, 120) != 7 ||
                 PartyAnimation.FrameAt(2000, 120) != 0 ||
                 PartyAnimation.FrameAt(750, 80) != 6 ||
                 Math.Abs(PartyAnimation.LoopDurationMs(80) - 1500) > 0.001 ||
@@ -43,11 +45,14 @@ namespace MusicBeePlugin
                     if (!frame) throw new Exception("Travel must show every in-between drawing.");
             }
 
-            // Side poses still land on alternating beats. The intervening
-            // beats at 120 BPM should visibly settle on the centre drawings.
-            if (PartyAnimation.FrameAt(450, 120) != 3 ||
+            // Each accented pose arrives on its beat. Approaching frames
+            // remain visible up to that boundary; the middle pose never
+            // appears early and both kinds of accented pose linger after it.
+            if (PartyAnimation.FrameAt(490, 120) != 2 ||
                 PartyAnimation.FrameAt(550, 120) != 3 ||
-                PartyAnimation.FrameAt(1450, 120) != 9 ||
+                PartyAnimation.FrameAt(620, 120) != 3 ||
+                PartyAnimation.FrameAt(650, 120) != 4 ||
+                PartyAnimation.FrameAt(1490, 120) != 8 ||
                 PartyAnimation.FrameAt(1550, 120) != 9 ||
                 PartyAnimation.FrameAt(375, 80) != 3 ||
                 PartyAnimation.FrameAt(500, 240) != 3)
