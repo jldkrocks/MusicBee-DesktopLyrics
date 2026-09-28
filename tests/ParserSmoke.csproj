@@ -20,6 +20,7 @@
     <Compile Include="..\LyricCardLayout.cs"><Link>LyricCardLayout.cs</Link></Compile>
     <Compile Include="..\LyricTextLayout.cs"><Link>LyricTextLayout.cs</Link></Compile>
     <Compile Include="..\PartyAnimation.cs"><Link>PartyAnimation.cs</Link></Compile>
+    <Compile Include="..\PartyTapTempo.cs"><Link>PartyTapTempo.cs</Link></Compile>
     <Compile Include="..\PartyBeatTracker.cs"><Link>PartyBeatTracker.cs</Link></Compile>
     <Compile Include="..\PartyTempoStore.cs"><Link>PartyTempoStore.cs</Link></Compile>
     <Compile Include="..\GetSongBpmClient.cs"><Link>GetSongBpmClient.cs</Link></Compile>

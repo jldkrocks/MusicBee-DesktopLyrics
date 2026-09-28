@@ -632,9 +632,10 @@ namespace MusicBeePlugin
             var currentBpm = _partyBpm > 0 ? _partyBpm :
                 _partyBeat.Bpm > 0 ? _partyBeat.Bpm : 120;
             int? tappedBeat = null;
+            var tapTempo = new PartyTapTempo();
             using (var dialog = new Form
             {
-                Text = "Party BPM for this song", ClientSize = new Size(360, 204),
+                Text = "Party BPM for this song", ClientSize = new Size(360, 254),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition = FormStartPosition.CenterParent,
                 ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false,
@@ -653,7 +654,8 @@ namespace MusicBeePlugin
                 var bpmInput = new NumericUpDown
                 {
                     Minimum = 40, Maximum = 240, DecimalPlaces = 1,
-                    Increment = 1, Value = (decimal)Math.Round(currentBpm, 1),
+                    Increment = 1, Value = (decimal)Math.Round(
+                        Math.Max(40, Math.Min(240, currentBpm)), 1),
                     Bounds = new Rectangle(82, 43, 100, 26)
                 };
                 var syncBeat = new Button
@@ -661,25 +663,64 @@ namespace MusicBeePlugin
                     Text = "Sync pose on beat",
                     Bounds = new Rectangle(190, 43, 154, 28)
                 };
+                var tapButton = new Button
+                {
+                    Text = "Tap beat", Bounds = new Rectangle(16, 83, 328, 44)
+                };
+                var tapStatus = new Label
+                {
+                    Text = "Tap along with the song at least twice.",
+                    Bounds = new Rectangle(16, 134, 328, 24)
+                };
                 var explanation = new Label
                 {
-                    Text = "Click Sync when the music hits a beat to put the raised-arm pose there. Save stores BPM and timing only in Desktop Lyrics.",
-                    Bounds = new Rectangle(16, 84, 328, 60)
+                    Text = "Save uses the last tap to align the raised-arm pose. For a typed BPM, click Sync on a beat. Only Desktop Lyrics stores this timing.",
+                    Bounds = new Rectangle(16, 163, 328, 46)
                 };
                 var forget = new Button
                 {
                     Text = "Forget saved BPM", Enabled = saved != null,
-                    Bounds = new Rectangle(16, 164, 140, 28)
+                    Bounds = new Rectangle(16, 215, 140, 28)
                 };
                 var cancel = new Button
                 {
                     Text = "Cancel", DialogResult = DialogResult.Cancel,
-                    Bounds = new Rectangle(188, 164, 74, 28)
+                    Bounds = new Rectangle(188, 215, 74, 28)
                 };
                 var save = new Button
                 {
                     Text = "Save", DialogResult = DialogResult.OK,
-                    Bounds = new Rectangle(270, 164, 74, 28)
+                    Bounds = new Rectangle(270, 215, 74, 28)
+                };
+                tapButton.Click += (sender, args) =>
+                {
+                    // Record the clock before calling MusicBee so the spacing
+                    // between clicks is independent of its UI response time.
+                    var timestamp = Stopwatch.GetTimestamp();
+                    try
+                    {
+                        if (_musicBee.NowPlaying_GetFileUrl() != trackUrl)
+                            throw new InvalidOperationException("The song changed.");
+                        var position = Math.Max(0, _musicBee.Player_GetPosition());
+                        double estimatedBpm;
+                        if (!tapTempo.Tap(timestamp, Stopwatch.Frequency,
+                                out estimatedBpm)) return;
+                        tappedBeat = position;
+                        syncBeat.Text = "Beat captured";
+                        if (estimatedBpm > 0)
+                        {
+                            bpmInput.Value = (decimal)Math.Round(estimatedBpm, 1);
+                            tapStatus.Text = tapTempo.TapCount + " taps · " +
+                                estimatedBpm.ToString("0.0", CultureInfo.InvariantCulture) +
+                                " BPM — Save to apply";
+                        }
+                        else tapStatus.Text = "First tap captured. Keep tapping...";
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(dialog, "Could not tap the beat: " + ex.Message,
+                            "Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                 };
                 syncBeat.Click += (sender, args) =>
                 {
@@ -698,7 +739,8 @@ namespace MusicBeePlugin
                 };
                 forget.Click += (sender, args) => { dialog.DialogResult = DialogResult.No; dialog.Close(); };
                 dialog.Controls.AddRange(new Control[]
-                    { title, bpmLabel, bpmInput, syncBeat, explanation, forget, cancel, save });
+                    { title, bpmLabel, bpmInput, syncBeat, tapButton, tapStatus,
+                        explanation, forget, cancel, save });
                 dialog.AcceptButton = save;
                 dialog.CancelButton = cancel;
                 var result = dialog.ShowDialog(this);
@@ -1470,6 +1512,20 @@ namespace MusicBeePlugin
             var groupHeight = LyricCardLayout.RequiredHeight(mainHeight, subHeight,
                 gap, hasSideLine);
             var availableHeight = Math.Max(12f, content.Height - 18f);
+            // A translated or upcoming lyric often needs two lines. The old
+            // 38-unit slot could not hold them, forcing a long translation
+            // into one tiny row even with ample free space around the card.
+            if (hasSideLine)
+            {
+                var extra = Math.Min(22f * scale,
+                    Math.Max(0f, availableHeight - groupHeight) / 2f);
+                subHeight += extra;
+                groupHeight += 2f * extra;
+            }
+            mainHeight += Math.Min(18f * scale,
+                Math.Max(0f, availableHeight - groupHeight));
+            groupHeight = LyricCardLayout.RequiredHeight(mainHeight, subHeight,
+                gap, hasSideLine);
             if (groupHeight > availableHeight)
             {
                 var fit = availableHeight / groupHeight;

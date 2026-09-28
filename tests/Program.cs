@@ -106,6 +106,19 @@ namespace MusicBeePlugin
             if (PartyAnimation.FrameAt(1234, 80) !=
                 PartyAnimation.FrameAt(1234 - manualOrigin, 120))
                 throw new Exception("Manual BPM adjustment must keep the current dance frame.");
+            var taps = new PartyTapTempo();
+            double tappedBpm;
+            if (!taps.Tap(1000, 1000, out tappedBpm) || tappedBpm != 0 ||
+                !taps.Tap(1500, 1000, out tappedBpm) || tappedBpm != 120 ||
+                !taps.Tap(2010, 1000, out tappedBpm) ||
+                !taps.Tap(2510, 1000, out tappedBpm) ||
+                !taps.Tap(3510, 1000, out tappedBpm) ||
+                Math.Abs(tappedBpm - 120) > 2 || taps.TapCount != 5 ||
+                taps.Tap(3600, 1000, out tappedBpm) || taps.TapCount != 5 ||
+                !taps.Tap(7000, 1000, out tappedBpm) ||
+                tappedBpm != 0 || taps.TapCount != 1 ||
+                !taps.Tap(7750, 1000, out tappedBpm) || tappedBpm != 80)
+                throw new Exception("Tap BPM must update promptly, ignore double clicks and missed beats, and restart after a pause.");
             var tempoRoot = Path.Combine(Path.GetTempPath(),
                 "DesktopLyrics-Tempo-" + Guid.NewGuid().ToString("N"));
             try
@@ -296,10 +309,18 @@ namespace MusicBeePlugin
                     font, 26, 960, 72);
                 var cjk = "星が降る夜に君の声を思い出してもう一度遠い空を見上げた";
                 var unspaced = LyricTextLayout.Fit(graphics, cjk, font, 28, 360, 82);
+                var screenshotTranslation =
+                    "Brain rot, higher and higher till I turn to ash, high, high, high, ah (ooh, ooh)";
+                var crampedTranslation = LyricTextLayout.Fit(graphics,
+                    screenshotTranslation, font, 19, 560, 38);
+                var roomyTranslation = LyricTextLayout.Fit(graphics,
+                    screenshotTranslation, font, 19, 560, 60);
                 if (longLine.Lines != 2 || !longLine.Text.Contains("\n") ||
                     longLine.Points < 12 || shortLine.Lines != 1 ||
                     unspaced.Lines != 2 ||
-                    unspaced.Text.Replace("\n", "") != cjk)
+                    unspaced.Text.Replace("\n", "") != cjk ||
+                    roomyTranslation.Lines != 2 ||
+                    roomyTranslation.Points <= crampedTranslation.Points * 1.15f)
                     throw new Exception("Long lyrics should wrap within their row without shrinking short lines.");
                 using (var format = new StringFormat(StringFormatFlags.NoWrap)
                        { Alignment = StringAlignment.Center,
