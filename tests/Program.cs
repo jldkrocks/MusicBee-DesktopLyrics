@@ -79,7 +79,26 @@ namespace MusicBeePlugin
                 PartyAnimation.SideImpactAt(500, 120) != 0 ||
                 PartyAnimation.SideImpactAt(1000, 120) < 0.99f ||
                 PartyAnimation.SideImpactAt(0, 0) != 0)
-                throw new Exception("Only the side beat should have the short impact accent.");
+                throw new Exception("The side beats should retain their strong impact.");
+            if (PartyAnimation.CentreImpactAt(0, 120) != 0 ||
+                PartyAnimation.CentreImpactAt(500, 120) < 0.27f ||
+                PartyAnimation.CentreImpactAt(560, 120) <= 0 ||
+                PartyAnimation.CentreImpactAt(610, 120) != 0 ||
+                PartyAnimation.CentreImpactAt(1000, 120) != 0 ||
+                PartyAnimation.CentreImpactAt(1500, 120) < 0.27f ||
+                PartyAnimation.CentreImpactAt(500, 0) != 0 ||
+                PartyAnimation.CentreImpactAt(500, 120) >=
+                    PartyAnimation.SideImpactAt(0, 120))
+                throw new Exception("The middle poses should land on beat with a lighter accent.");
+            if (PartyAnimation.AnticipationAt(0, 120) != 0 ||
+                PartyAnimation.AnticipationAt(350, 120) != 0 ||
+                PartyAnimation.AnticipationAt(440, 120) <= 0 ||
+                PartyAnimation.AnticipationAt(499, 120) < 0.99f ||
+                PartyAnimation.AnticipationAt(500, 120) != 0 ||
+                PartyAnimation.AnticipationAt(249, 240) < 0.99f ||
+                PartyAnimation.AnticipationAt(250, 240) != 0 ||
+                PartyAnimation.AnticipationAt(499, 0) != 0)
+                throw new Exception("Each held pose should prepare briefly and land on the next beat.");
 
             // The display compensates for timer and layered-window latency.
             // Keep the saved origin at the audible beat and test the frame

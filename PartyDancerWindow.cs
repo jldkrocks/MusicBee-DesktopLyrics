@@ -26,6 +26,7 @@ namespace MusicBeePlugin
         private int _lastFrame = -1;
         private int _lastSquashPixels = -1;
         private int _lastSwayQuarterPixels = int.MinValue;
+        private int _lastLiftQuarterPixels = int.MinValue;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct NativePoint { public int X, Y; public NativePoint(int x, int y) { X = x; Y = y; } }
@@ -112,22 +113,27 @@ namespace MusicBeePlugin
             }
         }
 
-        public void Present(Rectangle bounds, int frame, float impact, float sway)
+        public void Present(Rectangle bounds, int frame, float impact, float sway,
+            float anticipation)
         {
             if (IsDisposed || bounds.Width < 1 || bounds.Height < 1) return;
             if (Bounds != bounds) Bounds = bounds;
-            // A brief, grounded squash makes the side pose register as the
-            // strongest hit, then settles without changing the window bounds.
+            // Every beat lands; the side poses have the stronger squash.
+            // A small lift just before the next pose softens the static hold.
             var squashPixels = (int)Math.Round(bounds.Height * 0.045f * impact);
+            var liftQuarterPixels = (int)Math.Round(bounds.Height * 0.009f *
+                anticipation * 4);
             // Quarter-pixel steps keep the tiny sway from snapping between
             // whole pixels on slow songs.
             var swayQuarterPixels = (int)Math.Round(bounds.Width * sway * 4);
             if (_lastFrame == frame && _lastSquashPixels == squashPixels &&
                 _lastSwayQuarterPixels == swayQuarterPixels &&
+                _lastLiftQuarterPixels == liftQuarterPixels &&
                 _surface != null && _surface.Size == bounds.Size) return;
             if (_surface == null || _surface.Size != bounds.Size) CreateBuffer(bounds.Size);
             _graphics.Clear(Color.Transparent);
-            _graphics.DrawImage(_sheet, new RectangleF(swayQuarterPixels / 4f, squashPixels,
+            _graphics.DrawImage(_sheet, new RectangleF(swayQuarterPixels / 4f,
+                    squashPixels - liftQuarterPixels / 4f,
                     bounds.Width, bounds.Height - squashPixels),
                 new Rectangle(frame * FrameWidth, 0, FrameWidth, FrameHeight), GraphicsUnit.Pixel);
 
@@ -161,6 +167,7 @@ namespace MusicBeePlugin
             _lastFrame = frame;
             _lastSquashPixels = squashPixels;
             _lastSwayQuarterPixels = swayQuarterPixels;
+            _lastLiftQuarterPixels = liftQuarterPixels;
         }
 
         private void CreateBuffer(Size size)
@@ -197,6 +204,7 @@ namespace MusicBeePlugin
             _lastFrame = -1;
             _lastSquashPixels = -1;
             _lastSwayQuarterPixels = int.MinValue;
+            _lastLiftQuarterPixels = int.MinValue;
         }
 
         private void ReleaseBuffer()

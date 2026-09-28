@@ -822,11 +822,15 @@ namespace MusicBeePlugin
                 var phasePosition = PartyAnimation.DisplayPhaseAt(position,
                     _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs, bpm);
                 var frame = PartyAnimation.FrameAt(phasePosition, bpm);
-                var impact = PartyAnimation.SideImpactAt(phasePosition, bpm);
+                var impact = PartyAnimation.SideImpactAt(phasePosition, bpm) +
+                    PartyAnimation.CentreImpactAt(phasePosition, bpm);
                 var sway = PartyAnimation.SwayAt(phasePosition, bpm);
+                var anticipation = PartyAnimation.AnticipationAt(phasePosition, bpm);
                 RefreshPartyLayout();
-                PlacePartyDancer(_leftDancer, _leftPartyBounds, frame, impact, sway);
-                PlacePartyDancer(_rightDancer, _rightPartyBounds, frame, impact, sway);
+                PlacePartyDancer(_leftDancer, _leftPartyBounds, frame, impact,
+                    sway, anticipation);
+                PlacePartyDancer(_rightDancer, _rightPartyBounds, frame, impact,
+                    sway, anticipation);
             }
             catch (Exception ex)
             {
@@ -868,14 +872,14 @@ namespace MusicBeePlugin
         }
 
         private void PlacePartyDancer(PartyDancerWindow dancer, Rectangle bounds,
-            int frame, float impact, float sway)
+            int frame, float impact, float sway, float anticipation)
         {
             if (bounds.IsEmpty)
             {
                 dancer.Hide();
                 return;
             }
-            dancer.Present(bounds, frame, impact, sway);
+            dancer.Present(bounds, frame, impact, sway, anticipation);
             if (!dancer.Visible) dancer.Show(this);
         }
 

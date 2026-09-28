@@ -108,5 +108,35 @@ namespace MusicBeePlugin
             var remaining = 1 - sinceSideBeat / duration;
             return (float)(remaining * remaining);
         }
+
+        internal static float CentreImpactAt(int positionMs, double bpm)
+        {
+            if (bpm < 40 || bpm > 240) return 0;
+            var beatMs = 60000d / bpm;
+            var loop = LoopDurationMs(bpm);
+            var phase = positionMs % loop;
+            if (phase < 0) phase += loop;
+            var segment = Math.Min(3, (int)Math.Floor(phase / beatMs + 1e-9));
+            if (segment % 2 == 0) return 0;
+            var elapsed = Math.Max(0, phase - segment * beatMs);
+            var duration = Math.Min(110d, beatMs * 0.28);
+            if (elapsed >= duration) return 0;
+            var remaining = 1 - elapsed / duration;
+            // The middle beat is visible but less emphatic than either side.
+            return (float)(0.28 * remaining * remaining);
+        }
+
+        internal static float AnticipationAt(int positionMs, double bpm)
+        {
+            if (bpm < 40 || bpm > 240) return 0;
+            var beatMs = 60000d / bpm;
+            var elapsed = positionMs % beatMs;
+            if (elapsed < 0) elapsed += beatMs;
+            var duration = Math.Min(130d, beatMs * 0.24);
+            var progress = (elapsed - (beatMs - duration)) / duration;
+            if (progress <= 0) return 0;
+            // Ease into a slight lift, then land in the next drawing on beat.
+            return (float)(progress * progress * (3 - 2 * progress));
+        }
     }
 }
