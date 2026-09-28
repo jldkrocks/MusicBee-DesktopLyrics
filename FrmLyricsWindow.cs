@@ -15,7 +15,7 @@ namespace MusicBeePlugin
     internal sealed class FrmLyricsWindow : Form, IDesktopLyricsView
     {
         private const int BarCount = 48;
-        private const float TransitionMs = 220f;
+        private const float TransitionMs = 300f;
         private const float QueueNoticeMs = 3200f;
         private readonly Plugin.MusicBeeApiInterface _musicBee;
         private readonly PlaybackHistory _history;
@@ -1538,27 +1538,55 @@ namespace MusicBeePlugin
                 gap *= fit;
             }
             var eased = progress * progress * (3 - 2 * progress);
+            var oldOffset = -12f * scale * eased;
+            var newOffset = 12f * scale * (1 - eased);
+            var promotePreview = progress < 1f &&
+                !string.IsNullOrEmpty(previousShownNext) &&
+                previousShownNext == _line1 &&
+                LyricTextLayout.CanPromotePreview(g, _line1.Trim(),
+                    _settings.Font ?? SystemFonts.DefaultFont,
+                    (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale * 0.63f,
+                    (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale,
+                    content.Width, subHeight, mainHeight);
             if (_settings.TransparentCanvas)
                 DrawTransparentLyricPanel(g, content, panelLeft, panelWidth,
                     mainHeight, subHeight, gap, progress,
-                    shownNext, previousShownNext);
+                    shownNext, previousShownNext, oldOffset, newOffset);
             else
             {
                 if (progress < 1f)
                     DrawLyricPanel(g, content, panelLeft, panelWidth,
                         mainHeight, subHeight, gap, _previousLine1,
                         _previousLine2, previousShownNext,
-                        1 - eased, 0);
+                        1 - eased, oldOffset);
                 DrawLyricPanel(g, content, panelLeft, panelWidth, mainHeight,
                     subHeight, gap, _line1, _line2, shownNext,
-                    eased, 0);
+                    eased, newOffset);
             }
             if (progress < 1f)
                 DrawLyricGroup(g, content, mainHeight, subHeight, gap, scale,
                     _previousLine1, _previousLine2, previousShownNext,
-                    1 - eased, 0, true, true);
+                    1 - eased, oldOffset, true, !promotePreview);
             DrawLyricGroup(g, content, mainHeight, subHeight, gap, scale,
-                _line1, _line2, shownNext, eased, 0, true, true);
+                _line1, _line2, shownNext, eased, newOffset,
+                !promotePreview, true);
+            if (promotePreview)
+            {
+                var oldLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
+                    gap, !string.IsNullOrWhiteSpace(_previousLine2), true,
+                    oldOffset);
+                var newLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
+                    gap, !string.IsNullOrWhiteSpace(_line2),
+                    !string.IsNullOrWhiteSpace(shownNext), newOffset);
+                var start = oldLayout.Preview;
+                var end = newLayout.Main;
+                var traveling = new RectangleF(content.Left,
+                    start.Top + (end.Top - start.Top) * eased, content.Width,
+                    start.Height + (end.Height - start.Height) * eased);
+                var fontSize = (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale;
+                DrawLine(g, _line1, traveling, fontSize * (0.63f + 0.37f * eased),
+                    (int)(145 + 110 * eased));
+            }
             DrawUpcomingQueue(g, bounds, panelLeft);
             DrawQueueNotice(g, content);
             DrawSongTitle(g, bounds);
@@ -1614,7 +1642,7 @@ namespace MusicBeePlugin
         private void DrawTransparentLyricPanel(Graphics g, RectangleF content,
             int left, int width, float mainHeight, float subHeight, float gap,
             float progress, string shownNext,
-            string previousShownNext)
+            string previousShownNext, float oldOffset, float newOffset)
         {
             var hasOld = progress < 1f &&
                 (!string.IsNullOrWhiteSpace(_previousLine1) ||
@@ -1630,7 +1658,7 @@ namespace MusicBeePlugin
             {
                 var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
                     !string.IsNullOrWhiteSpace(_previousLine2),
-                    !string.IsNullOrWhiteSpace(previousShownNext), 0);
+                    !string.IsNullOrWhiteSpace(previousShownNext), oldOffset);
                 top = Math.Min(top, layout.Bounds.Top);
                 bottom = Math.Max(bottom, layout.Bounds.Bottom);
             }
@@ -1638,7 +1666,7 @@ namespace MusicBeePlugin
             {
                 var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
                     !string.IsNullOrWhiteSpace(_line2),
-                    !string.IsNullOrWhiteSpace(shownNext), 0);
+                    !string.IsNullOrWhiteSpace(shownNext), newOffset);
                 top = Math.Min(top, layout.Bounds.Top);
                 bottom = Math.Max(bottom, layout.Bounds.Bottom);
             }

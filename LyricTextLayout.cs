@@ -13,6 +13,21 @@ namespace MusicBeePlugin
 
     internal static class LyricTextLayout
     {
+        internal static bool CanPromotePreview(Graphics graphics, string lyric,
+            Font font, float previewPoints, float mainPoints, float width,
+            float previewHeight, float mainHeight)
+        {
+            var preview = Fit(graphics, lyric, font, previewPoints, width, previewHeight);
+            var main = Fit(graphics, lyric, font, mainPoints, width, mainHeight);
+            // A changing row count or large font jump makes the travelling
+            // lyric reflow while it moves. Let those lines slide and fade at
+            // their fixed sizes instead.
+            return preview.Lines == 1 && main.Lines == 1 &&
+                preview.Points >= previewPoints * 0.88f &&
+                main.Points >= mainPoints * 0.88f &&
+                main.Points <= preview.Points * 1.75f;
+        }
+
         internal static LyricTextFit Fit(Graphics graphics, string lyric, Font font,
             float desiredPoints, float width, float height)
         {

@@ -7,8 +7,8 @@ namespace MusicBeePlugin
     {
         internal const int FrameCount = 12;
         internal const int FrameDurationMs = 140;
-        private const double SidePoseHold = 0.42;
-        private const double CentrePoseHold = 0.26;
+        private const double SideTravelMs = 220;
+        private const double CentreToSideTravelMs = 175;
 
         internal static double ReadBpm(string tag)
         {
@@ -35,17 +35,20 @@ namespace MusicBeePlugin
             // intervening beat instead of appearing before it.
             var poseSegmentMs = loopMs / 4;
             var segment = (int)(phase / poseSegmentMs);
-            var progress = (phase - segment * poseSegmentMs) / poseSegmentMs;
+            var elapsed = phase - segment * poseSegmentMs;
             var poseFrame = segment * 3;
-            var hold = segment % 2 == 0 ? SidePoseHold : CentrePoseHold;
-            if (progress < hold) return poseFrame;
-
-            // The last drawing before a side hit is brief, so the side pose
-            // arrives with a visible snap at the next segment boundary.
-            var travel = (progress - hold) / (1 - hold);
-            // Briefly show the final anticipation drawing before the next
-            // side pose; the side pose itself arrives exactly on the beat.
-            return poseFrame + (travel < (segment % 2 == 0 ? 0.5 : 0.65) ? 1 : 2);
+            // Keep the travel drawings brief even on slow tracks. Stretching
+            // each of the twelve sprites across four slow beats made the
+            // intermediate poses hang for hundreds of milliseconds.
+            var toSide = segment % 2 != 0;
+            var travelMs = Math.Min(toSide ? CentreToSideTravelMs : SideTravelMs,
+                poseSegmentMs * 0.7);
+            var holdMs = poseSegmentMs - travelMs;
+            if (elapsed < holdMs) return poseFrame;
+            var travel = (elapsed - holdMs) / travelMs;
+            // The final drawing before the stronger side hit is a short
+            // anticipation, followed by frame 0 or 6 right on the beat.
+            return poseFrame + (travel < (toSide ? 0.6 : 0.5) ? 1 : 2);
         }
 
         internal static double LoopDurationMs(double bpm)
