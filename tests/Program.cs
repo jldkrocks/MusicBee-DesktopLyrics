@@ -42,11 +42,11 @@ namespace MusicBeePlugin
             foreach (var bpm in new[] { 40d, 80d, 120d, 240d })
             {
                 var beatMs = 60000d / bpm;
-                for (var beat = 0; beat < 4; beat++)
+                for (var poseIndex = 0; poseIndex < 4; poseIndex++)
                     for (var within = 0; within < 20; within++)
                     {
-                        var position = (int)Math.Ceiling((beat + within / 20d) * beatMs);
-                        if (PartyAnimation.FrameAt(position, bpm) != beat * 3)
+                        var position = (int)Math.Ceiling((poseIndex + within / 20d) * beatMs);
+                        if (PartyAnimation.FrameAt(position, bpm) != poseIndex * 3)
                             throw new Exception("Only the four main drawings should be held between beats.");
                     }
             }
