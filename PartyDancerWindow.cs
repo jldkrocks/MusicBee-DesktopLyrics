@@ -24,6 +24,7 @@ namespace MusicBeePlugin
         private byte[] _pixels;
         private IntPtr _memoryDc, _dib, _oldBitmap, _dibBits;
         private int _lastFrame = -1;
+        private int _lastSquashPixels = -1;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct NativePoint { public int X, Y; public NativePoint(int x, int y) { X = x; Y = y; } }
@@ -110,14 +111,19 @@ namespace MusicBeePlugin
             }
         }
 
-        public void Present(Rectangle bounds, int frame)
+        public void Present(Rectangle bounds, int frame, float impact)
         {
             if (IsDisposed || bounds.Width < 1 || bounds.Height < 1) return;
             if (Bounds != bounds) Bounds = bounds;
-            if (_lastFrame == frame && _surface != null && _surface.Size == bounds.Size) return;
+            // A brief, grounded squash makes the side pose register as the
+            // strongest hit, then settles without changing the window bounds.
+            var squashPixels = (int)Math.Round(bounds.Height * 0.045f * impact);
+            if (_lastFrame == frame && _lastSquashPixels == squashPixels &&
+                _surface != null && _surface.Size == bounds.Size) return;
             if (_surface == null || _surface.Size != bounds.Size) CreateBuffer(bounds.Size);
             _graphics.Clear(Color.Transparent);
-            _graphics.DrawImage(_sheet, new Rectangle(Point.Empty, bounds.Size),
+            _graphics.DrawImage(_sheet, new Rectangle(0, squashPixels,
+                    bounds.Width, bounds.Height - squashPixels),
                 new Rectangle(frame * FrameWidth, 0, FrameWidth, FrameHeight), GraphicsUnit.Pixel);
 
             var data = _surface.LockBits(new Rectangle(Point.Empty, bounds.Size),
@@ -148,6 +154,7 @@ namespace MusicBeePlugin
             }
             finally { ReleaseDC(IntPtr.Zero, screenDc); }
             _lastFrame = frame;
+            _lastSquashPixels = squashPixels;
         }
 
         private void CreateBuffer(Size size)
@@ -182,6 +189,7 @@ namespace MusicBeePlugin
             }
             finally { ReleaseDC(IntPtr.Zero, screenDc); }
             _lastFrame = -1;
+            _lastSquashPixels = -1;
         }
 
         private void ReleaseBuffer()

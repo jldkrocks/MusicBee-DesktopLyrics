@@ -46,21 +46,24 @@ namespace MusicBeePlugin
                     entry.Bpm < 40 || entry.Bpm > 240 ||
                     double.IsNaN(entry.Bpm) || double.IsInfinity(entry.Bpm) ||
                     entry.OriginMs < 0 || entry.OriginMs > 6000) return null;
-                // Older saved values used a four-beat loop and an arbitrary
-                // phase. Keep the BPM, but start at the assumed beat at 0.
+                // Older saved values used an arbitrary phase. Keep the BPM,
+                // but start at the assumed beat at 0.
                 if (!entry.TwoBeatPhase)
                     entry.OriginMs = PartyAnimation.OriginForBeat(0, entry.Bpm);
-                else if (entry.BeatPatternVersion < 2 &&
-                         entry.Bpm >= PartyAnimation.HalfTimeFromBpm)
+                else if (entry.BeatPatternVersion < 3)
                 {
-                    // Earlier saves alternated sides on every beat. Rebuild
-                    // the onset from that two-beat loop so half-time keeps
-                    // the old beat grid instead of landing on an offbeat.
-                    var oldLoop = 2 * 60000d / entry.Bpm;
-                    var beat = (entry.OriginMs + oldLoop / 2) % oldLoop;
-                    if (beat > oldLoop / 2) beat -= oldLoop;
-                    entry.OriginMs = PartyAnimation.OriginForBeat(
-                        (int)Math.Round(beat), entry.Bpm);
+                    // Earlier builds used two, four or eight beats per loop.
+                    // Recover the beat carrying frame 6 before moving every
+                    // song to four beats per loop. Preserve manual tap phase.
+                    var oldBeats = entry.BeatPatternVersion < 2 ? 2 :
+                        entry.Bpm >= 220 ? 8 : entry.Bpm >= 110 ? 4 : 2;
+                    if (oldBeats != 4 || entry.BeatPatternVersion < 2)
+                    {
+                        var oldLoop = oldBeats * 60000d / entry.Bpm;
+                        var beat = (entry.OriginMs + oldLoop / 2) % oldLoop;
+                        entry.OriginMs = PartyAnimation.OriginForBeat(
+                            (int)Math.Round(beat), entry.Bpm);
+                    }
                 }
                 return entry;
             }
@@ -83,7 +86,7 @@ namespace MusicBeePlugin
                 {
                     TrackUrl = trackUrl, Bpm = bpm, OriginMs = originMs,
                     Manual = manual, Online = online, TwoBeatPhase = true,
-                    BeatPatternVersion = 2
+                    BeatPatternVersion = 3
                 }), new UTF8Encoding(false));
                 if (File.Exists(filename)) File.Replace(temporary, filename, null);
                 else File.Move(temporary, filename);

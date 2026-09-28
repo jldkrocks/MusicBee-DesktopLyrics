@@ -15,7 +15,7 @@ namespace MusicBeePlugin
     internal sealed class FrmLyricsWindow : Form, IDesktopLyricsView
     {
         private const int BarCount = 48;
-        private const float TransitionMs = 320f;
+        private const float TransitionMs = 220f;
         private const float QueueNoticeMs = 3200f;
         private readonly Plugin.MusicBeeApiInterface _musicBee;
         private readonly PlaybackHistory _history;
@@ -821,9 +821,12 @@ namespace MusicBeePlugin
                 var frame = PartyAnimation.FrameAt(
                     position - (_partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs),
                     _partyBpm > 0 ? _partyBpm : detectedBpm);
+                var impact = PartyAnimation.SideImpactAt(
+                    position - (_partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs),
+                    _partyBpm > 0 ? _partyBpm : detectedBpm);
                 RefreshPartyLayout();
-                PlacePartyDancer(_leftDancer, _leftPartyBounds, frame);
-                PlacePartyDancer(_rightDancer, _rightPartyBounds, frame);
+                PlacePartyDancer(_leftDancer, _leftPartyBounds, frame, impact);
+                PlacePartyDancer(_rightDancer, _rightPartyBounds, frame, impact);
             }
             catch (Exception ex)
             {
@@ -864,14 +867,15 @@ namespace MusicBeePlugin
             }
         }
 
-        private void PlacePartyDancer(PartyDancerWindow dancer, Rectangle bounds, int frame)
+        private void PlacePartyDancer(PartyDancerWindow dancer, Rectangle bounds,
+            int frame, float impact)
         {
             if (bounds.IsEmpty)
             {
                 dancer.Hide();
                 return;
             }
-            dancer.Present(bounds, frame);
+            dancer.Present(bounds, frame, impact);
             if (!dancer.Visible) dancer.Show(this);
         }
 
@@ -1534,11 +1538,9 @@ namespace MusicBeePlugin
                 gap *= fit;
             }
             var eased = progress * progress * (3 - 2 * progress);
-            var promotePreview = progress < 1f && !string.IsNullOrEmpty(previousShownNext) &&
-                                 previousShownNext == _line1;
             if (_settings.TransparentCanvas)
                 DrawTransparentLyricPanel(g, content, panelLeft, panelWidth,
-                    mainHeight, subHeight, gap, scale, progress, eased,
+                    mainHeight, subHeight, gap, progress,
                     shownNext, previousShownNext);
             else
             {
@@ -1546,36 +1548,17 @@ namespace MusicBeePlugin
                     DrawLyricPanel(g, content, panelLeft, panelWidth,
                         mainHeight, subHeight, gap, _previousLine1,
                         _previousLine2, previousShownNext,
-                        1 - eased, -18f * scale * eased);
+                        1 - eased, 0);
                 DrawLyricPanel(g, content, panelLeft, panelWidth, mainHeight,
                     subHeight, gap, _line1, _line2, shownNext,
-                    eased, 18f * scale * (1 - eased));
+                    eased, 0);
             }
             if (progress < 1f)
                 DrawLyricGroup(g, content, mainHeight, subHeight, gap, scale,
                     _previousLine1, _previousLine2, previousShownNext,
-                    1 - eased, -18f * scale * eased, true, !promotePreview);
+                    1 - eased, 0, true, true);
             DrawLyricGroup(g, content, mainHeight, subHeight, gap, scale,
-                _line1, _line2, shownNext, eased, 18f * scale * (1 - eased),
-                !promotePreview, true);
-            if (promotePreview)
-            {
-                var oldLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
-                    gap, !string.IsNullOrWhiteSpace(_previousLine2), true,
-                    -18f * scale * eased);
-                var newLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
-                    gap, !string.IsNullOrWhiteSpace(_line2),
-                    !string.IsNullOrWhiteSpace(shownNext),
-                    18f * scale * (1 - eased));
-                var start = oldLayout.Preview;
-                var end = newLayout.Main;
-                var traveling = new RectangleF(content.Left,
-                    start.Top + (end.Top - start.Top) * eased, content.Width,
-                    start.Height + (end.Height - start.Height) * eased);
-                var fontSize = (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale;
-                DrawLine(g, _line1, traveling, fontSize * (0.63f + 0.37f * eased),
-                    (int)(145 + 110 * eased));
-            }
+                _line1, _line2, shownNext, eased, 0, true, true);
             DrawUpcomingQueue(g, bounds, panelLeft);
             DrawQueueNotice(g, content);
             DrawSongTitle(g, bounds);
@@ -1630,7 +1613,7 @@ namespace MusicBeePlugin
 
         private void DrawTransparentLyricPanel(Graphics g, RectangleF content,
             int left, int width, float mainHeight, float subHeight, float gap,
-            float scale, float progress, float eased, string shownNext,
+            float progress, string shownNext,
             string previousShownNext)
         {
             var hasOld = progress < 1f &&
@@ -1647,8 +1630,7 @@ namespace MusicBeePlugin
             {
                 var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
                     !string.IsNullOrWhiteSpace(_previousLine2),
-                    !string.IsNullOrWhiteSpace(previousShownNext),
-                    -18f * scale * eased);
+                    !string.IsNullOrWhiteSpace(previousShownNext), 0);
                 top = Math.Min(top, layout.Bounds.Top);
                 bottom = Math.Max(bottom, layout.Bounds.Bottom);
             }
@@ -1656,8 +1638,7 @@ namespace MusicBeePlugin
             {
                 var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
                     !string.IsNullOrWhiteSpace(_line2),
-                    !string.IsNullOrWhiteSpace(shownNext),
-                    18f * scale * (1 - eased));
+                    !string.IsNullOrWhiteSpace(shownNext), 0);
                 top = Math.Min(top, layout.Bounds.Top);
                 bottom = Math.Max(bottom, layout.Bounds.Bottom);
             }

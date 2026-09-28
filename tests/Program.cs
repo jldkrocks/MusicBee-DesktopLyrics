@@ -28,13 +28,13 @@ namespace MusicBeePlugin
                 PartyAnimation.FrameAt(1150, 120) != 6 ||
                 PartyAnimation.FrameAt(1250, 120) != 7 ||
                 PartyAnimation.FrameAt(2000, 120) != 0 ||
-                PartyAnimation.FrameAt(750, 80) != 6 ||
-                Math.Abs(PartyAnimation.LoopDurationMs(80) - 1500) > 0.001 ||
-                Math.Abs(PartyAnimation.LoopDurationMs(109) - 120000d / 109) > 0.001 ||
+                PartyAnimation.FrameAt(750, 80) != 3 ||
+                Math.Abs(PartyAnimation.LoopDurationMs(80) - 3000) > 0.001 ||
+                Math.Abs(PartyAnimation.LoopDurationMs(109) - 240000d / 109) > 0.001 ||
                 Math.Abs(PartyAnimation.LoopDurationMs(110) - 240000d / 110) > 0.001 ||
                 Math.Abs(PartyAnimation.LoopDurationMs(160) - 1500) > 0.001 ||
-                Math.Abs(PartyAnimation.LoopDurationMs(240) - 2000) > 0.001)
-                throw new Exception("Party dancers should hold each side and use half-time on fast tracks.");
+                Math.Abs(PartyAnimation.LoopDurationMs(240) - 1000) > 0.001)
+                throw new Exception("Party dancers should use two beats per side at every BPM.");
 
             for (var side = 0; side < 2; side++)
             {
@@ -54,9 +54,15 @@ namespace MusicBeePlugin
                 PartyAnimation.FrameAt(650, 120) != 4 ||
                 PartyAnimation.FrameAt(1490, 120) != 8 ||
                 PartyAnimation.FrameAt(1550, 120) != 9 ||
-                PartyAnimation.FrameAt(375, 80) != 3 ||
-                PartyAnimation.FrameAt(500, 240) != 3)
+                PartyAnimation.FrameAt(750, 80) != 3 ||
+                PartyAnimation.FrameAt(250, 240) != 3)
                 throw new Exception("The middle pose must accent the intervening beat without losing the side holds.");
+            if (PartyAnimation.SideImpactAt(0, 120) < 0.99f ||
+                PartyAnimation.SideImpactAt(60, 120) <= 0 ||
+                PartyAnimation.SideImpactAt(500, 120) != 0 ||
+                PartyAnimation.SideImpactAt(1000, 120) < 0.99f ||
+                PartyAnimation.SideImpactAt(0, 0) != 0)
+                throw new Exception("Only the side beat should have the short impact accent.");
 
             var beatOrigin = PartyAnimation.OriginForBeat(750, 120);
             if (PartyAnimation.FrameAt(750 - beatOrigin, 120) != 6 ||
@@ -67,8 +73,9 @@ namespace MusicBeePlugin
                 throw new Exception("Fast tracks must alternate sides every other beat.");
             var slowBeatOrigin = PartyAnimation.OriginForBeat(750, 80);
             if (PartyAnimation.FrameAt(750 - slowBeatOrigin, 80) != 6 ||
-                PartyAnimation.FrameAt(1500 - slowBeatOrigin, 80) != 0)
-                throw new Exception("Slower tracks must still alternate on successive beats.");
+                PartyAnimation.FrameAt(1500 - slowBeatOrigin, 80) != 9 ||
+                PartyAnimation.FrameAt(2250 - slowBeatOrigin, 80) != 0)
+                throw new Exception("Slow tracks must also alternate sides every other beat.");
 
             var workArea = new Rectangle(0, 0, 1920, 1040);
             var monitors = new[] { new Rectangle(-1920, 0, 1920, 1040),
@@ -144,7 +151,7 @@ namespace MusicBeePlugin
                 tempoStore.Save("first.mp3", beat.Bpm, beat.OriginMs, false);
                 var loaded = new PartyTempoStore(tempoRoot).Load("first.mp3");
                 if (loaded == null || loaded.Manual || !loaded.TwoBeatPhase ||
-                    loaded.BeatPatternVersion != 2 ||
+                    loaded.BeatPatternVersion != 3 ||
                     loaded.Bpm != beat.Bpm ||
                     loaded.OriginMs != beat.OriginMs ||
                     tempoStore.Load("second.mp3") != null)
@@ -188,6 +195,35 @@ namespace MusicBeePlugin
                     PartyAnimation.OriginForBeat(0, 120) ||
                     PartyAnimation.FrameAt(-loaded.OriginMs, loaded.Bpm) != 6)
                     throw new Exception("Two-beat saves must retain their beat grid at half-time.");
+                tempoStore.Save("legacy-slow.mp3", 80, 0, true);
+                foreach (var file in Directory.GetFiles(Path.Combine(tempoRoot,
+                    "DesktopLyrics-PartyTempo"), "*.json"))
+                {
+                    var entry = JObject.Parse(File.ReadAllText(file));
+                    if (entry["TrackUrl"].ToString() != "legacy-slow.mp3") continue;
+                    entry["BeatPatternVersion"] = 2;
+                    File.WriteAllText(file, entry.ToString());
+                }
+                loaded = tempoStore.Load("legacy-slow.mp3");
+                if (loaded == null || loaded.OriginMs !=
+                    PartyAnimation.OriginForBeat(750, 80) ||
+                    PartyAnimation.FrameAt(750 - loaded.OriginMs, 80) != 6)
+                    throw new Exception("Old slow-song taps must retain the accented beat.");
+                tempoStore.Save("legacy-fast.mp3", 230, 0, true);
+                foreach (var file in Directory.GetFiles(Path.Combine(tempoRoot,
+                    "DesktopLyrics-PartyTempo"), "*.json"))
+                {
+                    var entry = JObject.Parse(File.ReadAllText(file));
+                    if (entry["TrackUrl"].ToString() != "legacy-fast.mp3") continue;
+                    entry["BeatPatternVersion"] = 2;
+                    File.WriteAllText(file, entry.ToString());
+                }
+                loaded = tempoStore.Load("legacy-fast.mp3");
+                var oldFastBeat = (int)Math.Round(4 * 60000d / 230);
+                if (loaded == null || loaded.OriginMs !=
+                    PartyAnimation.OriginForBeat(oldFastBeat, 230) ||
+                    PartyAnimation.FrameAt(oldFastBeat - loaded.OriginMs, 230) != 6)
+                    throw new Exception("Old fast-song taps must retain the accented beat.");
                 tempoStore.Save("online.mp3", 127,
                     PartyAnimation.OriginForBeat(0, 127), false, true);
                 loaded = tempoStore.Load("online.mp3");

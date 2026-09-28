@@ -7,8 +7,6 @@ namespace MusicBeePlugin
     {
         internal const int FrameCount = 12;
         internal const int FrameDurationMs = 140;
-        internal const int HalfTimeFromBpm = 110;
-        internal const int QuarterTimeFromBpm = 220;
         private const double SidePoseHold = 0.42;
         private const double CentrePoseHold = 0.26;
 
@@ -42,10 +40,12 @@ namespace MusicBeePlugin
             var hold = segment % 2 == 0 ? SidePoseHold : CentrePoseHold;
             if (progress < hold) return poseFrame;
 
-            // Give the two travel drawings equal time within each segment.
-            // The next accented pose arrives at the next segment boundary.
+            // The last drawing before a side hit is brief, so the side pose
+            // arrives with a visible snap at the next segment boundary.
             var travel = (progress - hold) / (1 - hold);
-            return poseFrame + (travel < 0.5 ? 1 : 2);
+            // Briefly show the final anticipation drawing before the next
+            // side pose; the side pose itself arrives exactly on the beat.
+            return poseFrame + (travel < (segment % 2 == 0 ? 0.5 : 0.65) ? 1 : 2);
         }
 
         internal static double LoopDurationMs(double bpm)
@@ -53,11 +53,8 @@ namespace MusicBeePlugin
             var nativeLoopMs = FrameCount * FrameDurationMs;
             if (bpm >= 40 && bpm <= 240)
             {
-                // Fold fast tempos into a comfortable dance pace. Each side
-                // spans one, two, or four beats respectively.
-                var beatsPerLoop = bpm >= QuarterTimeFromBpm ? 8 :
-                    bpm >= HalfTimeFromBpm ? 4 : 2;
-                return beatsPerLoop * 60000d / bpm;
+                // Each side pose lasts two beats at every supported tempo.
+                return 4 * 60000d / bpm;
             }
             return nativeLoopMs;
         }
@@ -66,7 +63,7 @@ namespace MusicBeePlugin
         {
             var loop = LoopDurationMs(bpm);
             // At the beat the animation is halfway through its loop (frame 6).
-            // At higher tempos frame 0 arrives two or four beats later.
+            // The opposite side pose arrives two beats later at any BPM.
             // Floor keeps a fractional loop from putting the sampled beat
             // just before frame 6.
             var origin = (beatPositionMs - loop / 2) % loop;
@@ -84,6 +81,18 @@ namespace MusicBeePlugin
             var origin = (positionMs - phase / oldLoop * newLoop) % newLoop;
             if (origin < 0) origin += newLoop;
             return (int)Math.Round(origin);
+        }
+
+        internal static float SideImpactAt(int positionMs, double bpm)
+        {
+            if (bpm < 40 || bpm > 240) return 0;
+            var halfLoop = LoopDurationMs(bpm) / 2;
+            var sinceSideBeat = positionMs % halfLoop;
+            if (sinceSideBeat < 0) sinceSideBeat += halfLoop;
+            var duration = Math.Min(150d, 60000d / bpm * 0.35);
+            if (sinceSideBeat >= duration) return 0;
+            var remaining = 1 - sinceSideBeat / duration;
+            return (float)(remaining * remaining);
         }
     }
 }
