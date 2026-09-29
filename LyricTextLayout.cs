@@ -37,7 +37,7 @@ namespace MusicBeePlugin
                 }
             }
             // Keep complete words on additional rows before resorting to an
-            // explicit ellipsis. The full text remains available in the reader.
+            // explicit ellipsis. Enlarging the window gives long text more room.
             using (var sample = new Font(font.FontFamily, 10, font.Style, GraphicsUnit.Point))
             {
                 var rows = Wrap(graphics, lyric, sample, Math.Max(1, width - 8));

@@ -78,9 +78,6 @@ namespace MusicBeePlugin
         private Size _partyLayoutClientSize;
         private FormWindowState _partyLayoutState;
         private bool _partyLayoutValid;
-        private readonly ToolTip _lyricToolTip = new ToolTip { AutoPopDelay = 20000 };
-        private Rectangle _lyricHitArea;
-        private bool _lyricTipActive;
         private string _hoverButton;
         private long _queueNoticeStarted;
         private string _queueNoticeText = "That's the end of the queue ♪";
@@ -366,8 +363,6 @@ namespace MusicBeePlugin
                 BeginInvoke(new Action(OpenLrcLibPicker)));
             var tempoAction = menu.Items.Add("Adjust Party BPM…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyTempoEditor)));
-            menu.Items.Add("Read full current lyrics…", null, (sender, args) =>
-                BeginInvoke(new Action(OpenFullLyrics)));
             menu.Items.Add("Online Party BPM…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyOnlineSettings)));
             var retryOnline = menu.Items.Add("Retry online BPM for this song", null,
@@ -548,24 +543,6 @@ namespace MusicBeePlugin
             _lastPartyUpdate = 0;
             UpdatePartyDancers();
             Invalidate();
-        }
-
-        private void OpenFullLyrics()
-        {
-            using (var dialog = new Form { Text = "Current lyrics — " + _songTitle,
-                Size = new Size(560, 360), MinimumSize = new Size(320, 220),
-                StartPosition = FormStartPosition.CenterParent, ShowInTaskbar = false,
-                MinimizeBox = false, TopMost = true })
-            using (var font = new Font(SystemFonts.MessageBoxFont.FontFamily, 12))
-            using (var text = new TextBox { Multiline = true, ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = font,
-                Text = (_line2 ?? "") + "\r\n\r\n" + (_line1 ?? "") +
-                    "\r\n\r\nNext: " + (_nextLine ?? "") })
-            {
-                dialog.Controls.Add(text);
-                text.Select(0, 0);
-                dialog.ShowDialog(this);
-            }
         }
 
         private void OpenPartyOnlineSettings()
@@ -1006,9 +983,6 @@ namespace MusicBeePlugin
             _line2 = line2;
             _nextLine = nextLine;
             _transitionStarted = Stopwatch.GetTimestamp();
-            if (_lyricTipActive)
-                _lyricToolTip.SetToolTip(this, (_line2 ?? "") + "\n" + (_line1 ?? "") +
-                    "\n\nMenu → Read full current lyrics");
             Invalidate();
         }
 
@@ -1608,11 +1582,6 @@ namespace MusicBeePlugin
                 Math.Max(1, panelWidth - 18), region.Height);
             var shownNext = _nextLine;
             var previousShownNext = _previousNextLine;
-            var hitCorners = new[] { content.Location, new PointF(content.Right, content.Bottom) };
-            using (var transform = g.Transform) transform.TransformPoints(hitCorners);
-            _lyricHitArea = Rectangle.Round(RectangleF.FromLTRB(hitCorners[0].X,
-                hitCorners[0].Y, hitCorners[1].X, hitCorners[1].Y));
-
             var progress = 1f;
             if (_transitionStarted != 0)
             {
@@ -1666,13 +1635,17 @@ namespace MusicBeePlugin
             var oldLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
                 gap, !string.IsNullOrWhiteSpace(_previousLine2),
                 !string.IsNullOrWhiteSpace(previousShownNext), 0);
-            if (_settings.TransparentCanvas)
-                DrawTransparentLyricPanel(g, content, panelLeft, panelWidth,
-                    mainHeight, subHeight, gap, progress, shownNext, previousShownNext, 0, 0);
-            else
-                DrawLyricPanel(g, content, panelLeft, panelWidth, mainHeight, subHeight,
-                    gap, _line1, string.IsNullOrWhiteSpace(_line2) && progress < 1 ?
-                        _previousLine2 : _line2, shownNext, 1, 0);
+            // Expand/contract the card with the text transition instead of
+            // instantly revealing the entire English area at a lyric change.
+            var panelProgress = eased;
+            if (string.IsNullOrWhiteSpace(_previousLine2) && !string.IsNullOrWhiteSpace(_line2))
+                panelProgress = Math.Min(1, eased / 0.35f);
+            else if (!string.IsNullOrWhiteSpace(_previousLine2) && string.IsNullOrWhiteSpace(_line2))
+                panelProgress = Math.Max(0, (eased - 0.35f) / 0.65f);
+            var panelBounds = BlendRectangle(oldLayout.Bounds, activeLayout.Bounds, panelProgress);
+            if (!string.IsNullOrWhiteSpace(_line1) || !string.IsNullOrWhiteSpace(_line2) ||
+                !string.IsNullOrWhiteSpace(shownNext) || progress < 1)
+                DrawLyricPanel(g, panelLeft, panelWidth, panelBounds);
             var fontSize = (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale;
             // English changes separately without drawing two translations over
             // each other. The original and next lyrics keep scrolling below it.
@@ -1690,8 +1663,10 @@ namespace MusicBeePlugin
             if (progress < 1)
             {
                 var outgoing = oldLayout.Main;
-                outgoing.Y -= (oldLayout.Main.Height + gap) * eased;
-                DrawLine(g, _previousLine1, outgoing, fontSize, (int)(255 * (1 - eased)));
+                // Clear the old line in its own row; scrolling it through the
+                // fixed translation row produces visibly sliced letters.
+                DrawLine(g, _previousLine1, outgoing, fontSize,
+                    (int)(255 * Math.Max(0, 1 - eased / 0.45f)));
             }
             var incoming = activeLayout.Main;
             if (promotePreview)
@@ -1765,66 +1740,21 @@ namespace MusicBeePlugin
                 hit.Area = ShiftHit(hit.Area, gutter);
         }
 
-        private void DrawTransparentLyricPanel(Graphics g, RectangleF content,
-            int left, int width, float mainHeight, float subHeight, float gap,
-            float progress, string shownNext,
-            string previousShownNext, float oldOffset, float newOffset)
+        private void DrawLyricPanel(Graphics g, int left, int width, RectangleF bounds)
         {
-            var hasOld = progress < 1f &&
-                (!string.IsNullOrWhiteSpace(_previousLine1) ||
-                 !string.IsNullOrWhiteSpace(_previousLine2) ||
-                 !string.IsNullOrWhiteSpace(previousShownNext));
-            var hasNew = !string.IsNullOrWhiteSpace(_line1) ||
-                !string.IsNullOrWhiteSpace(_line2) ||
-                !string.IsNullOrWhiteSpace(shownNext);
-            if (!hasOld && !hasNew) return;
-            var top = float.MaxValue;
-            var bottom = float.MinValue;
-            if (hasOld)
-            {
-                var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
-                    !string.IsNullOrWhiteSpace(_previousLine2),
-                    !string.IsNullOrWhiteSpace(previousShownNext), oldOffset);
-                top = Math.Min(top, layout.Bounds.Top);
-                bottom = Math.Max(bottom, layout.Bounds.Bottom);
-            }
-            if (hasNew)
-            {
-                var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
-                    !string.IsNullOrWhiteSpace(_line2),
-                    !string.IsNullOrWhiteSpace(shownNext), newOffset);
-                top = Math.Min(top, layout.Bounds.Top);
-                bottom = Math.Max(bottom, layout.Bounds.Bottom);
-            }
-            var card = new Rectangle(left, (int)Math.Floor(top - 10), width,
-                Math.Max(29, (int)Math.Ceiling(bottom - top + 20)));
-            using (var path = RoundedRectangle(card, 14))
-            using (var shade = new SolidBrush(Color.FromArgb(255, 13, 17, 28)))
+            var transparent = _settings.TransparentCanvas;
+            using (var path = RoundedRectangle(new Rectangle(left,
+                       (int)Math.Floor(bounds.Top - 9), width,
+                       Math.Max(29, (int)Math.Ceiling(bounds.Height + 18))), 14))
+            using (var shade = new SolidBrush(transparent ? Color.FromArgb(255, 13, 17, 28) :
+                       Color.FromArgb(128, 10, 13, 27)))
+            using (var outline = new Pen(Color.FromArgb(56, _palette.Border)))
             {
                 var smoothing = g.SmoothingMode;
-                g.SmoothingMode = SmoothingMode.None;
+                if (transparent) g.SmoothingMode = SmoothingMode.None;
                 g.FillPath(shade, path);
+                if (!transparent) g.DrawPath(outline, path);
                 g.SmoothingMode = smoothing;
-            }
-        }
-
-        private void DrawLyricPanel(Graphics g, RectangleF content, int left, int width,
-            float mainHeight, float subHeight, float gap, string line1, string line2,
-            string preview, float opacity, float offsetY)
-        {
-            if (opacity <= 0 || (string.IsNullOrWhiteSpace(line1) &&
-                string.IsNullOrWhiteSpace(line2) && string.IsNullOrWhiteSpace(preview))) return;
-            var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
-                !string.IsNullOrWhiteSpace(line2), !string.IsNullOrWhiteSpace(preview),
-                offsetY);
-            using (var path = RoundedRectangle(new Rectangle(left,
-                       (int)Math.Floor(layout.Bounds.Top - 9), width,
-                       Math.Max(29, (int)Math.Ceiling(layout.Bounds.Height + 18))), 14))
-            using (var shade = new SolidBrush(Color.FromArgb((int)(128 * opacity), 10, 13, 27)))
-            using (var outline = new Pen(Color.FromArgb((int)(56 * opacity), _palette.Border)))
-            {
-                g.FillPath(shade, path);
-                g.DrawPath(outline, path);
             }
         }
 
@@ -2354,14 +2284,6 @@ namespace MusicBeePlugin
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            var showTip = _lyricHitArea.Contains(e.Location);
-            if (showTip != _lyricTipActive)
-            {
-                _lyricTipActive = showTip;
-                _lyricToolTip.SetToolTip(this, showTip ?
-                    (_line2 ?? "") + "\n" + (_line1 ?? "") +
-                    "\n\nMenu → Read full current lyrics" : null);
-            }
             if (_settings.TransparentCanvas && _resizeGrip.Contains(e.Location))
             {
                 Cursor = Cursors.SizeNWSE;
@@ -2423,8 +2345,6 @@ namespace MusicBeePlugin
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
-            _lyricTipActive = false;
-            _lyricToolTip.SetToolTip(this, null);
             _hoverButton = null;
             _hoverQueue = null;
             Cursor = Cursors.Default;
@@ -2724,7 +2644,6 @@ namespace MusicBeePlugin
                 CancelPartyLookup();
                 Interlocked.Increment(ref _artworkRequestId);
                 _animationTimer?.Dispose();
-                _lyricToolTip.Dispose();
                 DisposePartyDancers();
                 _albumArtwork?.Dispose();
                 _backgroundCache?.Dispose();
