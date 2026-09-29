@@ -110,6 +110,7 @@
     <Compile Include="GdiplusPInvoke.cs" />
     <Compile Include="FrmLyricsWindow.cs" />
     <Compile Include="PartyAnimation.cs" />
+    <Compile Include="PartyPlaybackClock.cs" />
     <Compile Include="PartyTapTempo.cs" />
     <Compile Include="PartyBeatTracker.cs" />
     <Compile Include="PartyTempoStore.cs" />

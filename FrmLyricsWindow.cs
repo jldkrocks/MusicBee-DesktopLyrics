@@ -60,6 +60,7 @@ namespace MusicBeePlugin
             _timingButton, _lrcButton, _backgroundButton, _partyButton, _resizeGrip;
         private PartyDancerWindow _leftDancer, _rightDancer;
         private readonly PartyBeatTracker _partyBeat = new PartyBeatTracker();
+        private readonly PartyPlaybackClock _partyClock = new PartyPlaybackClock();
         private double _partyBpm, _partyTagBpm;
         private int _partyOriginMs;
         private PartyTempoSource _partyTempoSource;
@@ -519,7 +520,7 @@ namespace MusicBeePlugin
                 try
                 {
                     var origin = saved != null ? PartyAnimation.OriginForPhase(
-                        Math.Max(0, _musicBee.Player_GetPosition()),
+                        ReadPartyPosition(Stopwatch.GetTimestamp()),
                         saved.Bpm, saved.OriginMs, bpm) :
                         PartyAnimation.OriginForBeat(0, bpm);
                     _partyTempoStore.Save(trackUrl, bpm, origin, false, true);
@@ -701,7 +702,7 @@ namespace MusicBeePlugin
                     {
                         if (_musicBee.NowPlaying_GetFileUrl() != trackUrl)
                             throw new InvalidOperationException("The song changed.");
-                        var position = Math.Max(0, _musicBee.Player_GetPosition());
+                        var position = ReadPartyPosition(timestamp);
                         double estimatedBpm;
                         if (!tapTempo.Tap(timestamp, Stopwatch.Frequency,
                                 out estimatedBpm)) return;
@@ -728,7 +729,7 @@ namespace MusicBeePlugin
                     {
                         if (_musicBee.NowPlaying_GetFileUrl() != trackUrl)
                             throw new InvalidOperationException("The song changed.");
-                        tappedBeat = Math.Max(0, _musicBee.Player_GetPosition());
+                        tappedBeat = ReadPartyPosition(Stopwatch.GetTimestamp());
                         syncBeat.Text = "Beat captured";
                     }
                     catch (Exception ex)
@@ -769,7 +770,7 @@ namespace MusicBeePlugin
                             origin = PartyAnimation.OriginForBeat(tappedBeat.Value, bpm);
                         else
                         {
-                            var position = Math.Max(0, _musicBee.Player_GetPosition());
+                            var position = ReadPartyPosition(Stopwatch.GetTimestamp());
                             var oldBpm = _partyBpm > 0 ? _partyBpm : _partyBeat.Bpm;
                             var oldOrigin = _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs;
                             origin = PartyAnimation.OriginForPhase(position,
@@ -801,6 +802,7 @@ namespace MusicBeePlugin
             if (!_settings.PartyMode)
             {
                 DisposePartyDancers();
+                _partyClock.Reset();
                 _partyLayoutValid = false;
                 return;
             }
@@ -816,7 +818,7 @@ namespace MusicBeePlugin
                     _leftDancer = new PartyDancerWindow("MusicBeePlugin.PartyRem.png");
                 if (_rightDancer == null)
                     _rightDancer = new PartyDancerWindow("MusicBeePlugin.PartyRam.png");
-                var position = _musicBee.Player_GetPosition();
+                var position = ReadPartyPosition(Stopwatch.GetTimestamp());
                 var detectedBpm = _partyBpm == 0 ? _partyBeat.Bpm : 0;
                 var bpm = _partyBpm > 0 ? _partyBpm : detectedBpm;
                 var phasePosition = PartyAnimation.DisplayPhaseAt(position,
@@ -841,6 +843,13 @@ namespace MusicBeePlugin
                 MessageBox.Show(this, "Could not show the party dancers: " + ex.Message,
                     "Party mode", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+        }
+
+        private int ReadPartyPosition(long timestamp)
+        {
+            var rawPosition = Math.Max(0, _musicBee.Player_GetPosition());
+            return _partyClock.PositionAt(rawPosition, timestamp,
+                Stopwatch.Frequency, _playState == Plugin.PlayState.Playing);
         }
 
         private void RefreshPartyLayout()
@@ -947,6 +956,7 @@ namespace MusicBeePlugin
                 }
                 catch (Exception) { _partyTagBpm = 0; }
                 _partyBeat.Reset();
+                _partyClock.Reset();
                 LoadPartyTempo(trackUrl);
                 _partySpectrumMisses = 0;
                 _lastPartyUpdate = 0;

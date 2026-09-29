@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -119,6 +120,37 @@ namespace MusicBeePlugin
             }
             if (PartyAnimation.DisplayPhaseAt(250, 10, 0) != 240)
                 throw new Exception("The unsynchronized fallback should keep its original loop timing.");
+
+            // A coarse player position should not make the four poses wait
+            // for its next 100 ms update and then jump ahead. The monotonic
+            // clock keeps the same BPM while making the intervals even.
+            var partyClock = new PartyPlaybackClock();
+            var poseChanges = new List<int>();
+            var previousPose = -1;
+            for (var wallMs = 0; wallMs < 5000; wallMs += 17)
+            {
+                var coarsePosition = wallMs / 100 * 100;
+                var smoothPosition = partyClock.PositionAt(coarsePosition,
+                    wallMs, 1000, true);
+                var currentPose = PartyAnimation.FrameAt(smoothPosition, 220);
+                if (previousPose >= 0 && currentPose != previousPose)
+                    poseChanges.Add(wallMs);
+                previousPose = currentPose;
+            }
+            if (poseChanges.Count < 17)
+                throw new Exception("The playback clock should advance through the whole song.");
+            for (var i = 1; i < poseChanges.Count; i++)
+                if (Math.Abs(poseChanges[i] - poseChanges[i - 1] - 60000d / 220) > 20)
+                    throw new Exception("Coarse MusicBee positions must not jitter the beat poses.");
+            if (partyClock.PositionAt(5000, 5100, 1000, false) != 5000 ||
+                partyClock.PositionAt(5000, 8000, 1000, false) != 5000 ||
+                partyClock.PositionAt(5000, 8017, 1000, true) != 5000 ||
+                partyClock.PositionAt(9000, 8034, 1000, true) != 9000 ||
+                partyClock.PositionAt(100, 8051, 1000, true) != 100)
+                throw new Exception("Pauses and seeks must reset the party clock.");
+            partyClock.Reset();
+            if (partyClock.PositionAt(750, 9000, 1000, true) != 750)
+                throw new Exception("Song changes must clear the old playback position.");
 
             var beatOrigin = PartyAnimation.OriginForBeat(750, 120);
             if (PartyAnimation.FrameAt(750 - beatOrigin, 120) != 6 ||
