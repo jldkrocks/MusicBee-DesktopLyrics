@@ -19,12 +19,22 @@ namespace MusicBeePlugin
             float desiredPoints, float width, float height)
         {
             var fit = FitCore(graphics, lyric, font, desiredPoints, width, height);
-            using (var sample = new Font(font.FontFamily, fit.Points, font.Style, GraphicsUnit.Point))
+            // GDI font hinting can change measured widths slightly when the
+            // computed point size is applied. Refine that size before falling
+            // back to minimum-size wrapping (also across Windows font versions).
+            for (var attempt = 0; attempt < 4; attempt++)
             {
-                var fits = fit.Lines * sample.GetHeight(graphics) <= height - 2;
-                foreach (var line in fit.Text.Split('\n'))
-                    fits &= graphics.MeasureString(line, sample).Width <= Math.Max(1, width - 8);
-                if (fits) return fit;
+                using (var sample = new Font(font.FontFamily, fit.Points, font.Style, GraphicsUnit.Point))
+                {
+                    var widest = 1f;
+                    foreach (var line in fit.Text.Split('\n'))
+                        widest = Math.Max(widest, graphics.MeasureString(line, sample).Width);
+                    var ratio = Math.Min(Math.Max(1, height - 2) / (fit.Lines * sample.GetHeight(graphics)),
+                        Math.Max(1, width - 8) / widest);
+                    if (ratio >= 1) return fit;
+                    if (fit.Points <= 10) break;
+                    fit.Points = Math.Max(10, fit.Points * ratio * 0.99f);
+                }
             }
             // Keep complete words on additional rows before resorting to an
             // explicit ellipsis. The full text remains available in the reader.

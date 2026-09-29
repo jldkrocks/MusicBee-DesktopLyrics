@@ -506,7 +506,11 @@ namespace MusicBeePlugin
                     unspaced.Text.Replace("\n", "") != cjk ||
                     roomyTranslation.Lines != 2 ||
                     roomyTranslation.Points <= crampedTranslation.Points * 1.15f)
-                    throw new Exception("Long lyrics should wrap within their row without shrinking short lines.");
+                    throw new Exception(string.Format("Long lyrics should wrap within their row without shrinking short lines. " +
+                        "Long {0}/{1:F2}; short {2}; CJK {3}/{4:F2}; roomy {5}/{6:F2}; cramped {7}/{8:F2}; DPI {9}.",
+                        longLine.Lines, longLine.Points, shortLine.Lines, unspaced.Lines, unspaced.Points,
+                        roomyTranslation.Lines, roomyTranslation.Points, crampedTranslation.Lines,
+                        crampedTranslation.Points, graphics.DpiY));
                 using (var format = new StringFormat(StringFormatFlags.NoWrap)
                        { Alignment = StringAlignment.Center,
                          LineAlignment = StringAlignment.Center })
