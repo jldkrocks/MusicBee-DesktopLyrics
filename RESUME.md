@@ -1,12 +1,12 @@
 # Resumable work: GPU rendering, BPM search, tempo maps
 
-Installed baseline: 1.15.34.0, release code f3352ad. Actions run 36601163777 passed plugin build, smoke checks and GPU-probe build; artifact 11048973758 was downloaded, digest-checked and installed with matching DLL hash. Previous 1.15.33.0 DLL is backed up under backups/MusicBee-20260929-1.15.33.0 outside the repo. Draft PR #1 uses codex/next-lyric-preview.
+Installed baseline: 1.15.35.0, release code 734eceb. Actions run 36627935330 passed plugin build, smoke checks and GPU-probe build; artifact 11060694308 was downloaded, digest-checked and installed with matching DLL SHA256 62578f5b9b5c1c56dca0dd9902de304793bf145b64f373f0d703daf4be1c48c6. Artifact ZIP SHA256 2d567c0eaafbcf18db17eae6abbaf8e75c9de727eaa96f2f2bc14263e9cd540d. Previous 1.15.34.0 DLL is backed up under backups/MusicBee-20260929-1.15.34.0 outside the repo. Draft PR #1 uses codex/next-lyric-preview.
 
 User authorized these features, with small independently verified checkpoints. Do not overwrite the installed DLL with unfinished work. Build each release through GitHub Actions; back up and verify the DLL before installation. Do not reset or redo completed work. User wants to conserve usage; remaining account allowance is not visible to the agent.
 
-## Current work: 1.15.35.0
+## Installed checkpoint: 1.15.35.0
 Optional Bob count-in on a Normal row immediately after Half speed. Adds up to four whole vertical bobs before the return at the incoming BPM, with a gentle first bob and zero lift/velocity at cue boundaries. Phase, saved alignment, BPM and pose sequence are unchanged; old maps default off. Short sections fit fewer complete bobs; holds never bob. BPM ramp now explains that equal BPM values do nothing and style changes remain immediate. Editor stores the per-row checkbox. PARTY: Shift-click opens BPM/alignment (read-only explanation while map enabled), Ctrl-click opens tempo map; ordinary click still toggles. Hover hint added.
-Local plugin build and smoke tests passed, including cue boundaries, old-map compatibility, persistence, short sections, seeking, holds and editor repeat-save. Editor snapshot checked with the user's seven-row Asterisk map. GitHub release build/install still pending; do not replace the installed DLL with the local build.
+Local plugin build and smoke tests passed, including cue boundaries, old-map compatibility, persistence, short sections, seeking, holds and editor repeat-save. Editor snapshot checked with the user's seven-row Asterisk map. Native renderer checks also confirmed bob displacement, no clipping and cache reset for both dancers/all four poses. GitHub Actions build and checks passed; the artifact was digest-verified, installed with MusicBee closed and its DLL hash independently verified. The user has not yet tried this version in playback.
 For the user's screenshot, tick Bob count-in on the Normal row at 196.51 and Save. The video is F:/2026-09-29 18-12-46.mkv. User requested this cue and shortcuts before continuing other work.
 
 ## Rhythm options to discuss in a later checkpoint
