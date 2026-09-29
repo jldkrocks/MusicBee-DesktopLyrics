@@ -1,6 +1,6 @@
 # Resumable work: GPU rendering, BPM search, tempo maps
 
-Installed baseline: 1.15.33.0, release commit 39a3620 (plugin implementation 280b144). Actions run 36598712653 passed plugin build, smoke suite and GPU-probe build; artifact 11047942054 was downloaded, digest-checked and installed with matching DLL hash from artifact-1.15.33.0-39a3620. Previous 1.15.32.0 DLL is backed up under backups/MusicBee-20260929-1.15.32.0 outside the repo. Draft PR #1 uses codex/next-lyric-preview.
+Installed baseline: 1.15.34.0, release code f3352ad. Actions run 36601163777 passed plugin build, smoke checks and GPU-probe build; artifact 11048973758 was downloaded, digest-checked and installed with matching DLL hash. Previous 1.15.33.0 DLL is backed up under backups/MusicBee-20260929-1.15.33.0 outside the repo. Draft PR #1 uses codex/next-lyric-preview.
 
 User authorized these features, with small independently verified checkpoints. Do not overwrite the installed DLL with unfinished work. Build each release through GitHub Actions; back up and verify the DLL before installation. Do not reset or redo completed work. User wants to conserve usage; remaining account allowance is not visible to the agent.
 
@@ -8,6 +8,15 @@ User authorized these features, with small independently verified checkpoints. D
 1.15.32.0 fixes dark submenu text (light enabled text/arrows and muted readable disabled text; off-screen menu rendering verified). Copy song and artist replaces the research prompt: clipboard contains only Artist – Song title, or title if artist missing. No success dialog. User's ChatGPT project already has the research context. Do not restore the verbose prompt. Retry supports Deezer-only configuration and preserves saved timing. These menu/copy features remain intact.
 
 Browser BPM search was implemented in 843763b (1.15.30.0), locally built and smoke-checked; Actions run 36593911526 is the release build. Browser BPM search is available to the lyrics flyout. It opens a Google query for the current artist/title only on a click. It does not automatically retrieve a BPM, modify saved timing, or use a paid API. Use existing Adjust Party BPM to save a result.
+
+## Implemented in 1.15.34.0
+Tempo-map editor has a dark styled layout, live seek timeline with section diamonds/coloured spans, Play/Pause, +/-5 seconds and Seek to row. Marker clicks select a row and seek; dragging seeks once on release without moving sections. Seeking preserves pause state. Save applies and keeps the editor open; Close confirms discarding later unsaved edits without undoing earlier saves. Navigation is disabled for another song; saving stays attached to the original song. Tests cover seek mapping, markers, scrub release, repeated saves, and track changes. Editor snapshot verified. No changes to main lyrics layout, dancer placement, or GPU integration in this release.
+
+## User-requested follow-ups (one at a time)
+- Shift-click the existing PARTY button should open the regular BPM controls; Ctrl-click should open the tempo map. Not implemented yet. Plain click must continue toggling Party Mode.
+- Make lyrics the visual focus in maximized mode, especially long current lines; current screenshot shows large empty gaps and the shorter upcoming lyric can appear more prominent. Do not move the dancers. Discuss/implement as a separate checkpoint.
+- 4K performance is better but still less smooth than the smaller window. Full GPU integration remains pending; the isolated probe is not the plugin renderer.
+User explicitly requested one thing at a time in case usage runs out. This pass completed only the editor workflow.
 
 ## Implemented in 1.15.33.0
 - Party BPM → Edit tempo map: separate per-song map storage, optional enabled flag, decimal-second starts, BPM, ramp duration, normal/side-to-side/half-speed/hold styles, explicit side-beat alignment. Save sorts and validates; Cancel discards; unchecking the enabled box restores underlying BPM. Existing song timing files are untouched. Tests cover integration, ramps, holds, styles, seeks, persistence and invalid-save preservation.
