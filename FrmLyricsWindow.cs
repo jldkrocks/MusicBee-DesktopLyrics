@@ -336,7 +336,7 @@ namespace MusicBeePlugin
                 BackColor = Color.FromArgb(27, 29, 41),
                 ForeColor = Color.FromArgb(234, 234, 241),
                 ShowCheckMargin = true,
-                Renderer = new ToolStripProfessionalRenderer(new DarkMenuColors())
+                Renderer = new DarkMenuRenderer()
             };
             AddToggle(menu, "Show song title", () => _settings.ShowSongTitle,
                 value => _settings.ShowSongTitle = value);
@@ -363,12 +363,15 @@ namespace MusicBeePlugin
                 BeginInvoke(new Action(OpenLrcLibPicker)));
             var partyBpm = new ToolStripMenuItem("Party BPM");
             menu.Items.Add(partyBpm);
+            partyBpm.DropDown.BackColor = menu.BackColor;
+            partyBpm.DropDown.ForeColor = menu.ForeColor;
+            partyBpm.DropDown.Renderer = menu.Renderer;
             var tempoAction = partyBpm.DropDownItems.Add("Adjust BPM and alignment…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyTempoEditor)));
             var browserBpm = partyBpm.DropDownItems.Add("Search Google…", null,
                 (sender, args) => BeginInvoke(new Action(OpenBrowserBpmSearch)));
-            var researchBpm = partyBpm.DropDownItems.Add("Copy ChatGPT research prompt", null,
-                (sender, args) => BeginInvoke(new Action(CopyBpmResearchPrompt)));
+            var copySong = partyBpm.DropDownItems.Add("Copy song and artist", null,
+                (sender, args) => BeginInvoke(new Action(CopySongAndArtist)));
             partyBpm.DropDownItems.Add(new ToolStripSeparator());
             partyBpm.DropDownItems.Add("Online lookup settings…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyOnlineSettings)));
@@ -379,7 +382,7 @@ namespace MusicBeePlugin
                 timingAction.Visible = _timingButton.IsEmpty;
                 lrcAction.Visible = _lrcButton.IsEmpty;
                 tempoAction.Enabled = !string.IsNullOrWhiteSpace(_artworkTrackUrl);
-                browserBpm.Enabled = researchBpm.Enabled = !string.IsNullOrWhiteSpace(_songTitle);
+                browserBpm.Enabled = copySong.Enabled = !string.IsNullOrWhiteSpace(_songTitle);
                 var savedTempo = !string.IsNullOrWhiteSpace(_artworkTrackUrl) ?
                     _partyTempoStore.Load(_artworkTrackUrl) : null;
                 retryOnline.Enabled = _settings.PartyMode &&
@@ -409,6 +412,28 @@ namespace MusicBeePlugin
                 Invalidate();
             };
             menu.Items.Add(item);
+        }
+
+        private sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
+        {
+            internal DarkMenuRenderer() : base(new DarkMenuColors()) { }
+
+            protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+            {
+                // Drop-downs do not reliably inherit the root menu foreground.
+                // Also keep disabled items readable without making them look enabled.
+                var color = e.Item.Enabled ? Color.FromArgb(234, 234, 241) :
+                    Color.FromArgb(153, 157, 175);
+                TextRenderer.DrawText(e.Graphics, e.Text, e.TextFont,
+                    e.TextRectangle, color, e.TextFormat);
+            }
+
+            protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+            {
+                e.ArrowColor = e.Item.Enabled ? Color.FromArgb(234, 234, 241) :
+                    Color.FromArgb(153, 157, 175);
+                base.OnRenderArrow(e);
+            }
         }
 
         private sealed class DarkMenuColors : ProfessionalColorTable
@@ -643,41 +668,19 @@ namespace MusicBeePlugin
             }
         }
 
-        private void CopyBpmResearchPrompt()
+        private void CopySongAndArtist()
         {
             if (string.IsNullOrWhiteSpace(_songTitle)) return;
-            var duration = 0;
-            try { duration = _musicBee.NowPlaying_GetDuration?.Invoke() ?? 0; }
-            catch (Exception) { }
-            var durationText = duration > 0 ?
-                TimeSpan.FromMilliseconds(duration).ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture) : "Unknown";
-            var prompt = "Research the best BPM setting for this recording in MusicBee's dancer animation. " +
-                "Search the web and compare reported values rather than returning only the first result.\r\n\r\n" +
-                "Artist: " + (string.IsNullOrWhiteSpace(_songArtist) ? "Unknown" : _songArtist) + "\r\n" +
-                "Title: " + _songTitle + "\r\n" +
-                "Album: " + (string.IsNullOrWhiteSpace(_songAlbum) ? "Unknown" : _songAlbum) + "\r\n" +
-                "Duration: " + durationText + "\r\n\r\n" +
-                "Check the recording/version and duration; distinguish live, remix, sped-up and cover versions. " +
-                "List the reported BPMs with source links, explain disagreements and half/double-time equivalents, " +
-                "and recommend the best-supported BPM with confidence and any alternative worth trying. " +
-                "Do not average conflicting values blindly or invent decimal precision. " +
-                "Distinguish the reported musical tempo from a slower dance setting. " +
-                "Flag evidence of tempo changes or beatless sections, but do not invent timestamps. " +
-                "If evidence is insufficient or web search is unavailable, say so. " +
-                "You have metadata, not my audio, so do not claim to have measured this file. " +
-                "End with a concise recommended BPM and whether half-speed may suit the animation. " +
-                "Beat alignment is a separate manual step in the plugin.";
+            var song = string.IsNullOrWhiteSpace(_songArtist) ? _songTitle.Trim() :
+                _songArtist.Trim() + " – " + _songTitle.Trim();
             try
             {
-                Clipboard.SetText(prompt);
-                MessageBox.Show(this, "Prompt copied. Paste it into your ChatGPT chat.\r\n\r\n" +
-                    "Review the recommendation, then use Party BPM → Adjust BPM and alignment to save it.",
-                    "BPM research prompt", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Clipboard.SetText(song);
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "Could not copy the prompt: " + ex.Message,
-                    "BPM research prompt", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Could not copy the song and artist: " + ex.Message,
+                    "Copy song and artist", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 

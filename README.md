@@ -29,7 +29,8 @@ To add a MusicBee toolbar button, right-click its toolbar and choose **Configure
 
 ### Party BPM menu
 
-The lyrics flyout groups adjustment/alignment, browser search, research prompt copying, online lookup settings and retry under **Party BPM**. **Copy ChatGPT research prompt** copies the current artist, title, album and duration with instructions to compare sourced BPM values, recording versions, half/double-time interpretations and uncertainty. Paste it into your own ChatGPT chat, review the answer, then use **Adjust BPM and alignment…** to save a value. Copying does not contact ChatGPT, require an API key, or replace saved timing.
+The lyrics flyout groups adjustment/alignment, browser search, song copying, online lookup settings and retry under **Party BPM**. **Copy song and artist** copies only `Artist – Song title` for pasting into your existing ChatGPT project or elsewhere (just the title if artist is missing). It copies silently without an extra dialog. It does not contact ChatGPT or replace saved timing. Enabled menu text is light; unavailable actions use a readable muted colour.
+
 
 ### Browser BPM search
 
