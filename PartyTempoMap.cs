@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace MusicBeePlugin
 {
     internal enum PartyDanceStyle { Normal, SideToSide, HalfSpeed, Hold }
-    internal enum PartyRhythm { Straight, Waltz, Swing }
+    internal enum PartyRhythm { Straight, Waltz, Swing, AccentFour }
 
     internal sealed class PartyTempoSection
     {
@@ -116,7 +116,9 @@ namespace MusicBeePlugin
         private static double AlignedBeat(double beat, PartyTempoSection section)
         {
             // In waltz, Align marks the first (strong) beat of a three-beat bar.
-            return section.Rhythm == PartyRhythm.Swing ? Math.Floor(beat / 2) * 2 :
+            // AccentFour Align marks the strong FOUR, not the first small bop.
+            return section.Rhythm == PartyRhythm.AccentFour ? Math.Floor(beat / 8) * 8 + 3 :
+                section.Rhythm == PartyRhythm.Swing ? Math.Floor(beat / 2) * 2 :
                 section.Rhythm == PartyRhythm.Waltz ? Math.Floor(beat / 6) * 6 :
                 Math.Floor(beat / 4) * 4 + (section.Style == PartyDanceStyle.SideToSide ? 3 : 2);
         }
@@ -171,11 +173,14 @@ namespace MusicBeePlugin
 
         private static readonly int[] WaltzFrames = { 6, 3, 3, 0, 9, 9 };
 
+        private static readonly int[] AccentFourFrames = { 3, 3, 3, 0, 9, 9, 9, 6 };
+
         private static PartyMapPose MakePose(double beat, double bpm, PartyDanceStyle style, PartyRhythm rhythm, double swingPercent, bool held)
         {
             var waltz = rhythm == PartyRhythm.Waltz;
             var swing = rhythm == PartyRhythm.Swing;
-            var cycle = waltz ? 6 : 4;
+            var accentFour = rhythm == PartyRhythm.AccentFour;
+            var cycle = accentFour ? 8 : waltz ? 6 : 4;
             var phase = (beat % cycle + cycle) % cycle;
             var slot = (int)Math.Floor(phase + 1e-9) % cycle;
             var effective = bpm * (style == PartyDanceStyle.HalfSpeed ? 0.5 : 1);
@@ -183,18 +188,19 @@ namespace MusicBeePlugin
             fraction = Math.Max(0, fraction);
             var sideOnly = style == PartyDanceStyle.SideToSide;
             if (swing) return MakeSwingPose(beat, bpm, effective, slot, fraction, swingPercent / 100, sideOnly, held);
-            var frame = waltz ? (sideOnly ? (slot % 2 == 0 ? 6 : 0) : WaltzFrames[slot]) :
+            var frame = accentFour ? (sideOnly ? (slot % 2 == 0 ? 6 : 0) : AccentFourFrames[slot]) :
+                waltz ? (sideOnly ? (slot % 2 == 0 ? 6 : 0) : WaltzFrames[slot]) :
                 sideOnly ? slot % 2 * 6 : slot * 3;
             var since = fraction * 60000 / effective;
-            var side = waltz ? slot % 3 == 0 : sideOnly || slot % 2 == 0;
+            var side = accentFour ? slot % 4 == 3 : waltz ? slot % 3 == 0 : sideOnly || slot % 2 == 0;
             var duration = side ? Math.Min(150, 60000 / effective * 0.35) : Math.Min(110, 60000 / effective * 0.28);
             var remaining = Math.Max(0, 1 - since / duration);
             var anticipationDuration = Math.Min(130, 60000 / effective * 0.24);
             var lift = Math.Max(0, 1 - (1 - fraction) * 60000 / effective / anticipationDuration);
-            var strength = side ? 1 : waltz ? 0.55 : 0.28;
+            var strength = accentFour ? (side ? 1.3 : 0.45) : side ? 1 : waltz ? 0.55 : 0.28;
             // The repeated centre drawing still lands separately on beats 2 and 3.
             // A slightly larger rise at the end of beat 3 prepares the side hit.
-            var rise = waltz && slot % 3 == 2 ? 1.3 : 1;
+            var rise = (accentFour && slot % 4 == 2) || (waltz && slot % 3 == 2) ? 1.3 : 1;
             return new PartyMapPose { Beat = beat, Bpm = bpm, Held = held, Frame = frame,
                 Impact = held ? 0 : (float)(remaining * remaining * strength),
                 Anticipation = held ? 0 : (float)(rise * lift * lift * (3 - 2 * lift)),

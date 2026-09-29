@@ -9,6 +9,54 @@ internal static class RhythmChecks
 
     internal static void Run()
     {
+        var four = new PartyTempoMap { TrackUrl = "accent-four-test" };
+        var fourSection = new PartyTempoSection { Bpm = 120, Rhythm = PartyRhythm.AccentFour };
+        four.Sections.Add(fourSection); four.Validate();
+        var fourFrames = new[] { 3, 3, 3, 0, 9, 9, 9, 6 };
+        for (int beat = 0; beat < 24; beat++)
+        {
+            var pose = four.At(beat * 0.5);
+            if (pose.Frame != fourFrames[beat % 8]) throw new Exception("Fourth-beat pattern needs three centre hits and alternating side landings.");
+            Near(pose.Impact, beat % 4 == 3 ? 1.3 : 0.45, "Only FOUR gets the stronger accent");
+            Near(pose.Beat, beat, "Fourth-beat rhythm must preserve the BPM clock");
+            if (four.At(beat * 0.5 + 0.25).Impact != 0) throw new Exception("Each centre bop must recover before the next beat.");
+        }
+        if (four.At(1.49).Anticipation <= four.At(0.99).Anticipation)
+            throw new Exception("Beat three should prepare the fourth-beat landing.");
+        fourSection.Style = PartyDanceStyle.HalfSpeed;
+        if (four.At(2).Frame != 3 || four.At(3).Frame != 0 || four.At(7).Frame != 6)
+            throw new Exception("Half speed must slow the complete fourth-beat pattern.");
+        fourSection.Style = PartyDanceStyle.SideToSide;
+        for (int beat = 0; beat < 8; beat++)
+        {
+            var pose = four.At(beat * 0.5);
+            if (pose.Frame != 0 && pose.Frame != 6) throw new Exception("Side-only must omit centres.");
+            Near(pose.Impact, beat % 4 == 3 ? 1.3 : 0.45, "Side-only preserves fourth-beat accents");
+        }
+        fourSection.Style = PartyDanceStyle.Normal;
+        four.InitialBeat = -2.25;
+        fourSection.AlignBeat = true;
+        Near(four.At(0).Impact, 1.3, "Align starts on strong FOUR even with negative initial phase");
+        if (four.At(0).Frame != 0 || four.At(2).Frame != 6) throw new Exception("Aligned fourth-beat landings alternate sides.");
+        four.Sections.Add(new PartyTempoSection { StartSeconds = 2.1, Style = PartyDanceStyle.Hold });
+        var frozen = four.At(2.1); var later = four.At(20);
+        if (frozen.Frame != later.Frame || later.Impact != 0 || later.Anticipation != 0 || later.Sway != 0)
+            throw new Exception("Hold freezes the fourth-beat pattern.");
+        four.Sections.Add(new PartyTempoSection { StartSeconds = 21, Bpm = 180, RampSeconds = 4, Rhythm = PartyRhythm.AccentFour, AlignBeat = true });
+        four.Validate();
+        Near(four.At(23).Beat - four.At(21).Beat, 4.5, "Fourth-beat rhythm retains integrated BPM ramps");
+        var seekPose = four.At(23); four.At(100); four.At(0);
+        Near(four.At(23).Beat, seekPose.Beat, "Fourth-beat seeking is deterministic");
+        if (four.At(23).Frame != seekPose.Frame) throw new Exception("Seeking must repeat fourth-beat poses.");
+        var fourLoaded = JsonConvert.DeserializeObject<PartyTempoMap>(JsonConvert.SerializeObject(four)); fourLoaded.Validate();
+        if (fourLoaded.Sections[0].Rhythm != PartyRhythm.AccentFour || fourLoaded.At(23).Frame != seekPose.Frame)
+            throw new Exception("Fourth-beat rhythm must survive save/load.");
+        four.Sections.Clear(); four.InitialBeat = 0; fourSection.Style = PartyDanceStyle.HalfSpeed; fourSection.AlignBeat = false;
+        four.Sections.Add(fourSection);
+        four.Sections.Add(new PartyTempoSection { StartSeconds = 10, Bpm = 120, Rhythm = PartyRhythm.AccentFour, AlignBeat = true, CountIn = true });
+        four.Validate();
+        Near(four.At(10).CountInAccent, 1, "Count-in final bop lands on aligned FOUR");
+        if (four.At(10).Frame != 0) throw new Exception("Final bop must use the fourth-beat side pose.");
         var map = new PartyTempoMap { TrackUrl = "rhythm-test" };
         var section = new PartyTempoSection { Bpm = 120, Rhythm = PartyRhythm.Waltz };
         map.Sections.Add(section); map.Validate();

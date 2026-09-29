@@ -24,7 +24,7 @@ namespace MusicBeePlugin
         private bool _dirty, _trackWasAvailable = true;
         private static readonly string[] Styles = { "Normal", "Side to side", "Half speed", "Hold pose" };
 
-        private static readonly string[] Rhythms = { "Straight", "Waltz (3/4)", "Swing" };
+        private static readonly string[] Rhythms = { "Straight", "Waltz (3/4)", "Swing", "4/4 - accent on 4" };
 
         internal FrmPartyTempoMap(PartyTempoMap map, string title, Func<double?> position,
             Action<int> seek, Action<PartyTempoMap> save, double duration,
@@ -55,10 +55,10 @@ namespace MusicBeePlugin
             _grid.Columns[7].DisplayIndex = 5;
             _grid.Columns[7].FillWeight = 80;
             _grid.Columns[7].ToolTipText = "Swing only: percentage of each beat spent in the side pose. 50 = even, 60 = light swing, 66.67 = about 2:1, 75 = strong swing. BPM does not change.";
-            _grid.Columns[6].FillWeight = 140;
-            _grid.Columns[6].ToolTipText = "Straight: existing motion. Waltz: side, centre bop, second centre bop, then the opposite side. Swing: longer side pose, short middle pose, opposite side. Swing % controls the long-short split. Half speed slows the chosen pattern; Hold stops it.";
+            _grid.Columns[6].FillWeight = 185;
+            _grid.Columns[6].ToolTipText = "4/4 accent on 4: three small centre bops, then a strong side landing on FOUR; opposite side next bar. BPM counts all four beats. Straight: existing motion. Waltz: side, centre bop, second centre bop, then the opposite side. Swing: longer side pose, short middle pose, opposite side. Swing % controls the long-short split. Half speed slows the chosen pattern; Hold stops it.";
             _grid.Columns[2].ToolTipText = "Seconds to blend from the previous BPM to this row's BPM. Example: 120 to 150 over 4 seconds. Equal BPM values do not ramp; dance styles switch at the start.";
-            _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start (beat 1 for Waltz). Leave off to preserve the ongoing beat phase.";
+            _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start (beat 1 for Waltz; strong FOUR for 4/4 accent on 4). Leave off to preserve the ongoing beat phase.";
             _grid.Columns[5].ToolTipText = "Check on the Normal row after Half speed: up to four lead-in bobs, then one final bop on the first beat at or after the return. Uses saved alignment, or this row's start when Align is checked.";
             _grid.Columns[3].FillWeight = 140;
             _grid.Columns[4].FillWeight = 65;
@@ -112,10 +112,11 @@ namespace MusicBeePlugin
                 "BPM ramp: 120 to 150 over 4 seconds = gradual tempo change. Equal BPM values do nothing; dance styles change at the start.\r\n" +
                 "Bob count-in: tick the Normal row after Half speed for lead-in bobs PLUS a final bop on the return beat.\r\n" +
                 "Waltz = side, centre bop, centre bop. Swing = long side, short middle; Swing %: 50 = even, 66.67 = about 2:1, 75 = strong.\r\n" +
+                "4/4 accent on 4 = centre, centre, centre, SIDE. Align marks FOUR; BPM counts every beat.\r\n" +
                 "Hold pose stops all motion. Align restarts a side pose. Colours: blue = normal, purple = side to side, amber = half speed, grey = hold.";
             _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 108));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));

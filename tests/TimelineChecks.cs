@@ -54,6 +54,11 @@ internal static class TimelineChecks
             if (saved != 2 || last.Sections[0].Bpm != 90 || map.Sections[0].Bpm != 120 || last.Sections[1].CountIn || !map.Sections[1].CountIn ||
                 last.Sections[1].SwingPercent != 70 || last.Sections[1].Rhythm != PartyRhythm.Swing || map.Sections[1].Rhythm != PartyRhythm.Waltz)
                 throw new Exception("Repeated saves must apply new values without mutating the original map object.");
+            grid.Rows[1].Cells[6].Value = "4/4 - accent on 4";
+            grid.Rows[1].Cells[4].Value = true;
+            Call(editor, "SaveMap");
+            if (last.Sections[1].Rhythm != PartyRhythm.AccentFour || !last.Sections[1].AlignBeat || !grid.Rows[1].Cells[7].ReadOnly)
+                throw new Exception("Editor must save fourth-beat rhythm/alignment and disable Swing amount.");
             Call(editor, "SeekTo", 105d);
             if (requestedSeek != 100000) throw new Exception("Editor seeks must clamp to song length.");
             position = null; Call(editor, "PollPlayback");
