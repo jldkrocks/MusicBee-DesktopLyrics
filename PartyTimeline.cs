@@ -45,7 +45,7 @@ namespace MusicBeePlugin
         {
             base.OnPaint(e); var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
             TextRenderer.DrawText(g, "TIMELINE", Font, new Point(MarginX, 8), ForeColor);
-            var clock = Duration > 0 ? Time(Position) + " / " + Time(Duration) : "Duration unavailable";
+            var clock = Duration > 0 ? Time(Position) + "." + ((int)(Math.Max(0, Position) * 1000) % 1000).ToString("000", CultureInfo.InvariantCulture) + " / " + Time(Duration) : "Duration unavailable";
             TextRenderer.DrawText(g, clock, Font, new Rectangle(0, 6, Width - MarginX, 22), ForeColor, TextFormatFlags.Right);
             using (var track = new SolidBrush(Color.FromArgb(57, 64, 81)))
                 g.FillRectangle(track, MarginX, 43, Math.Max(1, Width - MarginX * 2), 10);

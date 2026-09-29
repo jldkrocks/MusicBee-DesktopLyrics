@@ -63,3 +63,6 @@ Observed local averages (40 draws per measurement, warm caches):
 - 3840x2160: background 16.25 ms; spectrum 11.78 ms; whole OnPaint 57.25 ms.
 
 These are off-screen CPU drawing measurements, not MusicBee/compositor/TV frame rates. No real artwork was loaded and queue was disabled. The recording uses maximized dancer gutters; this benchmark uses the whole client area, so do not claim its values equal that layout. CPU improvements and the standalone GPU probe are now complete; integration remains pending as described above. Keep profiling helpers separate from shipped code.
+
+## In progress: 1.15.40.0
+Precision seek step (0.01-5 seconds, default 0.10), exact seconds input/Seek/Enter, millisecond timeline clock, and one-click Dance/Rhythm dropdowns. Align help explicitly says row Start, not click/Save time. Rapid seeks briefly retain their requested destination while MusicBee position catches up. Existing marker times are only changed by editing Start or adding rows. Local plugin build and smoke suite passed, including actual seek button actions, exact milliseconds, accumulating rapid steps despite stale positions, track-change protection, one-click dropdowns and no false dirty state. Editor snapshot inspected. Actions and installation pending; baseline above remains installed. User has closed MusicBee for installation; recheck process.

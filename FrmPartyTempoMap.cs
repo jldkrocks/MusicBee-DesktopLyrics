@@ -20,7 +20,11 @@ namespace MusicBeePlugin
         private readonly Timer _timer = new Timer { Interval = 120 };
         private readonly Label _status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
         private readonly Font _editorFont = new Font("Segoe UI", 9f);
-        private Button _play, _back, _forward, _add, _seekRow;
+        private Button _play, _back, _forward, _add, _seekRow, _seekExact;
+        private readonly NumericUpDown _seekStep = new NumericUpDown();
+        private readonly NumericUpDown _seekTime = new NumericUpDown();
+        private readonly System.Diagnostics.Stopwatch _seekAge = new System.Diagnostics.Stopwatch();
+        private double? _pendingSeek;
         private bool _dirty, _trackWasAvailable = true;
         private static readonly string[] Styles = { "Normal", "Side to side", "Half speed", "Hold pose" };
 
@@ -58,7 +62,7 @@ namespace MusicBeePlugin
             _grid.Columns[6].FillWeight = 185;
             _grid.Columns[6].ToolTipText = "4/4 accent on 4: three small centre bops, then a strong side landing on FOUR; opposite side next bar. BPM counts all four beats. Straight: existing motion. Waltz: side, centre bop, second centre bop, then the opposite side. Swing: longer side pose, short middle pose, opposite side. Swing % controls the long-short split. Half speed slows the chosen pattern; Hold stops it.";
             _grid.Columns[2].ToolTipText = "Seconds to blend from the previous BPM to this row's BPM. Example: 120 to 150 over 4 seconds. Equal BPM values do not ramp; dance styles switch at the start.";
-            _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start (beat 1 for Waltz; strong FOUR for 4/4 accent on 4). Leave off to preserve the ongoing beat phase.";
+            _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start (beat 1 for Waltz; strong FOUR for 4/4 accent on 4). Uses the row Start time, NOT when you click Align or Save. Save applies the setting. Leave off to preserve the ongoing beat phase.";
             _grid.Columns[5].ToolTipText = "Check on the Normal row after Half speed: up to four lead-in bobs, then one final bop on the first beat at or after the return. Uses saved alignment, or this row's start when Align is checked.";
             _grid.Columns[3].FillWeight = 140;
             _grid.Columns[4].FillWeight = 65;
@@ -75,16 +79,30 @@ namespace MusicBeePlugin
                 Padding = new Padding(4, 2, 4, 2) };
             _grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(34, 40, 54);
             var transport = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
-            _back = AddButton(transport, "−5 seconds", () => SeekRelative(-5));
+            transport.Controls.Add(new Label { Text = "Step (s)", AutoSize = true, Margin = new Padding(3, 9, 3, 0) });
+            ConfigureSeekNumber(_seekStep, 0.01m, 5, 0.01m, 0.1m, 2);
+            transport.Controls.Add(_seekStep);
+            _back = AddButton(transport, "- step", () => SeekRelative(-(double)_seekStep.Value));
             _play = AddButton(transport, "Play / pause", () => { try { _togglePlayback(); PollPlayback(); } catch (Exception ex) { _status.Text = ex.Message; } });
-            _forward = AddButton(transport, "+5 seconds", () => SeekRelative(5));
+            _forward = AddButton(transport, "+ step", () => SeekRelative((double)_seekStep.Value));
+            transport.Controls.Add(new Label { Text = "Seek to (s)", AutoSize = true, Margin = new Padding(15, 9, 3, 0) });
+            ConfigureSeekNumber(_seekTime, 0, (decimal)Math.Max(0, duration), 0.001m,
+                (decimal)Math.Max(0, Math.Min(duration, _position() ?? 0)), 3);
+            _seekTime.Width = 105;
+            transport.Controls.Add(_seekTime);
+            _seekExact = AddButton(transport, "Seek", () => SeekTo((double)_seekTime.Value));
+            _seekTime.KeyDown += (sender, args) =>
+            {
+                if (args.KeyCode != Keys.Enter) return;
+                SeekTo((double)_seekTime.Value); args.SuppressKeyPress = true;
+            };
             _timeline.Duration = Math.Max(0, duration); _timeline.Dock = DockStyle.Fill;
             _timeline.SeekRequested += SeekTo;
             _timeline.MarkerSelected += row => { if (row >= 0 && row < _grid.Rows.Count) _grid.CurrentCell = _grid.Rows[row].Cells[0]; };
             var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
             _add = AddButton(actions, "Add at playhead", () =>
             {
-                var now = _position();
+                var now = EditingPosition();
                 if (!now.HasValue) { _status.Text = "Play the original song to capture its position."; return; }
                 var selected = _grid.CurrentRow;
                 double bpm = 120;
@@ -113,10 +131,11 @@ namespace MusicBeePlugin
                 "Bob count-in: tick the Normal row after Half speed for lead-in bobs PLUS a final bop on the return beat.\r\n" +
                 "Waltz = side, centre bop, centre bop. Swing = long side, short middle; Swing %: 50 = even, 66.67 = about 2:1, 75 = strong.\r\n" +
                 "4/4 accent on 4 = centre, centre, centre, SIDE. Align marks FOUR; BPM counts every beat.\r\n" +
+                "Align uses the row Start time, not when clicked. Save applies it; no need to time your click. Pause for precise seeking.\r\n" +
                 "Hold pose stops all motion. Align restarts a side pose. Colours: blue = normal, purple = side to side, amber = half speed, grey = hold.";
             _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 144));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -137,7 +156,9 @@ namespace MusicBeePlugin
                 if (_grid.IsCurrentCellDirty && (_grid.CurrentCell is DataGridViewCheckBoxCell ||
                     _grid.CurrentCell is DataGridViewComboBoxCell)) _grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
             };
-            _grid.CellBeginEdit += (sender, args) => MarkDirty();
+            // Open combo cells after the grid has finished its selection/click handling.
+            // Opening during MouseDown can let the same click close them again.
+            _grid.CellClick += OpenComboOnClick;
             _grid.SelectionChanged += (sender, args) => RefreshMarkers();
             _enabled.CheckedChanged += (sender, args) => MarkDirty();
             _timer.Tick += (sender, args) => PollPlayback();
@@ -149,6 +170,39 @@ namespace MusicBeePlugin
                     args.Cancel = true;
             };
             _grid.DataError += (sender, args) => { args.ThrowException = false; };
+        }
+
+        private static void ConfigureSeekNumber(NumericUpDown input, decimal minimum, decimal maximum,
+            decimal increment, decimal value, int places)
+        {
+            input.Minimum = minimum; input.Maximum = maximum; input.Increment = increment;
+            input.DecimalPlaces = places; input.Value = value; input.Width = 75;
+            input.Margin = new Padding(3, 7, 3, 3);
+            input.BackColor = Color.FromArgb(30, 35, 48); input.ForeColor = Color.FromArgb(232, 236, 245);
+        }
+
+        private void OpenComboOnClick(object sender, DataGridViewCellEventArgs args)
+        {
+            if (args.RowIndex < 0 || args.ColumnIndex < 0 ||
+                !(_grid[args.ColumnIndex, args.RowIndex] is DataGridViewComboBoxCell)) return;
+            var cell = _grid[args.ColumnIndex, args.RowIndex];
+            BeginInvoke(new Action(() =>
+            {
+                if (IsDisposed || _grid.IsDisposed || _grid.CurrentCell != cell || cell.ReadOnly) return;
+                if (_grid.BeginEdit(true) && _grid.EditingControl is ComboBox combo && !combo.DroppedDown)
+                    combo.DroppedDown = true;
+            }));
+        }
+
+        private double? EditingPosition()
+        {
+            var reported = _position();
+            if (!reported.HasValue) { _pendingSeek = null; return null; }
+            // MusicBee can briefly report the pre-seek position. Accumulate rapid
+            // nudges from the requested destination rather than losing each step.
+            if (_pendingSeek.HasValue && _seekAge.ElapsedMilliseconds < 1000) return _pendingSeek;
+            _pendingSeek = null;
+            return reported;
         }
 
         private void AddRow(double start, double bpm, double ramp, PartyDanceStyle style, bool align, bool countIn = false, PartyRhythm rhythm = PartyRhythm.Straight, double swingPercent = 66.67)
@@ -201,8 +255,8 @@ namespace MusicBeePlugin
         {
             try
             {
-                var position = _position(); var available = position.HasValue;
-                _timeline.Enabled = _back.Enabled = _forward.Enabled = _seekRow.Enabled = available && _timeline.Duration > 0;
+                var position = EditingPosition(); var available = position.HasValue;
+                _timeline.Enabled = _back.Enabled = _forward.Enabled = _seekRow.Enabled = _seekExact.Enabled = _seekTime.Enabled = _seekStep.Enabled = available && _timeline.Duration > 0;
                 _play.Enabled = _add.Enabled = available;
                 _play.Text = available && _playing() ? "Pause" : "Play";
                 if (available && !_timeline.Scrubbing) _timeline.Position = position.Value;
@@ -216,7 +270,7 @@ namespace MusicBeePlugin
 
         private void SeekRelative(double seconds)
         {
-            var position = _position();
+            var position = EditingPosition();
             if (position.HasValue) SeekTo(position.Value + seconds);
         }
 
@@ -226,7 +280,11 @@ namespace MusicBeePlugin
             {
                 if (!_position().HasValue || _timeline.Duration <= 0) return;
                 var clamped = Math.Max(0, Math.Min(_timeline.Duration, seconds));
-                _seek(checked((int)Math.Round(clamped * 1000)));
+                var milliseconds = checked((int)Math.Round(clamped * 1000));
+                _seek(milliseconds);
+                clamped = milliseconds / 1000d;
+                _pendingSeek = clamped; _seekAge.Restart();
+                _seekTime.Value = Math.Max(_seekTime.Minimum, Math.Min(_seekTime.Maximum, (decimal)clamped));
                 _timeline.Position = clamped; _timeline.Invalidate();
             }
             catch (Exception ex) { _status.Text = ex.Message; }

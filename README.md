@@ -127,3 +127,5 @@ MusicBee 中歌曲关联的歌词必须为 LRC 格式的同步歌词。支持 `o
 ![](https://i.imgur.com/o0aYax7.png)
 
 ![](https://i.imgur.com/KnHdZzI.png)
+
+Tempo-map precision controls: choose a **Step (s)** from 0.01 to 5 (default 0.10), then use **- step / + step**. Or enter an exact **Seek to (s)** value with three decimal places and press Seek/Enter. These seek playback without moving section markers; edit a row's Start (s) to move its boundary. Pause when placing precise boundaries. **Align uses that row's Start time**, not the time you click Align or Save. Save applies the edited map. Dance/Rhythm dropdowns open with one click. Playback seek accuracy still depends on MusicBee and the audio decoder.

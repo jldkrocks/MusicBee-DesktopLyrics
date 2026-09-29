@@ -59,14 +59,52 @@ internal static class TimelineChecks
             Call(editor, "SaveMap");
             if (last.Sections[1].Rhythm != PartyRhythm.AccentFour || !last.Sections[1].AlignBeat || !grid.Rows[1].Cells[7].ReadOnly)
                 throw new Exception("Editor must save fourth-beat rhythm/alignment and disable Swing amount.");
+            Call(editor, "SeekTo", 12.345d);
+            if (requestedSeek != 12345) throw new Exception("Exact seek must preserve milliseconds.");
+            Call(editor, "SeekRelative", 0.01d);
+            Call(editor, "SeekRelative", 0.01d);
+            if (requestedSeek != 12365) throw new Exception("Rapid fine seeks must accumulate despite stale player position.");
+            Call(editor, "SeekRelative", -0.01d);
+            if (requestedSeek != 12355) throw new Exception("Fine backward seek must retain precision.");
+            var seekInput = (NumericUpDown)Field(editor, "_seekTime");
+            seekInput.Value = 23.456m; Call(editor, "PollPlayback");
+            if (seekInput.Value != 23.456m) throw new Exception("Playback polling must not overwrite an exact time being entered.");
+            Call(editor, "SeekTo", -1d);
+            if (requestedSeek != 0) throw new Exception("Seek must clamp at zero.");
             Call(editor, "SeekTo", 105d);
             if (requestedSeek != 100000) throw new Exception("Editor seeks must clamp to song length.");
             position = null; Call(editor, "PollPlayback");
-            if (((PartyTimeline)Field(editor, "_timeline")).Enabled) throw new Exception("Another song must disable navigation.");
+            if (((PartyTimeline)Field(editor, "_timeline")).Enabled || seekInput.Enabled || ((Button)Field(editor, "_seekExact")).Enabled) throw new Exception("Another song must disable navigation.");
             Call(editor, "SeekTo", 20d);
             if (requestedSeek != 100000) throw new Exception("Navigation must not seek the new song.");
             Call(editor, "SaveMap");
             if (last.TrackUrl != "original") throw new Exception("Save must stay attached to the original song.");
+            editor.Opacity = 0; editor.Show(); Application.DoEvents();
+            foreach (var column in new[] { 3, 6 })
+            {
+                grid.CurrentCell = grid.Rows[0].Cells[0];
+                grid.CurrentCell = grid.Rows[1].Cells[column];
+                typeof(DataGridView).GetMethod("OnCellClick", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(grid, new object[] { new DataGridViewCellEventArgs(column, 1) });
+                Application.DoEvents();
+                var combo = grid.EditingControl as ComboBox;
+                if (combo == null || !combo.DroppedDown) throw new Exception("One click must open each tempo-map dropdown.");
+                combo.DroppedDown = false; grid.EndEdit();
+            }
+            if ((bool)Field(editor, "_dirty")) throw new Exception("Opening dropdowns without changes must not dirty the map.");
+            position = 10; Call(editor, "PollPlayback");
+            var step = (NumericUpDown)Field(editor, "_seekStep");
+            if (step.Value != 0.1m || step.Minimum != 0.01m || step.Maximum != 5) throw new Exception("Seek step must offer useful fine and coarse values.");
+            step.Value = 0.01m;
+            Call(editor, "SeekTo", 10d);
+            ((Button)Field(editor, "_forward")).PerformClick();
+            if (requestedSeek != 10010) throw new Exception("Forward button must use the selected fine step.");
+            ((Button)Field(editor, "_back")).PerformClick();
+            if (requestedSeek != 10000) throw new Exception("Backward button must use the selected fine step.");
+            seekInput.Value = 12.345m;
+            ((Button)Field(editor, "_seekExact")).PerformClick();
+            if (requestedSeek != 12345) throw new Exception("Exact seek button must use the entered time.");
+            editor.Hide();
         }
         Console.WriteLine("Timeline seek, section selection, repeat-save and track-change checks passed.");
     }
