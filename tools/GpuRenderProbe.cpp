@@ -9,7 +9,10 @@
 #include <cstdio>
 #include <initializer_list>
 using Microsoft::WRL::ComPtr;
-static void Check(HRESULT hr) { if (FAILED(hr)) throw hr; }
+static void CheckResult(HRESULT hr, const char* step) {
+    if (FAILED(hr)) { std::printf("Failed operation: %s\n", step); throw hr; }
+}
+#define Check(expression) CheckResult((expression), #expression)
 int main()
 {
     HWND window = nullptr;
@@ -62,9 +65,9 @@ int main()
                 const wchar_t* lyric = L"GPU lyrics rendering prototype\nCurrent and upcoming lyrics";
                 target->DrawText(lyric, (UINT32)wcslen(lyric), text.Get(),
                     D2D1::RectF(100,height * .3f,width - 100.f,height * .7f), brush.Get());
+                if (frame == 119) Check(target->Flush());
                 Check(target->EndDraw());
             }
-            Check(target->Flush());
             std::printf("Hardware Direct2D/DirectWrite: %ux%u, 120 off-screen frames passed.\n", width, height);
         }
         std::puts("Feasibility check only; no presentation/frame-rate claim. Plugin unchanged by this probe.");
