@@ -28,18 +28,22 @@ namespace MusicBeePlugin
         // Customed
         private volatile SettingsObj _settings;
         private volatile IDesktopLyricsView _frmLyrics;
+        private LyricsWindowThread _windowThread;
+        private Control _musicBeeControl;
+        private volatile bool _closing;
         private ToolStripMenuItem _visibilityMenuItem;
         private readonly PlaybackHistory _history = new PlaybackHistory();
         private Timer _timer;
-        private System.Windows.Forms.Timer _stopHideTimer;
         private LyricsController _lyricsCtrl;
         private EnglishTranslationStore _englishStore;
         private PartyTempoStore _partyTempoStore;
         private readonly object _lock = new object();
+        private readonly object _settingsSaveLock = new object();
         private DateTime _missingLyricsSinceUtc = DateTime.MinValue;
 
         public PluginInfo Initialise(IntPtr apiInterfacePtr)
         {
+            _closing = false;
             var versions = Assembly.GetExecutingAssembly().GetName().Version.ToString().Split('.');
 
             _mbApiInterface = new MusicBeeApiInterface();
@@ -76,7 +80,7 @@ namespace MusicBeePlugin
             {
                 var view = _frmLyrics;
                 if (view == null) return;
-                view.UpdateFromSettings(settings);
+                if (!view.Form.IsDisposed) view.Form.BeginInvoke(new Action(() => { if (!view.Form.IsDisposed) view.UpdateFromSettings(settings); }));
             };
             settingsForm.ShowDialog();
             SaveSettings(_settings);
@@ -84,16 +88,17 @@ namespace MusicBeePlugin
             _lyricsCtrl.NextLineWhenNoTranslation = _settings.NextLineWhenNoTranslation;
             _lyricsCtrl.ShowTranslation = _settings.ShowTranslation;
             var activeView = _frmLyrics;
-            activeView?.Form.Invoke(new Action(() =>
+            activeView?.Form.BeginInvoke(new Action(() =>
             {
-                activeView.UpdateFromSettings(_settings);
+                if (!activeView.Form.IsDisposed) activeView.UpdateFromSettings(_settings);
             }));
             return true;
         }
 
         private void SaveSettings(SettingsObj settings)
         {
-            File.WriteAllText(SettingsPath, JsonConvert.SerializeObject(settings));
+            lock (_settingsSaveLock)
+                File.WriteAllText(SettingsPath, JsonConvert.SerializeObject(settings));
         }
 
         public void SaveSettings()
@@ -105,15 +110,11 @@ namespace MusicBeePlugin
         // ReSharper disable once UnusedParameter.Global
         public void Close(PluginCloseReason reason)
         {
+            _closing = true;
             _timer?.Stop();
-            var view = _frmLyrics;
-            view?.Form.Invoke(new Action(() =>
-            {
-                _stopHideTimer?.Dispose();
-                _stopHideTimer = null;
-                _frmLyrics = null;
-                view.Form.Dispose();
-            }));
+            _frmLyrics = null;
+            _windowThread?.Dispose();
+            _windowThread = null;
             SaveSettings(_settings);
         }
         
@@ -293,34 +294,7 @@ namespace MusicBeePlugin
             view.Form.BeginInvoke(new Action(() =>
             {
                 if (!ReferenceEquals(view, _frmLyrics) || view.Form.IsDisposed) return;
-                if (state == PlayState.Stopped)
-                {
-                    if (_stopHideTimer == null)
-                    {
-                        _stopHideTimer = new System.Windows.Forms.Timer { Interval = 1200 };
-                        _stopHideTimer.Tick += (sender, args) =>
-                        {
-                            _stopHideTimer.Stop();
-                            var active = _frmLyrics;
-                            try
-                            {
-                                if (_settings.AutoHide && active != null &&
-                                    !active.Form.IsDisposed &&
-                                    _mbApiInterface.Player_GetPlayState() == PlayState.Stopped &&
-                                    !(active is FrmLyricsWindow compact && compact.IsAtEndOfQueue))
-                                    active.Form.Hide();
-                            }
-                            catch (Exception e) { _mbApiInterface.MB_Trace(e.ToString()); }
-                        };
-                    }
-                    _stopHideTimer.Stop();
-                    _stopHideTimer.Start();
-                }
-                else if (state == PlayState.Playing)
-                {
-                    _stopHideTimer?.Stop();
-                    view.Form.Show();
-                }
+                if (view is FrmLyricsWindow window) window.UpdatePlaybackVisibility(state);
             }));
         }
 
@@ -351,7 +325,8 @@ namespace MusicBeePlugin
                 else
                 {
                     _frmLyrics = null;
-                    view.Form.Dispose();
+                    _windowThread?.Dispose();
+                    _windowThread = null;
                     _visibilityMenuItem.Checked = false;
                     _settings.HideOnStartup = true;
                     SaveSettings(_settings);
@@ -377,38 +352,46 @@ namespace MusicBeePlugin
             SaveSettings(_settings);
         }
 
+        private void PostToMusicBee(Action action)
+        {
+            var main = _musicBeeControl;
+            if (_closing || main == null || main.IsDisposed) throw new ObjectDisposedException("MusicBee");
+            if (main.InvokeRequired) main.BeginInvoke(action); else action();
+        }
+
         private void StartupForm()
         {
-            var f = (Form)Control.FromHandle(_mbApiInterface.MB_GetWindowHandle());
-            f.Invoke(new Action(() =>
+            if (_closing) return;
+            _musicBeeControl = Control.FromHandle(_mbApiInterface.MB_GetWindowHandle());
+            var host = new LyricsWindowThread();
+            _windowThread?.Dispose();
+            _windowThread = host;
+            _frmLyrics = null;
+            host.Start(() => new FrmLyricsWindow(_settings,
+                _mbApiInterface, _history, WindowSettingsChanged,
+                () => PostToMusicBee(() => Configure(IntPtr.Zero)), PreviewTimingLyrics,
+                CancelTimingPreview, TimingLyricsSaved, _englishStore,
+                ImportedEnglishSaved, _partyTempoStore, PostToMusicBee), form =>
             {
-                var previous = _frmLyrics;
-                _frmLyrics = null;
-                previous?.Form.Dispose();
-                var view = (IDesktopLyricsView)new FrmLyricsWindow(_settings,
-                    _mbApiInterface, _history, WindowSettingsChanged,
-                    () => Configure(IntPtr.Zero), PreviewTimingLyrics,
-                    CancelTimingPreview, TimingLyricsSaved, _englishStore,
-                    ImportedEnglishSaved, _partyTempoStore);
+                if (_closing || !ReferenceEquals(_windowThread, host)) { host.Dispose(); return; }
+                var view = (IDesktopLyricsView)form;
                 _frmLyrics = view;
-                view.Form.FormClosed += (sender, args) =>
+                form.FormClosed += (sender, args) =>
                 {
-                    if (args.CloseReason != CloseReason.UserClosing || !ReferenceEquals(_frmLyrics, view)) return;
+                    if (!ReferenceEquals(_frmLyrics, view)) return;
                     _frmLyrics = null;
-                    _stopHideTimer?.Stop();
-                    if (_visibilityMenuItem != null) _visibilityMenuItem.Checked = false;
-                    // X closes this instance; the next MusicBee launch restores it.
+                    if (!_closing) PostToMusicBee(() =>
+                    {
+                        if (_frmLyrics == null && _visibilityMenuItem != null) _visibilityMenuItem.Checked = false;
+                    });
                 };
-                view.Form.Show();
-                try
-                {
-                    UpdateLyrics(force: true);
-                }
-                catch (Exception e)
-                {
-                    _mbApiInterface.MB_Trace(e.ToString());
-                }
-            }));
+                try { UpdateLyrics(force: true); }
+                catch (Exception ex) { _mbApiInterface.MB_Trace(ex.ToString()); }
+            }, ex =>
+            {
+                if (ReferenceEquals(_windowThread, host)) _frmLyrics = null;
+                if (!_closing) _mbApiInterface.MB_Trace("Desktop Lyrics UI: " + ex);
+            });
         }
 
         private void WindowSettingsChanged(SettingsObj settings)
@@ -454,7 +437,7 @@ namespace MusicBeePlugin
             {
                 _mbApiInterface.MB_Trace(e.ToString());
             }
-            ((Timer) sender).Start();
+            if (!_closing) ((Timer) sender).Start();
         }
 
         private string _line1, _line2, _nextLine;

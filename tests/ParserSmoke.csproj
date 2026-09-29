@@ -48,6 +48,10 @@
     <Compile Include="..\LrcLibClient.cs"><Link>LrcLibClient.cs</Link></Compile>
     <Compile Include="..\ImportedLyricsTagStore.cs"><Link>ImportedLyricsTagStore.cs</Link></Compile>
     <Compile Include="..\FrmLrcLibPicker.cs"><Link>FrmLrcLibPicker.cs</Link></Compile>
+    <Compile Include="..\PlaybackSnapshotReader.cs" />
+    <Compile Include="..\LyricsWindowThread.cs" />
+    <Compile Include="AsyncPlaybackChecks.cs" />
+    <Compile Include="RampShortcutChecks.cs" />
     <Compile Include="BpmLookupChecks.cs" />
     <Compile Include="TempoMapChecks.cs" />
     <Compile Include="RhythmChecks.cs" />

@@ -143,3 +143,9 @@ Maximised lyrics and pause animation (1.15.42):
 - On sufficiently large maximised windows, larger artwork sits at the upper-left of the centre area and the queue sits at the upper-right. Lyrics use the wider space below, while dancers retain their existing positions.
 - The current lyric uses a larger font and measured row spacing. English and upcoming lyrics have smaller visual emphasis; preview size is capped relative to the fitted current line, so short previews do not overpower long current lyrics. Transition endpoints keep stable text layouts as the lyric card resizes.
 - Smaller/restored windows keep their compact layout. Selectable accent beats and GPU integration remain planned.
+
+
+Playback responsiveness and destination ramps (1.15.43):
+- The lyrics window has its own STA message loop. Playback state, position and spectrum are sampled by one background reader; rendering no longer runs on MusicBee's UI thread. Pause feedback releases the spectrum immediately while MusicBee handles the command; the bars keep falling even if that command is slow. Animation requests are capped at approximately 60 Hz. This is still the GDI+ renderer, not GPU acceleration.
+- In the tempo map, select the row containing the destination time and BPM, then click **Ramp to row** and **Save**. The preceding row becomes the ramp: its **From BPM** is the starting tempo, **BPM** the target, and **BPM ramp (s)** the exact gap between the rows. The selected row holds that target from its start. Dance, rhythm, speed and alignment remain attached to their row starts.
+- Example: row at 10 s has 120 BPM, row at 15.5 s has 90 BPM. Select the 15.5 s row and use Ramp to row: the preceding row ramps 120 to 90 over 5.5 s, reaching 90 at 15.5 s. A ramp can also begin at 0. Holds are excluded. Blank From BPM keeps the original forward-ramp behavior. Existing maps remain readable; edited maps save as version 3.

@@ -19,6 +19,10 @@ namespace MusicBeePlugin
         private const float QueueNoticeMs = 3200f;
         private readonly Plugin.MusicBeeApiInterface _musicBee;
         private readonly PlaybackHistory _history;
+        private readonly PlaybackSnapshotReader _playback;
+        private readonly Action<Action> _dispatchPlayerCommand;
+        private bool _playCommandPending;
+        private System.Windows.Forms.Timer _stopHideTimer;
         private readonly Action<SettingsObj> _settingsChanged;
         private readonly Action _openSettings;
         private readonly Action<string, string> _previewTiming, _savedTiming;
@@ -142,10 +146,13 @@ namespace MusicBeePlugin
             Action<SettingsObj> settingsChanged, Action openSettings,
             Action<string, string> previewTiming, Action<string> cancelTiming,
             Action<string, string> savedTiming, EnglishTranslationStore englishStore,
-            Action<string> englishSaved, PartyTempoStore partyTempoStore)
+            Action<string> englishSaved, PartyTempoStore partyTempoStore, Action<Action> dispatchPlayerCommand = null)
         {
             _settings = settings;
             _musicBee = musicBee;
+            _playback = new PlaybackSnapshotReader(musicBee);
+            _dispatchPlayerCommand = dispatchPlayerCommand ?? (action => System.Threading.ThreadPool.QueueUserWorkItem(_ => action()));
+            _playback.Request(false);
             _history = history;
             _settingsChanged = settingsChanged;
             _openSettings = openSettings;
@@ -180,7 +187,7 @@ namespace MusicBeePlugin
                 Location = new Point(workArea.Left + (workArea.Width - Width) / 2,
                                      workArea.Bottom - Height - 70);
 
-            _animationTimer = new System.Windows.Forms.Timer { Interval = 8 };
+            _animationTimer = new System.Windows.Forms.Timer { Interval = 16 };
             _animationTimer.Tick += AnimationClockTick;
             ApplyTransparency();
             Shown += (sender, args) =>
@@ -284,6 +291,7 @@ namespace MusicBeePlugin
             if (_lastSpectrumSample == 0 ||
                 (now - _lastSpectrumSample) * 1000.0 / Stopwatch.Frequency >= 30)
             {
+                _playback.Request((_settings.ShowVisualizer && !_settings.TransparentCanvas) || _settings.PartyMode);
                 if ((_settings.ShowVisualizer && !_settings.TransparentCanvas) ||
                     (_settings.PartyMode && _partyBpm == 0 &&
                      _partyBeat.Bpm == 0 && !PartyOnlineEnabled))
@@ -302,7 +310,7 @@ namespace MusicBeePlugin
                 UpdatePartyDancers();
                 _lastPartyUpdate = now;
             }
-            if (_settings.ShowSongQueue &&
+            if (!_playCommandPending && _settings.ShowSongQueue &&
                 (_lastQueueCheck == 0 ||
                  (now - _lastQueueCheck) * 1000.0 / Stopwatch.Frequency >= 12000))
                 RefreshQueue();
@@ -466,15 +474,37 @@ namespace MusicBeePlugin
             public override Color CheckSelectedBackground => Color.FromArgb(84, 94, 138);
         }
 
+        internal void UpdatePlaybackVisibility(Plugin.PlayState state)
+        {
+            if (state == Plugin.PlayState.Stopped)
+            {
+                if (_stopHideTimer == null)
+                {
+                    _stopHideTimer = new System.Windows.Forms.Timer { Interval = 1200 };
+                    _stopHideTimer.Tick += (sender, args) =>
+                    {
+                        _stopHideTimer.Stop();
+                        if (_settings.AutoHide && _playback.Latest.State == Plugin.PlayState.Stopped && !IsAtEndOfQueue)
+                            Hide();
+                    };
+                }
+                _stopHideTimer.Stop(); _stopHideTimer.Start();
+            }
+            else if (state == Plugin.PlayState.Playing)
+            {
+                _stopHideTimer?.Stop(); Show();
+            }
+        }
+
         private void RefreshPlayState()
         {
             try
             {
-                var reported = _musicBee.Player_GetPlayState();
+                var reported = _playback.Latest.State;
                 if (_requestedPlayState.HasValue)
                 {
-                    if (reported == _requestedPlayState.Value ||
-                        (Stopwatch.GetTimestamp() - _playStateRequestedAt) * 1000d / Stopwatch.Frequency >= 750)
+                    if (!_playCommandPending && (reported == _requestedPlayState.Value ||
+                        (Stopwatch.GetTimestamp() - _playStateRequestedAt) * 1000d / Stopwatch.Frequency >= 750))
                         _requestedPlayState = null;
                     else reported = _requestedPlayState.Value;
                 }
@@ -493,26 +523,39 @@ namespace MusicBeePlugin
 
         private void TogglePlayback()
         {
+            if (_playCommandPending) return;
             RefreshPlayState();
             var before = _playState;
             _requestedPlayState = before == Plugin.PlayState.Playing ? Plugin.PlayState.Paused : Plugin.PlayState.Playing;
             _playStateRequestedAt = Stopwatch.GetTimestamp();
             _playState = _requestedPlayState.Value;
+            _playCommandPending = true;
             if (_playState != Plugin.PlayState.Playing) ReleaseSpectrum();
-            Invalidate(); Update(); // Show the click before MusicBee processes its command.
+            Invalidate();
+            Action<bool> complete = accepted =>
+            {
+                if (IsDisposed || !IsHandleCreated) return;
+                try { BeginInvoke(new Action(() =>
+                {
+                    if (IsDisposed) return;
+                    _playCommandPending = false;
+                    _playStateRequestedAt = Stopwatch.GetTimestamp();
+                    if (!accepted) { _requestedPlayState = null; _playState = before; }
+                    _playback.Request(true);
+                    Invalidate();
+                })); } catch (InvalidOperationException) { }
+            };
             try
             {
-                if (!_musicBee.Player_PlayPause())
+                _dispatchPlayerCommand(() =>
                 {
-                    _requestedPlayState = null; _playState = before;
-                }
+                    var accepted = false;
+                    try { accepted = _musicBee.Player_PlayPause(); }
+                    catch (Exception) { }
+                    complete(accepted);
+                });
             }
-            catch
-            {
-                _requestedPlayState = null; _playState = before;
-                Invalidate(); throw;
-            }
-            RefreshPlayState(); Invalidate();
+            catch (Exception) { complete(false); }
         }
 
         private void LoadPartyTempo(string trackUrl)
@@ -765,7 +808,7 @@ namespace MusicBeePlugin
         {
             var track = _artworkTrackUrl;
             if (string.IsNullOrWhiteSpace(track)) return;
-            Func<bool> editingCurrentSong = () => _musicBee.NowPlaying_GetFileUrl?.Invoke() == track;
+            Func<bool> editingCurrentSong = () => _playback.Latest.TrackUrl == track;
             var bpm = _partyBpm > 0 ? _partyBpm : _partyBeat.Bpm > 0 ? _partyBeat.Bpm : 120;
             var origin = _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs;
             var map = _partyTempoStore.LoadMap(track) ?? new PartyTempoMap { TrackUrl = track,
@@ -775,7 +818,8 @@ namespace MusicBeePlugin
                 () => editingCurrentSong() ? (double?)ReadPartyPosition(Stopwatch.GetTimestamp()) / 1000 : null,
                 position =>
                 {
-                    if (!editingCurrentSong()) throw new InvalidOperationException("Play the song being edited first.");
+                    if (!editingCurrentSong() || _musicBee.NowPlaying_GetFileUrl?.Invoke() != track)
+                        throw new InvalidOperationException("Play the song being edited first.");
                     if (position < 0 || position > (_musicBee.NowPlaying_GetDuration?.Invoke() ?? int.MaxValue))
                         throw new ArgumentException("The selected start is outside this song.");
                     _musicBee.Player_SetPosition(position);
@@ -792,9 +836,10 @@ namespace MusicBeePlugin
                 }, (_musicBee.NowPlaying_GetDuration?.Invoke() ?? 0) / 1000d,
                 () =>
                 {
-                    if (!editingCurrentSong()) throw new InvalidOperationException("Play the song being edited first.");
+                    if (!editingCurrentSong() || _musicBee.NowPlaying_GetFileUrl?.Invoke() != track)
+                        throw new InvalidOperationException("Play the song being edited first.");
                     TogglePlayback();
-                }, () => _musicBee.Player_GetPlayState() == Plugin.PlayState.Playing)) editor.ShowDialog(this);
+                }, () => _playState == Plugin.PlayState.Playing)) editor.ShowDialog(this);
         }
 
         private void OpenPartyTempoEditor()
@@ -1094,7 +1139,7 @@ namespace MusicBeePlugin
 
         private int ReadPartyPosition(long timestamp)
         {
-            var rawPosition = Math.Max(0, _musicBee.Player_GetPosition());
+            var rawPosition = Math.Max(0, _playback.Latest.Position);
             return _partyClock.PositionAt(rawPosition, timestamp,
                 Stopwatch.Frequency, _playState == Plugin.PlayState.Playing);
         }
@@ -1393,18 +1438,10 @@ namespace MusicBeePlugin
 
         private void SampleSpectrum()
         {
-            var count = 0;
-            try
-            {
-                RefreshPlayState();
-                if (_playState == Plugin.PlayState.Playing &&
-                    _musicBee.NowPlaying_GetSpectrumData != null)
-                    count = _musicBee.NowPlaying_GetSpectrumData(_fft);
-            }
-            catch (Exception)
-            {
-                // A missing audio stream should leave the lyrics window usable.
-            }
+            RefreshPlayState();
+            var sample = _playback.Latest;
+            var count = _playState == Plugin.PlayState.Playing ? sample.Count : 0;
+            if (count > 0) Array.Copy(sample.Spectrum, _fft, count);
 
             var validCount = Math.Min(Math.Max(0, count), _fft.Length);
             var upperBin = Math.Min(validCount / 2, 1024);
@@ -1433,7 +1470,7 @@ namespace MusicBeePlugin
                 }
                 try
                 {
-                    _partyBeat.Observe(_musicBee.Player_GetPosition(), bassEnergy);
+                    _partyBeat.Observe(_playback.Latest.Position, bassEnergy);
                     if (_partyBeat.Bpm > 0 && !string.IsNullOrWhiteSpace(_artworkTrackUrl))
                         _partyTempoStore.Save(_artworkTrackUrl, _partyBeat.Bpm,
                             _partyBeat.OriginMs, false);
@@ -2966,6 +3003,8 @@ namespace MusicBeePlugin
                 CancelPartyLookup();
                 Interlocked.Increment(ref _artworkRequestId);
                 _animationTimer?.Dispose();
+                _playback?.Dispose();
+                _stopHideTimer?.Dispose();
                 DisposePartyDancers();
                 _albumArtwork?.Dispose();
                 _backgroundCache?.Dispose();
