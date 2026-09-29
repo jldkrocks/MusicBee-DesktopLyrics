@@ -63,6 +63,10 @@ namespace MusicBeePlugin
         private readonly PartyPlaybackClock _partyClock = new PartyPlaybackClock();
         private double _partyBpm, _partyTagBpm;
         private int _partyOriginMs;
+        // A dialog preview overrides drawing only; saved/live tempo stays intact.
+        private string _partyPreviewTrackUrl;
+        private double _partyPreviewBpm;
+        private int _partyPreviewOriginMs;
         private PartyTempoSource _partyTempoSource;
         private string _partyApiKey, _songAlbum = "", _lastOnlineAttemptTrack,
             _partyLookupError, _partyLookupDetail;
@@ -655,13 +659,13 @@ namespace MusicBeePlugin
                 var bpmInput = new NumericUpDown
                 {
                     Minimum = 40, Maximum = 240, DecimalPlaces = 1,
-                    Increment = 1, Value = (decimal)Math.Round(
+                    Increment = 0.1m, Value = (decimal)Math.Round(
                         Math.Max(40, Math.Min(240, currentBpm)), 1),
                     Bounds = new Rectangle(82, 43, 100, 26)
                 };
                 var syncBeat = new Button
                 {
-                    Text = "Sync pose on beat",
+                    Text = "Align to this beat",
                     Bounds = new Rectangle(190, 43, 154, 28)
                 };
                 var tapButton = new Button
@@ -675,7 +679,7 @@ namespace MusicBeePlugin
                 };
                 var explanation = new Label
                 {
-                    Text = "Save uses the last tap to align the raised-arm pose. For a typed BPM, click Sync on a beat. Only Desktop Lyrics stores this timing.",
+                    Text = "Click Align as you hear a beat to preview the raised-arm pose timing. Save keeps it for this song; Cancel discards the preview.",
                     Bounds = new Rectangle(16, 163, 328, 46)
                 };
                 var forget = new Button
@@ -693,6 +697,18 @@ namespace MusicBeePlugin
                     Text = "Save", DialogResult = DialogResult.OK,
                     Bounds = new Rectangle(270, 215, 74, 28)
                 };
+                Action previewBeat = () =>
+                {
+                    if (!tappedBeat.HasValue || _artworkTrackUrl != trackUrl) return;
+                    _partyPreviewBpm = (double)bpmInput.Value;
+                    _partyPreviewOriginMs = PartyAnimation.OriginForBeat(
+                        tappedBeat.Value, _partyPreviewBpm);
+                    _partyPreviewTrackUrl = trackUrl;
+                    tapStatus.Text = "Previewing alignment — Save to keep";
+                    _lastPartyUpdate = 0;
+                    UpdatePartyDancers();
+                };
+                bpmInput.ValueChanged += (sender, args) => previewBeat();
                 tapButton.Click += (sender, args) =>
                 {
                     // Record the clock before calling MusicBee so the spacing
@@ -707,15 +723,17 @@ namespace MusicBeePlugin
                         if (!tapTempo.Tap(timestamp, Stopwatch.Frequency,
                                 out estimatedBpm)) return;
                         tappedBeat = position;
-                        syncBeat.Text = "Beat captured";
                         if (estimatedBpm > 0)
                         {
                             bpmInput.Value = (decimal)Math.Round(estimatedBpm, 1);
                             tapStatus.Text = tapTempo.TapCount + " taps · " +
                                 estimatedBpm.ToString("0.0", CultureInfo.InvariantCulture) +
-                                " BPM — Save to apply";
+                                " BPM — Save to keep preview";
                         }
-                        else tapStatus.Text = "First tap captured. Keep tapping...";
+                        else tapStatus.Text = "Previewing first tap. Keep tapping...";
+                        var status = tapStatus.Text;
+                        previewBeat();
+                        tapStatus.Text = status;
                     }
                     catch (Exception ex)
                     {
@@ -730,7 +748,7 @@ namespace MusicBeePlugin
                         if (_musicBee.NowPlaying_GetFileUrl() != trackUrl)
                             throw new InvalidOperationException("The song changed.");
                         tappedBeat = ReadPartyPosition(Stopwatch.GetTimestamp());
-                        syncBeat.Text = "Beat captured";
+                        previewBeat();
                     }
                     catch (Exception ex)
                     {
@@ -744,7 +762,14 @@ namespace MusicBeePlugin
                         explanation, forget, cancel, save });
                 dialog.AcceptButton = save;
                 dialog.CancelButton = cancel;
-                var result = dialog.ShowDialog(this);
+                DialogResult result;
+                try { result = dialog.ShowDialog(this); }
+                finally
+                {
+                    _partyPreviewTrackUrl = null;
+                    _lastPartyUpdate = 0;
+                    UpdatePartyDancers();
+                }
                 if (result != DialogResult.OK && result != DialogResult.No) return;
                 try
                 {
@@ -821,8 +846,14 @@ namespace MusicBeePlugin
                 var position = ReadPartyPosition(Stopwatch.GetTimestamp());
                 var detectedBpm = _partyBpm == 0 ? _partyBeat.Bpm : 0;
                 var bpm = _partyBpm > 0 ? _partyBpm : detectedBpm;
-                var phasePosition = PartyAnimation.DisplayPhaseAt(position,
-                    _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs, bpm);
+                var origin = _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs;
+                if (_partyPreviewTrackUrl != null &&
+                    _partyPreviewTrackUrl == _artworkTrackUrl)
+                {
+                    bpm = _partyPreviewBpm;
+                    origin = _partyPreviewOriginMs;
+                }
+                var phasePosition = PartyAnimation.DisplayPhaseAt(position, origin, bpm);
                 var frame = PartyAnimation.FrameAt(phasePosition, bpm);
                 var impact = PartyAnimation.SideImpactAt(phasePosition, bpm) +
                     PartyAnimation.CentreImpactAt(phasePosition, bpm);
@@ -957,6 +988,7 @@ namespace MusicBeePlugin
                 catch (Exception) { _partyTagBpm = 0; }
                 _partyBeat.Reset();
                 _partyClock.Reset();
+                _partyPreviewTrackUrl = null;
                 LoadPartyTempo(trackUrl);
                 _partySpectrumMisses = 0;
                 _lastPartyUpdate = 0;
