@@ -13,6 +13,8 @@ namespace MusicBeePlugin
         public double RampSeconds;
         public PartyDanceStyle Style;
         public PartyRhythm Rhythm;
+        public double Speed = 1;
+        internal double EffectiveSpeed => Style == PartyDanceStyle.HalfSpeed ? 0.5 : Speed;
         public double SwingPercent = 66.67;
         public bool AlignBeat;
         public bool CountIn;
@@ -28,7 +30,7 @@ namespace MusicBeePlugin
 
         internal void Validate()
         {
-            if (Version != 1 || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
+            if ((Version != 1 && Version != 2) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
                 Sections.Count == 0 || Sections.Count > 500 || !Finite(InitialBeat))
                 throw new ArgumentException("The map needs a song and 1-500 sections.");
             double previous = -1;
@@ -42,15 +44,17 @@ namespace MusicBeePlugin
                     !Enum.IsDefined(typeof(PartyDanceStyle), s.Style) ||
                     !Enum.IsDefined(typeof(PartyRhythm), s.Rhythm))
                     throw new ArgumentException("Use increasing start times, BPM 40-240, nonnegative ramps and a listed dance/rhythm.");
+                if (s.Speed != 0.5 && s.Speed != 1 && s.Speed != 2)
+                    throw new ArgumentException("Choose Half, Normal or Double dance speed.");
                 if (!Finite(s.SwingPercent) || s.SwingPercent < 50 || s.SwingPercent > 75)
                     throw new ArgumentException("Swing % must be between 50 (even) and 75 (strong swing).");
                 if (i == 0 && (s.StartSeconds != 0 || s.RampSeconds != 0))
                     throw new ArgumentException("The first section must start at 0 with no ramp.");
                 if (s.Style == PartyDanceStyle.Hold && (s.RampSeconds != 0 || s.AlignBeat))
                     throw new ArgumentException("Hold sections cannot have tempo ramps or beat alignment.");
-                if (s.CountIn && (i == 0 || s.Style != PartyDanceStyle.Normal ||
-                    Sections[i - 1].Style != PartyDanceStyle.HalfSpeed))
-                    throw new ArgumentException("Count-in belongs on a Normal row immediately after Half speed. It adds up to four lead-in bobs and a final bop on the return beat.");
+                if (s.CountIn && (i == 0 || s.Style == PartyDanceStyle.Hold || s.EffectiveSpeed != 1 ||
+                    Sections[i - 1].Style == PartyDanceStyle.Hold || Sections[i - 1].EffectiveSpeed != 0.5))
+                    throw new ArgumentException("Count-in belongs on a Normal-speed row immediately after Half speed (neither may Hold). It adds up to four lead-in bobs and a final bop on the return beat.");
                 if (i + 1 < Sections.Count && Sections[i + 1] != null &&
                     s.RampSeconds > Sections[i + 1].StartSeconds - s.StartSeconds)
                     throw new ArgumentException("A ramp must finish before the next section.");
@@ -69,6 +73,7 @@ namespace MusicBeePlugin
             var style = PartyDanceStyle.Normal;
             var rhythm = PartyRhythm.Straight;
             var swingPercent = 66.67;
+            var speed = 1d;
             seconds = Math.Max(0, seconds);
             for (var i = 0; i < Sections.Count; i++)
             {
@@ -84,18 +89,19 @@ namespace MusicBeePlugin
                 if (!held)
                 {
                     style = section.Style;
+                    speed = section.EffectiveSpeed;
                     rhythm = section.Rhythm;
                     swingPercent = section.SwingPercent;
                     var ramp = section.RampSeconds;
                     var beats = IntegratedBeats(sectionStartTempo, section, elapsed);
-                    beat += beats * (style == PartyDanceStyle.HalfSpeed ? 0.5 : 1);
+                    beat += beats * speed;
                     tempo = ramp > 0 && elapsed < ramp ?
                         tempo + (section.Bpm - tempo) * elapsed / ramp : section.Bpm;
                 }
                 if (seconds < end || i == Sections.Count - 1)
                 {
-                    var pose = MakePose(beat, tempo, style, rhythm, swingPercent, held);
-                    if (!held && style == PartyDanceStyle.HalfSpeed && i + 1 < Sections.Count && Sections[i + 1].CountIn)
+                    var pose = MakePose(beat, tempo, style, rhythm, swingPercent, speed, held);
+                    if (!held && speed == 0.5 && i + 1 < Sections.Count && Sections[i + 1].CountIn)
                     {
                         var endBeat = sectionStartBeat + IntegratedBeats(sectionStartTempo, section,
                             end - section.StartSeconds) * 0.5;
@@ -105,12 +111,12 @@ namespace MusicBeePlugin
                         var cuePhase = endBeat - (end - seconds) * incomingBpm / 60;
                         ApplyCountIn(ref pose, section, incoming, endBeat, cuePhase);
                     }
-                    else if (!held && section.CountIn && i > 0 && Sections[i - 1].Style == PartyDanceStyle.HalfSpeed)
+                    else if (!held && section.CountIn && i > 0 && Sections[i - 1].EffectiveSpeed == 0.5)
                         ApplyCountIn(ref pose, Sections[i - 1], section, sectionStartBeat, beat);
                     return pose;
                 }
             }
-            return MakePose(beat, tempo, style, rhythm, swingPercent, false);
+            return MakePose(beat, tempo, style, rhythm, swingPercent, speed, false);
         }
 
         private static double AlignedBeat(double beat, PartyTempoSection section)
@@ -137,7 +143,7 @@ namespace MusicBeePlugin
         private static void ApplyCountIn(ref PartyMapPose pose, PartyTempoSection previous,
             PartyTempoSection next, double endBeat, double phase)
         {
-            if (next.Style != PartyDanceStyle.Normal) return;
+            if (next.Style == PartyDanceStyle.Hold || next.EffectiveSpeed != 1) return;
             // A BPM ramp begins at the preceding tempo, not at its final target.
             var incomingBpm = next.RampSeconds > 0 ? previous.Bpm : next.Bpm;
             var period = 60 / incomingBpm;
@@ -175,7 +181,7 @@ namespace MusicBeePlugin
 
         private static readonly int[] AccentFourFrames = { 3, 3, 3, 0, 9, 9, 9, 6 };
 
-        private static PartyMapPose MakePose(double beat, double bpm, PartyDanceStyle style, PartyRhythm rhythm, double swingPercent, bool held)
+        private static PartyMapPose MakePose(double beat, double bpm, PartyDanceStyle style, PartyRhythm rhythm, double swingPercent, double speed, bool held)
         {
             var waltz = rhythm == PartyRhythm.Waltz;
             var swing = rhythm == PartyRhythm.Swing;
@@ -183,7 +189,7 @@ namespace MusicBeePlugin
             var cycle = accentFour ? 8 : waltz ? 6 : 4;
             var phase = (beat % cycle + cycle) % cycle;
             var slot = (int)Math.Floor(phase + 1e-9) % cycle;
-            var effective = bpm * (style == PartyDanceStyle.HalfSpeed ? 0.5 : 1);
+            var effective = bpm * speed;
             var fraction = phase - Math.Floor(phase + 1e-9);
             fraction = Math.Max(0, fraction);
             var sideOnly = style == PartyDanceStyle.SideToSide;

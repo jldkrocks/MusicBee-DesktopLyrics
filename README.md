@@ -129,3 +129,11 @@ MusicBee 中歌曲关联的歌词必须为 LRC 格式的同步歌词。支持 `o
 ![](https://i.imgur.com/KnHdZzI.png)
 
 Tempo-map precision controls: choose a **Step (s)** from 0.01 to 5 (default 0.10), then use **- step / + step**. Or enter an exact **Seek to (s)** value with three decimal places and press Seek/Enter. These seek playback without moving section markers; edit a row's Start (s) to move its boundary. Pause when placing precise boundaries. **Align uses that row's Start time**, not the time you click Align or Save. Save applies the edited map. Dance/Rhythm dropdowns open with one click. Playback seek accuracy still depends on MusicBee and the audio decoder.
+
+Window controls and dance speed (1.15.41):
+- The framed lyrics window has native minimise/maximise/close controls and a taskbar entry for restoring it. It stays on top while restored; minimising hides its dancers and stops its animation timer.
+- Tempo-map **Dance** chooses Normal, Side to side, or Hold pose. Separate **Speed** chooses Half (0.5x), Normal (1x), or Double (2x), with every rhythm supported. Speed multiplies dance timing without changing the song BPM. Holds remain still. Count-in can accompany a return from Half to Normal speed with either moving dance style.
+- Older Half speed rows load as Normal dance + Half speed, preserving their beat phase, ramps and count-in. Existing files are not rewritten on load; Save writes the updated map format (version 2).
+- Maximised Party Mode extends the song colours and spectrum behind both dancers; foreground layout and dancer positions are unchanged.
+- The compact Queue tab shares the top toolbar instead of overlapping lyrics. Its expanded list remains a temporary overlay.
+- Play/pause clicks update the icon and clear paused spectrum immediately, then reconcile with MusicBee's reported state. Rejected commands revert; a delayed report has a short grace period.

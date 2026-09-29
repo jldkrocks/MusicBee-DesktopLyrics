@@ -40,6 +40,9 @@ internal static class TimelineChecks
             if (saved != 1 || editor.IsDisposed || editor.DialogResult != DialogResult.None)
                 throw new Exception("Save must apply without closing the editor.");
             var grid = (DataGridView)Field(editor, "_grid");
+            if (Convert.ToString(grid.Rows[0].Cells[3].Value) != "Normal" || Convert.ToString(grid.Rows[0].Cells[8].Value) != "Half (0.5x)" ||
+                last.Sections[0].Style != PartyDanceStyle.Normal || last.Sections[0].Speed != 0.5 || last.Version != 2)
+                throw new Exception("Editor must preserve legacy Half speed as an independent speed choice.");
             if (!Convert.ToBoolean(grid.Rows[1].Cells[5].Value) || !last.Sections[1].CountIn)
                 throw new Exception("Editor must load and save the count-in checkbox.");
             if (Convert.ToString(grid.Rows[1].Cells[6].Value) != "Waltz (3/4)" || last.Sections[1].Rhythm != PartyRhythm.Waltz)
@@ -80,7 +83,7 @@ internal static class TimelineChecks
             Call(editor, "SaveMap");
             if (last.TrackUrl != "original") throw new Exception("Save must stay attached to the original song.");
             editor.Opacity = 0; editor.Show(); Application.DoEvents();
-            foreach (var column in new[] { 3, 6 })
+            foreach (var column in new[] { 3, 6, 8 })
             {
                 grid.CurrentCell = grid.Rows[0].Cells[0];
                 grid.CurrentCell = grid.Rows[1].Cells[column];
@@ -92,6 +95,11 @@ internal static class TimelineChecks
                 combo.DroppedDown = false; grid.EndEdit();
             }
             if ((bool)Field(editor, "_dirty")) throw new Exception("Opening dropdowns without changes must not dirty the map.");
+            grid.Rows[1].Cells[3].Value = "Side to side";
+            grid.Rows[1].Cells[8].Value = "Double (2x)";
+            Call(editor, "SaveMap");
+            if (last.Sections[1].Style != PartyDanceStyle.SideToSide || last.Sections[1].Speed != 2)
+                throw new Exception("Editor must save side-to-side at double speed independently.");
             position = 10; Call(editor, "PollPlayback");
             var step = (NumericUpDown)Field(editor, "_seekStep");
             if (step.Value != 0.1m || step.Minimum != 0.01m || step.Maximum != 5) throw new Exception("Seek step must offer useful fine and coarse values.");

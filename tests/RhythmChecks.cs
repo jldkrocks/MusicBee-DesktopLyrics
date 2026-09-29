@@ -9,6 +9,47 @@ internal static class RhythmChecks
 
     internal static void Run()
     {
+        // Speed is independent of the pose pattern and stored song BPM.
+        foreach (PartyRhythm rhythm in Enum.GetValues(typeof(PartyRhythm)))
+        foreach (var speed in new[] { 0.5, 1d, 2d })
+        {
+            var speedMap = new PartyTempoMap { Version = 2, TrackUrl = "speed-test" };
+            speedMap.Sections.Add(new PartyTempoSection { Bpm = 120, Style = PartyDanceStyle.SideToSide, Rhythm = rhythm, Speed = speed });
+            speedMap.Validate();
+            for (double t = 0; t < 4; t += 0.125)
+            {
+                var pose = speedMap.At(t);
+                Near(pose.Beat, t * 2 * speed, "Independent speed scales dance beats");
+                Near(pose.Bpm, 120, "Speed must not rewrite song BPM");
+                if (pose.Frame != 0 && pose.Frame != 6) throw new Exception("Side-only speed combinations must omit centre drawings.");
+            }
+            var loadedSpeed = JsonConvert.DeserializeObject<PartyTempoMap>(JsonConvert.SerializeObject(speedMap)); loadedSpeed.Validate();
+            Near(loadedSpeed.At(1.125).Beat, speedMap.At(1.125).Beat, "Speed persists across save/load");
+        }
+        var legacyHalf = new PartyTempoMap { TrackUrl = "legacy-half" };
+        legacyHalf.Sections.Add(new PartyTempoSection { Bpm = 123.45, Style = PartyDanceStyle.HalfSpeed, Rhythm = PartyRhythm.Swing });
+        legacyHalf.Sections.Add(new PartyTempoSection { StartSeconds = 10, Bpm = 135, RampSeconds = 2, CountIn = true });
+        var migrated = JsonConvert.DeserializeObject<PartyTempoMap>(JsonConvert.SerializeObject(legacyHalf));
+        migrated.Version = 2; migrated.Sections[0].Style = PartyDanceStyle.Normal; migrated.Sections[0].Speed = 0.5;
+        migrated.Validate();
+        for (double t = 0; t < 15; t += 0.037)
+        {
+            var oldPose = legacyHalf.At(t); var newPose = migrated.At(t);
+            if (oldPose.Frame != newPose.Frame) throw new Exception("Legacy half-speed poses must remain identical after migration.");
+            Near(newPose.Beat, oldPose.Beat, "Legacy half-speed phase preserved");
+            Near(newPose.Impact, oldPose.Impact, "Legacy count-in and bounce preserved");
+        }
+        migrated.Sections[0].Style = PartyDanceStyle.SideToSide;
+        migrated.Sections[1].Style = PartyDanceStyle.SideToSide; migrated.Validate();
+        Near(migrated.At(10).Beat, legacyHalf.At(10).Beat, "Side-only count-in preserves phase");
+        migrated.Sections[1].CountIn = false; migrated.Sections[1].Speed = 2;
+        Near(migrated.At(12).Beat - migrated.At(10).Beat, (123.45 + 135) / 60 * 2, "Double speed integrates the BPM ramp");
+        migrated.Sections.Add(new PartyTempoSection { StartSeconds = 13, Style = PartyDanceStyle.Hold });
+        if (!migrated.At(20).Held || migrated.At(20).Impact != 0 || migrated.At(20).Frame != migrated.At(13).Frame)
+            throw new Exception("Hold must freeze double-speed motion.");
+        migrated.Sections[0].Speed = 3;
+        bool badSpeed = false; try { migrated.Validate(); } catch (ArgumentException) { badSpeed = true; }
+        if (!badSpeed) throw new Exception("Unknown speeds must be rejected.");
         var four = new PartyTempoMap { TrackUrl = "accent-four-test" };
         var fourSection = new PartyTempoSection { Bpm = 120, Rhythm = PartyRhythm.AccentFour };
         four.Sections.Add(fourSection); four.Validate();

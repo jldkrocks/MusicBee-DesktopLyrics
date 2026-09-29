@@ -57,7 +57,8 @@ namespace MusicBeePlugin
         private ArtworkPalette _cachedBackgroundPalette;
         private string _songTitle = "", _songArtist = "";
         private Plugin.PlayState _playState = Plugin.PlayState.Undefined;
-        private long _lastPlayStateCheck;
+        private long _lastPlayStateCheck, _playStateRequestedAt;
+        private Plugin.PlayState? _requestedPlayState;
         private Rectangle _previousButton, _playButton, _nextButton, _menuButton,
             _timingButton, _lrcButton, _backgroundButton, _partyButton, _resizeGrip;
         private PartyDancerWindow _leftDancer, _rightDancer;
@@ -157,9 +158,10 @@ namespace MusicBeePlugin
             _englishSaved = englishSaved;
             _useArtworkColors = settings.UseArtworkColors;
             Text = "Desktop Lyrics";
-            FormBorderStyle = FormBorderStyle.SizableToolWindow;
+            FormBorderStyle = FormBorderStyle.Sizable;
             BackColor = Color.FromArgb(13, 18, 32);
-            ShowInTaskbar = false;
+            ShowInTaskbar = true;
+            MinimizeBox = true;
             StartPosition = FormStartPosition.Manual;
             MinimumSize = new Size(420, 190);
             Size = new Size(Math.Max(420, settings.WindowWidth), Math.Max(190, settings.WindowHeight));
@@ -197,7 +199,13 @@ namespace MusicBeePlugin
                 UpdatePartyDancers();
             };
             LocationChanged += (sender, args) => { SaveBounds(); UpdatePartyDancers(); };
-            SizeChanged += (sender, args) => { SaveBounds(); UpdatePartyDancers(); };
+            SizeChanged += (sender, args) =>
+            {
+                TopMost = WindowState != FormWindowState.Minimized;
+                if (WindowState == FormWindowState.Minimized) _animationTimer.Stop();
+                else if (_loaded && Visible) StartAnimation();
+                SaveBounds(); UpdatePartyDancers();
+            };
             ResizeBegin += (sender, args) =>
             {
                 _movingOrResizing = true;
@@ -226,7 +234,7 @@ namespace MusicBeePlugin
             // blend with the key colour and acquire purple fringes.
             var clientSize = ClientSize;
             FormBorderStyle = _settings.TransparentCanvas ? FormBorderStyle.None :
-                FormBorderStyle.SizableToolWindow;
+                FormBorderStyle.Sizable;
             ClientSize = clientSize;
             TransparencyKey = _settings.TransparentCanvas ? ClearKey : Color.Empty;
             BackColor = _settings.TransparentCanvas ? ClearKey : Color.FromArgb(13, 18, 32);
@@ -460,8 +468,51 @@ namespace MusicBeePlugin
 
         private void RefreshPlayState()
         {
-            try { _playState = _musicBee.Player_GetPlayState(); }
-            catch (Exception) { _playState = Plugin.PlayState.Undefined; }
+            try
+            {
+                var reported = _musicBee.Player_GetPlayState();
+                if (_requestedPlayState.HasValue)
+                {
+                    if (reported == _requestedPlayState.Value ||
+                        (Stopwatch.GetTimestamp() - _playStateRequestedAt) * 1000d / Stopwatch.Frequency >= 750)
+                        _requestedPlayState = null;
+                    else reported = _requestedPlayState.Value;
+                }
+                _playState = reported;
+                if (_playState != Plugin.PlayState.Playing) ClearSpectrum();
+            }
+            catch (Exception) { _requestedPlayState = null; _playState = Plugin.PlayState.Undefined; }
+        }
+
+        private void ClearSpectrum()
+        {
+            Array.Clear(_bars, 0, _bars.Length);
+            Array.Clear(_targets, 0, _targets.Length);
+            Array.Clear(_levels, 0, _levels.Length);
+        }
+
+        private void TogglePlayback()
+        {
+            RefreshPlayState();
+            var before = _playState;
+            _requestedPlayState = before == Plugin.PlayState.Playing ? Plugin.PlayState.Paused : Plugin.PlayState.Playing;
+            _playStateRequestedAt = Stopwatch.GetTimestamp();
+            _playState = _requestedPlayState.Value;
+            if (_playState != Plugin.PlayState.Playing) ClearSpectrum();
+            Invalidate(); Update(); // Show the click before MusicBee processes its command.
+            try
+            {
+                if (!_musicBee.Player_PlayPause())
+                {
+                    _requestedPlayState = null; _playState = before;
+                }
+            }
+            catch
+            {
+                _requestedPlayState = null; _playState = before;
+                Invalidate(); throw;
+            }
+            RefreshPlayState(); Invalidate();
         }
 
         private void LoadPartyTempo(string trackUrl)
@@ -742,7 +793,7 @@ namespace MusicBeePlugin
                 () =>
                 {
                     if (!editingCurrentSong()) throw new InvalidOperationException("Play the song being edited first.");
-                    _musicBee.Player_PlayPause();
+                    TogglePlayback();
                 }, () => _musicBee.Player_GetPlayState() == Plugin.PlayState.Playing)) editor.ShowDialog(this);
         }
 
@@ -1345,7 +1396,7 @@ namespace MusicBeePlugin
             var count = 0;
             try
             {
-                _playState = _musicBee.Player_GetPlayState();
+                RefreshPlayState();
                 if (_playState == Plugin.PlayState.Playing &&
                     _musicBee.NowPlaying_GetSpectrumData != null)
                     count = _musicBee.NowPlaying_GetSpectrumData(_fft);
@@ -1542,7 +1593,7 @@ namespace MusicBeePlugin
             Rectangle card;
             if (narrow)
             {
-                _queueTab = new Rectangle(bounds.Right - 110, 43, 101, 27);
+                _queueTab = new Rectangle(bounds.Right - (_settings.TransparentCanvas || bounds.Width < 700 ? 162 : 322), 7, 76, 29);
                 using (var tabPath = RoundedRectangle(_queueTab, 8))
                 using (var tabShade = new SolidBrush(Color.FromArgb(255, 13, 17, 28)))
                 using (var tabFont = new Font("Segoe UI", 8f, FontStyle.Bold))
@@ -1673,15 +1724,13 @@ namespace MusicBeePlugin
             var gutter = PartyGutter;
             var bounds = new Rectangle(0, 0, client.Width - gutter * 2, client.Height);
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
+            DrawBackground(g, client);
+            if (_settings.ShowVisualizer && !_settings.TransparentCanvas) DrawSpectrum(g, client);
             var state = g.Save();
             if (gutter > 0) g.TranslateTransform(gutter, 0);
             try
             {
 
-            DrawBackground(g, bounds);
-
-            if (_settings.ShowVisualizer && !_settings.TransparentCanvas)
-                DrawSpectrum(g, bounds);
 
             var topInset = _settings.ShowSongTitle ?
                 (_settings.TransparentCanvas ? (bounds.Height < 260 ? 52f : 65f) : 43f) : 18f;
@@ -1939,6 +1988,12 @@ namespace MusicBeePlugin
             var titleArea = new RectangleF((bounds.Width - titleWidth) / 2f,
                 _settings.TransparentCanvas ? (bounds.Height < 260 ? 18 : 26) : 7,
                 titleWidth, 29);
+            if (!_queueTab.IsEmpty)
+            {
+                titleArea.X = 12;
+                titleArea.Width = Math.Max(1, _queueTab.Left - 22);
+                titleArea.Y = 7;
+            }
             if (_settings.TransparentCanvas)
                 using (var path = RoundedRectangle(Rectangle.Round(titleArea), 10))
                 using (var shade = new SolidBrush(Color.FromArgb(255, 13, 17, 28)))
@@ -2561,7 +2616,7 @@ namespace MusicBeePlugin
             try
             {
                 if (_previousButton.Contains(e.Location)) _musicBee.Player_PlayPreviousTrack();
-                else if (_playButton.Contains(e.Location)) _musicBee.Player_PlayPause();
+                else if (_playButton.Contains(e.Location)) TogglePlayback();
                 else if (_nextButton.Contains(e.Location))
                 {
                     if (QueueNavigation.TryPlayNext(_musicBee))

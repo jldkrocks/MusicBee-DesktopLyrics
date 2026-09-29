@@ -26,7 +26,9 @@ namespace MusicBeePlugin
         private readonly System.Diagnostics.Stopwatch _seekAge = new System.Diagnostics.Stopwatch();
         private double? _pendingSeek;
         private bool _dirty, _trackWasAvailable = true;
-        private static readonly string[] Styles = { "Normal", "Side to side", "Half speed", "Hold pose" };
+        private static readonly string[] Styles = { "Normal", "Side to side", "Hold pose" };
+
+        private static readonly string[] Speeds = { "Half (0.5x)", "Normal (1x)", "Double (2x)" };
 
         private static readonly string[] Rhythms = { "Straight", "Waltz (3/4)", "Swing", "4/4 - accent on 4" };
 
@@ -55,20 +57,24 @@ namespace MusicBeePlugin
             _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "countIn", HeaderText = "Bob count-in" });
             _grid.Columns.Add(new DataGridViewComboBoxColumn { Name = "rhythm", HeaderText = "Rhythm", DataSource = Rhythms });
             _grid.Columns.Add("swing", "Swing %");
+            _grid.Columns.Add(new DataGridViewComboBoxColumn { Name = "speed", HeaderText = "Speed", DataSource = Speeds });
+            _grid.Columns[8].FillWeight = 120;
+            _grid.Columns[8].ToolTipText = "Half, normal or double dance speed, independent of Dance and Rhythm. Does not change the song BPM. Hold stops all motion.";
             _grid.Columns[6].DisplayIndex = 4;
             _grid.Columns[7].DisplayIndex = 5;
+            _grid.Columns[8].DisplayIndex = 4;
             _grid.Columns[7].FillWeight = 80;
             _grid.Columns[7].ToolTipText = "Swing only: percentage of each beat spent in the side pose. 50 = even, 60 = light swing, 66.67 = about 2:1, 75 = strong swing. BPM does not change.";
             _grid.Columns[6].FillWeight = 185;
             _grid.Columns[6].ToolTipText = "4/4 accent on 4: three small centre bops, then a strong side landing on FOUR; opposite side next bar. BPM counts all four beats. Straight: existing motion. Waltz: side, centre bop, second centre bop, then the opposite side. Swing: longer side pose, short middle pose, opposite side. Swing % controls the long-short split. Half speed slows the chosen pattern; Hold stops it.";
             _grid.Columns[2].ToolTipText = "Seconds to blend from the previous BPM to this row's BPM. Example: 120 to 150 over 4 seconds. Equal BPM values do not ramp; dance styles switch at the start.";
             _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start (beat 1 for Waltz; strong FOUR for 4/4 accent on 4). Uses the row Start time, NOT when you click Align or Save. Save applies the setting. Leave off to preserve the ongoing beat phase.";
-            _grid.Columns[5].ToolTipText = "Check on the Normal row after Half speed: up to four lead-in bobs, then one final bop on the first beat at or after the return. Uses saved alignment, or this row's start when Align is checked.";
+            _grid.Columns[5].ToolTipText = "Check on a Normal-speed row after Half speed: up to four lead-in bobs, then one final bop on the first beat at or after the return. Uses saved alignment, or this row's start when Align is checked.";
             _grid.Columns[3].FillWeight = 140;
             _grid.Columns[4].FillWeight = 65;
             _grid.RowTemplate.Height = 29;
             foreach (DataGridViewColumn column in _grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
-            foreach (var section in map.Sections) AddRow(section.StartSeconds, section.Bpm, section.RampSeconds, section.Style, section.AlignBeat, section.CountIn, section.Rhythm, section.SwingPercent);
+            foreach (var section in map.Sections) AddRow(section.StartSeconds, section.Bpm, section.RampSeconds, section.Style, section.AlignBeat, section.CountIn, section.Rhythm, section.SwingPercent, section.EffectiveSpeed);
             _grid.BackgroundColor = Color.FromArgb(30, 35, 48);
             _grid.BorderStyle = BorderStyle.None; _grid.GridColor = Color.FromArgb(54, 62, 79);
             _grid.EnableHeadersVisualStyles = false; _grid.ColumnHeadersHeight = 32; _grid.RowTemplate.Height = 29;
@@ -111,7 +117,7 @@ namespace MusicBeePlugin
                     (PartyRhythm)Math.Max(0, Array.IndexOf(Rhythms, Convert.ToString(selected.Cells[6].Value)));
                 double swingPercent;
                 if (selected == null || !double.TryParse(Convert.ToString(selected.Cells[7].Value), out swingPercent)) swingPercent = 66.67;
-                AddRow(Math.Round(now.Value, 3), bpm >= 40 && bpm <= 240 ? bpm : 120, 0, PartyDanceStyle.Normal, false, false, rhythm, swingPercent);
+                AddRow(Math.Round(now.Value, 3), bpm >= 40 && bpm <= 240 ? bpm : 120, 0, PartyDanceStyle.Normal, false, false, rhythm, swingPercent, selected == null ? 1 : SpeedAt(selected));
                 _grid.CurrentCell = _grid.Rows[_grid.Rows.Count - 1].Cells[0];
                 MarkDirty();
             });
@@ -128,11 +134,11 @@ namespace MusicBeePlugin
             _status.ForeColor = Color.FromArgb(178, 192, 212);
             help.Text = "Sections last until the next start; times are seconds. First row starts at 0. Save applies edits without closing.\r\n" +
                 "BPM ramp: 120 to 150 over 4 seconds = gradual tempo change. Equal BPM values do nothing; dance styles change at the start.\r\n" +
-                "Bob count-in: tick the Normal row after Half speed for lead-in bobs PLUS a final bop on the return beat.\r\n" +
+                "Bob count-in: tick a Normal-speed row after Half speed for lead-in bobs PLUS a final bop on the return beat.\r\n" +
                 "Waltz = side, centre bop, centre bop. Swing = long side, short middle; Swing %: 50 = even, 66.67 = about 2:1, 75 = strong.\r\n" +
                 "4/4 accent on 4 = centre, centre, centre, SIDE. Align marks FOUR; BPM counts every beat.\r\n" +
                 "Align uses the row Start time, not when clicked. Save applies it; no need to time your click. Pause for precise seeking.\r\n" +
-                "Hold pose stops all motion. Align restarts a side pose. Colours: blue = normal, purple = side to side, amber = half speed, grey = hold.";
+                "Speed: Half / Normal / Double, independent of Dance. Hold stops all motion. Colours: blue = normal, purple = side to side, grey = hold.";
             _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 144));
@@ -205,10 +211,26 @@ namespace MusicBeePlugin
             return reported;
         }
 
-        private void AddRow(double start, double bpm, double ramp, PartyDanceStyle style, bool align, bool countIn = false, PartyRhythm rhythm = PartyRhythm.Straight, double swingPercent = 66.67)
+        private static PartyDanceStyle StyleAt(DataGridViewRow row)
+        {
+            var value = Convert.ToString(row.Cells[3].Value);
+            if (value == "Normal") return PartyDanceStyle.Normal;
+            if (value == "Side to side") return PartyDanceStyle.SideToSide;
+            if (value == "Hold pose") return PartyDanceStyle.Hold;
+            throw new ArgumentException("Choose a listed dance.");
+        }
+
+        private static double SpeedAt(DataGridViewRow row)
+        {
+            var index = Array.IndexOf(Speeds, Convert.ToString(row.Cells[8].Value));
+            if (index < 0) throw new ArgumentException("Choose a listed speed.");
+            return index == 0 ? 0.5 : index == 2 ? 2 : 1;
+        }
+
+        private void AddRow(double start, double bpm, double ramp, PartyDanceStyle style, bool align, bool countIn = false, PartyRhythm rhythm = PartyRhythm.Straight, double swingPercent = 66.67, double speed = 1)
         {
             _grid.Rows.Add(start.ToString("0.###", CultureInfo.CurrentCulture), bpm.ToString("0.###", CultureInfo.CurrentCulture),
-                ramp.ToString("0.###", CultureInfo.CurrentCulture), Styles[(int)style], align, countIn, Rhythms[(int)rhythm], swingPercent.ToString("0.##", CultureInfo.CurrentCulture));
+                ramp.ToString("0.###", CultureInfo.CurrentCulture), style == PartyDanceStyle.Hold ? "Hold pose" : style == PartyDanceStyle.SideToSide ? "Side to side" : "Normal", align, countIn, Rhythms[(int)rhythm], swingPercent.ToString("0.##", CultureInfo.CurrentCulture), Speeds[(style == PartyDanceStyle.HalfSpeed || speed == 0.5) ? 0 : speed == 2 ? 2 : 1]);
             RefreshSwingCells();
         }
 
@@ -245,7 +267,8 @@ namespace MusicBeePlugin
                 if (double.TryParse(Convert.ToString(row.Cells[0].Value), out seconds) &&
                     !double.IsNaN(seconds) && !double.IsInfinity(seconds) && seconds >= 0 && seconds <= _timeline.Duration)
                     _timeline.Markers.Add(new PartyTimeline.Marker { Row = row.Index, Seconds = seconds,
-                        Style = (PartyDanceStyle)Math.Max(0, Array.IndexOf(Styles, Convert.ToString(row.Cells[3].Value))) });
+                        Style = Convert.ToString(row.Cells[3].Value) == "Hold pose" ? PartyDanceStyle.Hold :
+                            Convert.ToString(row.Cells[3].Value) == "Side to side" ? PartyDanceStyle.SideToSide : PartyDanceStyle.Normal });
             }
             _timeline.SelectedRow = _grid.CurrentRow?.Index ?? -1;
             _timeline.Invalidate();
@@ -310,14 +333,14 @@ namespace MusicBeePlugin
             try
             {
                 _grid.EndEdit();
-                var map = new PartyTempoMap { TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
+                var map = new PartyTempoMap { Version = 2, TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
                 foreach (DataGridViewRow row in _grid.Rows)
                     map.Sections.Add(new PartyTempoSection { StartSeconds = Number(row, 0), Bpm = Number(row, 1),
-                        RampSeconds = Number(row, 2), Style = (PartyDanceStyle)Array.IndexOf(Styles, Convert.ToString(row.Cells[3].Value)),
+                        RampSeconds = Number(row, 2), Style = StyleAt(row),
                         AlignBeat = Convert.ToBoolean(row.Cells[4].Value ?? false),
                         CountIn = Convert.ToBoolean(row.Cells[5].Value ?? false),
                         Rhythm = (PartyRhythm)Array.IndexOf(Rhythms, Convert.ToString(row.Cells[6].Value)),
-                        SwingPercent = Number(row, 7) });
+                        SwingPercent = Number(row, 7), Speed = SpeedAt(row) });
                 map.Sections = map.Sections.OrderBy(s => s.StartSeconds).ToList();
                 map.Validate();
                 _save(map); _dirty = false;
