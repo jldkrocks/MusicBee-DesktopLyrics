@@ -25,6 +25,7 @@ namespace MusicBeePlugin
         private readonly Action<string> _cancelTiming;
         private readonly EnglishTranslationStore _englishStore;
         private readonly PartyTempoStore _partyTempoStore;
+        private PartyTempoMap _partyMap;
         private readonly Action<string> _englishSaved;
         private readonly ContextMenuStrip _flyoutMenu;
         private readonly float[] _fft = new float[4096];
@@ -51,7 +52,7 @@ namespace MusicBeePlugin
         private bool _loaded;
         private bool _animationDisposed;
         private Bitmap _albumArtwork;
-        private Bitmap _backgroundCache;
+        private Bitmap _backgroundCache, _spectrumCache;
         private ArtworkPalette _cachedBackgroundPalette;
         private string _songTitle = "", _songArtist = "";
         private Plugin.PlayState _playState = Plugin.PlayState.Undefined;
@@ -112,9 +113,10 @@ namespace MusicBeePlugin
             public FontStyle FontStyle;
             public float DesiredPoints, Width, Height, DpiY, FittedPoints;
             public GraphicsPath Path;
+            public Bitmap Raster;
             public RectangleF Bounds;
 
-            public void Dispose() { Path?.Dispose(); }
+            public void Dispose() { Path?.Dispose(); Raster?.Dispose(); }
         }
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
@@ -229,6 +231,7 @@ namespace MusicBeePlugin
             BackColor = _settings.TransparentCanvas ? ClearKey : Color.FromArgb(13, 18, 32);
             _backgroundCache?.Dispose();
             _backgroundCache = null;
+            _spectrumCache?.Dispose(); _spectrumCache = null;
             Invalidate();
             if (_loaded && Visible) StartAnimation();
         }
@@ -368,6 +371,8 @@ namespace MusicBeePlugin
             partyBpm.DropDown.Renderer = menu.Renderer;
             var tempoAction = partyBpm.DropDownItems.Add("Adjust BPM and alignment…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyTempoEditor)));
+            var mapAction = partyBpm.DropDownItems.Add("Edit tempo map…", null,
+                (sender, args) => BeginInvoke(new Action(OpenPartyTempoMap)));
             var browserBpm = partyBpm.DropDownItems.Add("Search Google…", null,
                 (sender, args) => BeginInvoke(new Action(OpenBrowserBpmSearch)));
             var copySong = partyBpm.DropDownItems.Add("Copy song and artist", null,
@@ -381,12 +386,14 @@ namespace MusicBeePlugin
             {
                 timingAction.Visible = _timingButton.IsEmpty;
                 lrcAction.Visible = _lrcButton.IsEmpty;
-                tempoAction.Enabled = !string.IsNullOrWhiteSpace(_artworkTrackUrl);
+                mapAction.Enabled = !string.IsNullOrWhiteSpace(_artworkTrackUrl);
+                tempoAction.Enabled = mapAction.Enabled && !(_partyMap?.Enabled ?? false);
+                tempoAction.ToolTipText = "Disable the tempo map to adjust the single-BPM timing.";
                 browserBpm.Enabled = copySong.Enabled = !string.IsNullOrWhiteSpace(_songTitle);
                 var savedTempo = !string.IsNullOrWhiteSpace(_artworkTrackUrl) ?
                     _partyTempoStore.Load(_artworkTrackUrl) : null;
                 retryOnline.Enabled = _settings.PartyMode &&
-                    PartyOnlineEnabled && !string.IsNullOrWhiteSpace(_artworkTrackUrl) &&
+                    PartyOnlineEnabled && !(_partyMap?.Enabled ?? false) && !string.IsNullOrWhiteSpace(_artworkTrackUrl) &&
                     PartyOnlineLookup.CanLookup(_partyTagBpm, savedTempo);
             };
             menu.Items.Add("More settings…", null, (sender, args) =>
@@ -457,6 +464,7 @@ namespace MusicBeePlugin
 
         private void LoadPartyTempo(string trackUrl)
         {
+            _partyMap = _partyTempoStore.LoadMap(trackUrl);
             var saved = _partyTempoStore.Load(trackUrl);
             if (saved != null && (saved.Manual || _partyTagBpm == 0))
             {
@@ -487,7 +495,7 @@ namespace MusicBeePlugin
 
         private void StartPartyOnlineLookup(bool retry = false)
         {
-            if (_animationDisposed || !_settings.PartyMode ||
+            if (_animationDisposed || !_settings.PartyMode || (_partyMap?.Enabled ?? false) ||
                 !PartyOnlineEnabled || string.IsNullOrWhiteSpace(_artworkTrackUrl)) return;
             var saved = _partyTempoStore.Load(_artworkTrackUrl);
             if (!PartyOnlineLookup.CanLookup(_partyTagBpm, saved)) return;
@@ -698,6 +706,37 @@ namespace MusicBeePlugin
                 MessageBox.Show(this, "Could not open your browser: " + ex.Message,
                     "Search for BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+        }
+
+        private void OpenPartyTempoMap()
+        {
+            var track = _artworkTrackUrl;
+            if (string.IsNullOrWhiteSpace(track)) return;
+            var bpm = _partyBpm > 0 ? _partyBpm : _partyBeat.Bpm > 0 ? _partyBeat.Bpm : 120;
+            var origin = _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs;
+            var map = _partyTempoStore.LoadMap(track) ?? new PartyTempoMap { TrackUrl = track,
+                InitialBeat = -origin * bpm / 60000d,
+                Sections = new List<PartyTempoSection> { new PartyTempoSection { Bpm = bpm } } };
+            using (var editor = new FrmPartyTempoMap(map, _songTitle,
+                () => _artworkTrackUrl == track ? (double?)ReadPartyPosition(Stopwatch.GetTimestamp()) / 1000 : null,
+                position =>
+                {
+                    if (_artworkTrackUrl != track) throw new InvalidOperationException("Play the song being edited first.");
+                    if (position < 0 || position > (_musicBee.NowPlaying_GetDuration?.Invoke() ?? int.MaxValue))
+                        throw new ArgumentException("The selected start is outside this song.");
+                    _musicBee.Player_SetPosition(position);
+                    if (_playState != Plugin.PlayState.Playing) _musicBee.Player_PlayPause();
+                },
+                result =>
+                {
+                    _partyTempoStore.SaveMap(result);
+                    if (_artworkTrackUrl == track)
+                    {
+                        CancelPartyLookup(); _partyMap = result;
+                        if (!result.Enabled) StartPartyOnlineLookup();
+                        _lastPartyUpdate = 0; UpdatePartyDancers(); Invalidate();
+                    }
+                })) editor.ShowDialog(this);
         }
 
         private void OpenPartyTempoEditor()
@@ -963,6 +1002,12 @@ namespace MusicBeePlugin
                     PartyAnimation.CentreImpactAt(phasePosition, bpm);
                 var sway = PartyAnimation.SwayAt(phasePosition, bpm);
                 var anticipation = PartyAnimation.AnticipationAt(phasePosition, bpm);
+                if ((_partyMap?.Enabled ?? false) && _partyPreviewTrackUrl == null)
+                {
+                    var mapped = _partyMap.At((position + PartyAnimation.VisualLeadMs) / 1000d);
+                    frame = mapped.Frame; impact = mapped.Impact;
+                    sway = mapped.Sway; anticipation = mapped.Anticipation;
+                }
                 RefreshPartyLayout();
                 PlacePartyDancer(_leftDancer, _leftPartyBounds, frame, impact,
                     sway, anticipation);
@@ -1296,12 +1341,12 @@ namespace MusicBeePlugin
 
             var validCount = Math.Min(Math.Max(0, count), _fft.Length);
             var upperBin = Math.Min(validCount / 2, 1024);
-            if (_settings.PartyMode && !PartyOnlineEnabled &&
+            if (_settings.PartyMode && !(_partyMap?.Enabled ?? false) && !PartyOnlineEnabled &&
                 _partyBpm == 0 && _partyBeat.Bpm == 0 &&
                 _playState == Plugin.PlayState.Playing)
                 _partySpectrumMisses = upperBin > 8 ? 0 :
                     Math.Min(30, _partySpectrumMisses + 1);
-            if (_settings.PartyMode && !PartyOnlineEnabled &&
+            if (_settings.PartyMode && !(_partyMap?.Enabled ?? false) && !PartyOnlineEnabled &&
                 _partyBpm == 0 && _partyBeat.Bpm == 0 &&
                 upperBin > 8 &&
                 _playState == Plugin.PlayState.Playing)
@@ -1401,10 +1446,13 @@ namespace MusicBeePlugin
                 _cachedBackgroundPalette.Left != _palette.Left ||
                 _cachedBackgroundPalette.Right != _palette.Right ||
                 _cachedBackgroundPalette.Accent != _palette.Accent ||
-                _cachedBackgroundPalette.BarBottom != _palette.BarBottom)
+                _cachedBackgroundPalette.BarBottom != _palette.BarBottom ||
+                _cachedBackgroundPalette.BarTop != _palette.BarTop)
             {
                 _backgroundCache?.Dispose();
-                _backgroundCache = new Bitmap(bounds.Width, bounds.Height);
+                _spectrumCache?.Dispose(); _spectrumCache = null;
+                _backgroundCache = new Bitmap(bounds.Width, bounds.Height,
+                    System.Drawing.Imaging.PixelFormat.Format32bppRgb);
                 using (var surface = Graphics.FromImage(_backgroundCache))
                 {
                     surface.SmoothingMode = SmoothingMode.AntiAlias;
@@ -1412,7 +1460,10 @@ namespace MusicBeePlugin
                 }
                 _cachedBackgroundPalette = _palette;
             }
+            var copyMode = g.CompositingMode;
+            g.CompositingMode = CompositingMode.SourceCopy;
             g.DrawImageUnscaled(_backgroundCache, bounds.Location);
+            g.CompositingMode = copyMode;
         }
 
         private void DrawBackgroundCore(Graphics g, Rectangle bounds)
@@ -2155,6 +2206,7 @@ namespace MusicBeePlugin
                         _partyBeat.Bpm > 0 ? "AUTO " +
                             _partyBeat.Bpm.ToString("0.#", CultureInfo.InvariantCulture) :
                         _partySpectrumMisses >= 30 ? "NO SIGNAL" : "LISTENING...";
+                    if (_partyMap?.Enabled ?? false) tempo = "TEMPO MAP";
                     g.DrawString(tempo, smallFont, brush, new Rectangle(
                         _partyButton.Left, _partyButton.Top + 18, _partyButton.Width, 16), format);
                 }
@@ -2513,6 +2565,41 @@ namespace MusicBeePlugin
             var barWidth = Math.Max(2, barSpacing - 3);
             var floor = area.Bottom - 10;
             var maxHeight = Math.Max(1, area.Height - 28);
+            if (!_movingOrResizing && _paletteStarted == 0 && _backgroundCache != null &&
+                _backgroundCache.Size == area.Size)
+            {
+                if (_spectrumCache == null)
+                {
+                    // Preblend the translucent gradient against the cached opaque
+                    // background. Each frame then copies only the visible bar strips.
+                    _spectrumCache = _backgroundCache.Clone(new Rectangle(Point.Empty, area.Size),
+                        System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+                    using (var surface = Graphics.FromImage(_spectrumCache))
+                    using (var tint = new LinearGradientBrush(new Point(0, 16), new Point(0, floor),
+                        Color.FromArgb(124, _palette.BarTop), Color.FromArgb(165, _palette.BarBottom)))
+                        surface.FillRectangle(tint, 0, 0, area.Width, area.Height);
+                }
+                var state = g.Save();
+                try
+                {
+                    g.CompositingMode = CompositingMode.SourceCopy;
+                    g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                    using (var bars = new Region())
+                    {
+                        bars.MakeEmpty();
+                        for (var i = 0; i < BarCount; i++)
+                        {
+                            var height = Math.Max(2, (int)Math.Round(_bars[i] * maxHeight));
+                            bars.Union(new Rectangle((int)Math.Round(23 + i * barSpacing), floor - height,
+                                Math.Max(2, (int)Math.Round(barWidth)), height));
+                        }
+                        g.SetClip(bars, CombineMode.Intersect);
+                        g.DrawImageUnscaled(_spectrumCache, Point.Empty);
+                    }
+                }
+                finally { g.Restore(state); }
+                return;
+            }
             using (var brush = new LinearGradientBrush(
                        new Point(0, 16), new Point(0, floor),
                        Color.FromArgb(124, _palette.BarTop),
@@ -2556,6 +2643,11 @@ namespace MusicBeePlugin
             if (string.IsNullOrEmpty(lyric) || alpha <= 0) return;
             var geometry = GetTextGeometry(g, lyric, layoutArea ?? area, desiredPoints);
             if (geometry == null) return;
+            if (!_settings.TransparentCanvas)
+            {
+                DrawCachedLine(g, geometry, area, glyphScale, alpha);
+                return;
+            }
             using (var shadow = new SolidBrush(Color.FromArgb(alpha * 2 / 3, 0, 0, 0)))
             using (var outline = new Pen(Color.FromArgb(alpha, _settings.BorderColor),
                        Math.Max(1.5f, Math.Min(3f, geometry.FittedPoints / 20f))))
@@ -2584,6 +2676,54 @@ namespace MusicBeePlugin
                 }
                 finally { g.Restore(state); }
             }
+        }
+
+        private void DrawCachedLine(Graphics g, TextGeometry geometry, RectangleF area, float scale, int alpha)
+        {
+            const int padding = 6;
+            if (geometry.Raster == null)
+            {
+                geometry.Raster = new Bitmap((int)Math.Ceiling(geometry.Bounds.Width) + padding * 2,
+                    (int)Math.Ceiling(geometry.Bounds.Height) + padding * 2,
+                    System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                using (var surface = Graphics.FromImage(geometry.Raster))
+                using (var shadow = new SolidBrush(Color.FromArgb(170, 0, 0, 0)))
+                using (var outline = new Pen(_settings.BorderColor,
+                    Math.Max(1.5f, Math.Min(3f, geometry.FittedPoints / 20f))))
+                using (var foreground = CreateTextBrush(geometry.Bounds, 255))
+                {
+                    surface.SmoothingMode = SmoothingMode.AntiAlias;
+                    surface.TranslateTransform(padding - geometry.Bounds.Left, padding - geometry.Bounds.Top);
+                    surface.TranslateTransform(1, 2); surface.FillPath(shadow, geometry.Path);
+                    surface.TranslateTransform(-1, -2); outline.LineJoin = LineJoin.Round;
+                    surface.DrawPath(outline, geometry.Path); surface.FillPath(foreground, geometry.Path);
+                }
+            }
+            var state = g.Save();
+            try
+            {
+                g.SetClip(area, CombineMode.Intersect);
+                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                using (var attributes = new System.Drawing.Imaging.ImageAttributes())
+                {
+                    var opacity = new System.Drawing.Imaging.ColorMatrix { Matrix33 = alpha / 255f };
+                    attributes.SetColorMatrix(opacity);
+                    attributes.SetWrapMode(WrapMode.TileFlipXY);
+                    var x = area.Left + (area.Width - geometry.Bounds.Width * scale) / 2 - padding * scale;
+                    var y = area.Top + (area.Height - geometry.Bounds.Height * scale) / 2 - padding * scale;
+                    if (Math.Abs(scale - 1) < 0.00001f)
+                    {
+                        x = (float)Math.Round(x); y = (float)Math.Round(y);
+                        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                    }
+                    var image = geometry.Raster;
+                    g.DrawImage(image, new[] { new PointF(x, y), new PointF(x + image.Width * scale, y),
+                        new PointF(x, y + image.Height * scale) }, new RectangleF(0, 0, image.Width, image.Height),
+                        GraphicsUnit.Pixel, attributes);
+                }
+            }
+            finally { g.Restore(state); }
         }
 
         private TextGeometry GetTextGeometry(Graphics g, string lyric,
@@ -2710,6 +2850,7 @@ namespace MusicBeePlugin
                 DisposePartyDancers();
                 _albumArtwork?.Dispose();
                 _backgroundCache?.Dispose();
+                _spectrumCache?.Dispose();
                 ClearTextGeometries();
                 if (_timingEditor != null && !_timingEditor.IsDisposed)
                     _timingEditor.ForceClose();

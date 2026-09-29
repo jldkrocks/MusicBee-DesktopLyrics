@@ -32,6 +32,23 @@ To add a MusicBee toolbar button, right-click its toolbar and choose **Configure
 The lyrics flyout groups adjustment/alignment, browser search, song copying, online lookup settings and retry under **Party BPM**. **Copy song and artist** copies only `Artist – Song title` for pasting into your existing ChatGPT project or elsewhere (just the title if artist is missing). It copies silently without an extra dialog. It does not contact ChatGPT or replace saved timing. Enabled menu text is light; unavailable actions use a readable muted colour.
 
 
+### Per-song tempo map
+
+Choose **Party BPM → Edit tempo map…** to mark tempo changes or beatless passages. The first row starts at zero and is seeded from the current BPM (120 if none is known). Each row lasts until the next start time. Times are seconds with optional decimals; Save sorts rows by start time and rejects duplicates.
+
+- **BPM** sets the section's musical tempo, from 40 to 240.
+- **Ramp (s)** gradually reaches that BPM from the previous tempo. Zero changes speed immediately while preserving phase. A ramp must finish before the next section; the first row cannot ramp.
+- **Dance** selects Normal, Side to side (no centre poses), Half speed, or Hold pose. Hold freezes the pose and movement until the next row; its BPM is ignored. A final Hold lasts to the end of the song.
+- **Align** starts a raised-arm side pose exactly at the section boundary (with the existing display-latency lead). Leave it unchecked to keep phase continuous. Hold cannot align or ramp.
+
+**Add at current time** captures a new row; edit its values in the table. **Play from row** seeks the current song to that start. Edits take effect only after **Save**. **Cancel** leaves the saved map unchanged. Uncheck **Use this map for this song** and Save to restore the original single-BPM timing without deleting the map. The Party button reads **TEMPO MAP** while a map is active; single-BPM adjustment is disabled until the map is disabled. Maps override tags and lookup only for their own song and are stored separately from saved BPMs and music files. If the song changes during editing, Save still applies to the original song; capture/seek require that original song to be playing.
+
+Maps are manual: they do not detect tempo changes, silence, waltz or swing automatically. Quiet passages can still contain beats, so holding is an explicit choice. Seeking and replay compute the pose from the song timeline rather than accumulated animation ticks.
+
+### Rendering and GPU investigation
+
+Normal-window rendering caches lyric rasters and preblends spectrum colours against the opaque cached background. This reduces repeated text shaping/drawing and per-frame blending. Transparent mode retains its vector text path. The Direct2D/DirectWrite feasibility probe under `tools` is separate from the plugin: it requires a hardware render target and draws synthetic 1080p/4K scenes off-screen. It neither replaces the installed renderer nor measures presentation frame rate. See `tools/GPU-PLAN.md` for the migration checkpoint.
+
 ### Browser BPM search
 
 For catalog misses, open **Party BPM → Search Google…** in the lyrics flyout. This opens your browser with the current artist and title; nothing is sent until you click. Review the recording/version and enter the result in **Adjust Party BPM…**, then align and save as usual. This uses no paid API and never replaces timing automatically.

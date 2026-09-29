@@ -106,6 +106,43 @@ namespace MusicBeePlugin
             if (File.Exists(filename)) File.Delete(filename);
         }
 
+        internal PartyTempoMap LoadMap(string trackUrl)
+        {
+            if (string.IsNullOrWhiteSpace(trackUrl)) return null;
+            try
+            {
+                var path = FileName(trackUrl) + ".map";
+                if (!File.Exists(path)) return null;
+                var map = JsonConvert.DeserializeObject<PartyTempoMap>(File.ReadAllText(path));
+                if (map == null || map.TrackUrl != trackUrl) return null;
+                map.Validate();
+                return map;
+            }
+            catch (Exception) { return null; }
+        }
+
+        internal void SaveMap(PartyTempoMap map)
+        {
+            map.Validate();
+            Directory.CreateDirectory(_folder);
+            var path = FileName(map.TrackUrl) + ".map";
+            var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temp, JsonConvert.SerializeObject(map), new UTF8Encoding(false));
+                if (File.Exists(path)) File.Replace(temp, path, null);
+                else File.Move(temp, path);
+            }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
+        }
+
+        internal void DeleteMap(string trackUrl)
+        {
+            if (string.IsNullOrWhiteSpace(trackUrl)) return;
+            var path = FileName(trackUrl) + ".map";
+            if (File.Exists(path)) File.Delete(path);
+        }
+
         internal string LoadApiKey()
         {
             try

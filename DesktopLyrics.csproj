@@ -109,6 +109,8 @@
     <Compile Include="Gdiplus.cs" />
     <Compile Include="GdiplusPInvoke.cs" />
     <Compile Include="FrmLyricsWindow.cs" />
+    <Compile Include="PartyTempoMap.cs" />
+    <Compile Include="FrmPartyTempoMap.cs" />
     <Compile Include="PartyAnimation.cs" />
     <Compile Include="PartyPlaybackClock.cs" />
     <Compile Include="PartyTapTempo.cs" />

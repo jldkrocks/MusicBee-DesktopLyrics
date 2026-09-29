@@ -24,10 +24,13 @@ jobs:
           msbuild tests/ParserSmoke.csproj /p:Configuration=Release
           & .\tests\bin\Release\ParserSmoke.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build isolated Direct2D feasibility probe
+        run: msbuild tools/GpuRenderProbe.vcxproj /p:Configuration=Release /p:Platform=x64
       - uses: actions/upload-artifact@v4
         with:
-          name: DesktopLyrics-1.15.32.0
+          name: DesktopLyrics-1.15.33.0
           path: |
             bin/Release/mb_DesktopLyrics.dll
             pkg/*.zip
+            tools/bin/Release/GpuRenderProbe.exe
           if-no-files-found: error
