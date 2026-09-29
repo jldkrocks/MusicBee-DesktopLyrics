@@ -78,6 +78,9 @@ namespace MusicBeePlugin
         private Size _partyLayoutClientSize;
         private FormWindowState _partyLayoutState;
         private bool _partyLayoutValid;
+        private readonly ToolTip _lyricToolTip = new ToolTip { AutoPopDelay = 20000 };
+        private Rectangle _lyricHitArea;
+        private bool _lyricTipActive;
         private string _hoverButton;
         private long _queueNoticeStarted;
         private string _queueNoticeText = "That's the end of the queue ♪";
@@ -363,6 +366,8 @@ namespace MusicBeePlugin
                 BeginInvoke(new Action(OpenLrcLibPicker)));
             var tempoAction = menu.Items.Add("Adjust Party BPM…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyTempoEditor)));
+            menu.Items.Add("Read full current lyrics…", null, (sender, args) =>
+                BeginInvoke(new Action(OpenFullLyrics)));
             menu.Items.Add("Online Party BPM…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyOnlineSettings)));
             var retryOnline = menu.Items.Add("Retry online BPM for this song", null,
@@ -543,6 +548,24 @@ namespace MusicBeePlugin
             _lastPartyUpdate = 0;
             UpdatePartyDancers();
             Invalidate();
+        }
+
+        private void OpenFullLyrics()
+        {
+            using (var dialog = new Form { Text = "Current lyrics — " + _songTitle,
+                Size = new Size(560, 360), MinimumSize = new Size(320, 220),
+                StartPosition = FormStartPosition.CenterParent, ShowInTaskbar = false,
+                MinimizeBox = false, TopMost = true })
+            using (var font = new Font(SystemFonts.MessageBoxFont.FontFamily, 12))
+            using (var text = new TextBox { Multiline = true, ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = font,
+                Text = (_line2 ?? "") + "\r\n\r\n" + (_line1 ?? "") +
+                    "\r\n\r\nNext: " + (_nextLine ?? "") })
+            {
+                dialog.Controls.Add(text);
+                text.Select(0, 0);
+                dialog.ShowDialog(this);
+            }
         }
 
         private void OpenPartyOnlineSettings()
@@ -983,6 +1006,9 @@ namespace MusicBeePlugin
             _line2 = line2;
             _nextLine = nextLine;
             _transitionStarted = Stopwatch.GetTimestamp();
+            if (_lyricTipActive)
+                _lyricToolTip.SetToolTip(this, (_line2 ?? "") + "\n" + (_line1 ?? "") +
+                    "\n\nMenu → Read full current lyrics");
             Invalidate();
         }
 
@@ -1557,6 +1583,11 @@ namespace MusicBeePlugin
                 (_settings.TransparentCanvas ? (bounds.Height < 260 ? 52f : 65f) : 43f) : 18f;
             var bottomInset = _settings.ShowTransportControls ?
                 (_settings.TransparentCanvas ? (bounds.Height < 260 ? 66f : 78f) : 58f) : 15f;
+            if (bounds.Height < 260 && !string.IsNullOrWhiteSpace(_line2))
+            {
+                topInset = Math.Min(topInset, 32f);
+                bottomInset = Math.Min(bottomInset, 46f);
+            }
             var region = new RectangleF(0, topInset, bounds.Width,
                 Math.Max(24f, bounds.Height - topInset - bottomInset));
             // Give the cover its own vertical space. In a short window it can
@@ -1564,6 +1595,8 @@ namespace MusicBeePlugin
             var artSize = _settings.ShowAlbumArt
                 ? Math.Max(0f, Math.Min(260f,
                     Math.Min(bounds.Height - 44f, bounds.Width * 0.16f))) : 0f;
+            if ((!string.IsNullOrWhiteSpace(_line2) || !string.IsNullOrWhiteSpace(_previousLine2)) &&
+                (bounds.Width < 700 || region.Height < 130)) artSize = 0;
             if (artSize > 0)
                 DrawAlbumArt(g, new RectangleF(16,
                     Math.Max(topInset - 4f, (bounds.Height - artSize) / 2f),
@@ -1573,12 +1606,12 @@ namespace MusicBeePlugin
             var panelWidth = Math.Max(40, bounds.Width - panelLeft * 2);
             var content = new RectangleF(panelLeft + 9, region.Top,
                 Math.Max(1, panelWidth - 18), region.Height);
-            // Keep the next line beneath the central romaji, with English
-            // above it. Only a very short lyric area hides the preview.
-            var shownNext = content.Height < 130 && !string.IsNullOrWhiteSpace(_line2)
-                ? null : _nextLine;
-            var previousShownNext = content.Height < 130 &&
-                !string.IsNullOrWhiteSpace(_previousLine2) ? null : _previousNextLine;
+            var shownNext = _nextLine;
+            var previousShownNext = _previousNextLine;
+            var hitCorners = new[] { content.Location, new PointF(content.Right, content.Bottom) };
+            using (var transform = g.Transform) transform.TransformPoints(hitCorners);
+            _lyricHitArea = Rectangle.Round(RectangleF.FromLTRB(hitCorners[0].X,
+                hitCorners[0].Y, hitCorners[1].X, hitCorners[1].Y));
 
             var progress = 1f;
             if (_transitionStarted != 0)
@@ -1625,55 +1658,61 @@ namespace MusicBeePlugin
                 gap *= fit;
             }
             var eased = progress * progress * (3 - 2 * progress);
-            var oldOffset = -12f * scale * eased;
             var newOffset = 12f * scale * (1 - eased);
             var promotePreview = progress < 1f &&
-                !string.IsNullOrEmpty(previousShownNext) &&
-                previousShownNext == _line1 &&
-                LyricTextLayout.CanPromotePreview(g, _line1.Trim(),
-                    _settings.Font ?? SystemFonts.DefaultFont,
-                    (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale * 0.63f,
-                    (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale,
-                    content.Width, subHeight, mainHeight);
+                !string.IsNullOrWhiteSpace(previousShownNext) && previousShownNext == _line1;
+            var activeLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
+                gap, !string.IsNullOrWhiteSpace(_line2), !string.IsNullOrWhiteSpace(shownNext), 0);
+            var oldLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
+                gap, !string.IsNullOrWhiteSpace(_previousLine2),
+                !string.IsNullOrWhiteSpace(previousShownNext), 0);
             if (_settings.TransparentCanvas)
                 DrawTransparentLyricPanel(g, content, panelLeft, panelWidth,
-                    mainHeight, subHeight, gap, progress,
-                    shownNext, previousShownNext, oldOffset, newOffset);
+                    mainHeight, subHeight, gap, progress, shownNext, previousShownNext, 0, 0);
             else
+                DrawLyricPanel(g, content, panelLeft, panelWidth, mainHeight, subHeight,
+                    gap, _line1, string.IsNullOrWhiteSpace(_line2) && progress < 1 ?
+                        _previousLine2 : _line2, shownNext, 1, 0);
+            var fontSize = (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale;
+            // English changes separately without drawing two translations over
+            // each other. The original and next lyrics keep scrolling below it.
+            if (progress < 1 && _previousLine2 != _line2)
+                DrawLine(g, _previousLine2, oldLayout.English, fontSize * 0.68f,
+                    (int)(225 * Math.Max(0, 1 - eased / 0.35f)));
+            DrawLine(g, _line2, activeLayout.English, fontSize * 0.68f,
+                (int)(225 * (progress >= 1 || _previousLine2 == _line2 ? 1 :
+                    Math.Min(1, Math.Max(0, (eased - 0.35f) / 0.4f)))));
+            var lyricClip = g.Save();
+            g.SetClip(RectangleF.FromLTRB(content.Left,
+                Math.Min(activeLayout.Main.Top, oldLayout.Main.Top), content.Right,
+                Math.Min(content.Bottom, Math.Max(activeLayout.Bounds.Bottom, oldLayout.Bounds.Bottom))),
+                CombineMode.Intersect);
+            if (progress < 1)
             {
-                if (progress < 1f)
-                    DrawLyricPanel(g, content, panelLeft, panelWidth,
-                        mainHeight, subHeight, gap, _previousLine1,
-                        _previousLine2, previousShownNext,
-                        1 - eased, oldOffset);
-                DrawLyricPanel(g, content, panelLeft, panelWidth, mainHeight,
-                    subHeight, gap, _line1, _line2, shownNext,
-                    eased, newOffset);
+                var outgoing = oldLayout.Main;
+                outgoing.Y -= (oldLayout.Main.Height + gap) * eased;
+                DrawLine(g, _previousLine1, outgoing, fontSize, (int)(255 * (1 - eased)));
             }
-            if (progress < 1f)
-                DrawLyricGroup(g, content, mainHeight, subHeight, gap, scale,
-                    _previousLine1, _previousLine2, previousShownNext,
-                    1 - eased, oldOffset, true, !promotePreview);
-            DrawLyricGroup(g, content, mainHeight, subHeight, gap, scale,
-                _line1, _line2, shownNext, eased, newOffset,
-                !promotePreview, true);
+            var incoming = activeLayout.Main;
             if (promotePreview)
             {
-                var oldLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
-                    gap, !string.IsNullOrWhiteSpace(_previousLine2), true,
-                    oldOffset);
-                var newLayout = LyricCardLayout.Create(content, mainHeight, subHeight,
-                    gap, !string.IsNullOrWhiteSpace(_line2),
-                    !string.IsNullOrWhiteSpace(shownNext), newOffset);
-                var start = oldLayout.Preview;
-                var end = newLayout.Main;
-                var traveling = new RectangleF(content.Left,
-                    start.Top + (end.Top - start.Top) * eased, content.Width,
-                    start.Height + (end.Height - start.Height) * eased);
-                var fontSize = (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale;
-                DrawLine(g, _line1, traveling, fontSize * (0.63f + 0.37f * eased),
-                    (int)(145 + 110 * eased));
+                incoming = BlendRectangle(oldLayout.Preview, activeLayout.Main, eased);
+                DrawTravellingLine(g, _line1, incoming, activeLayout.Main, fontSize,
+                    (int)(145 + 110 * eased), eased);
             }
+            else
+            {
+                incoming.Y += newOffset;
+                DrawLine(g, _line1, incoming, fontSize, (int)(255 * eased));
+            }
+            if (!string.IsNullOrWhiteSpace(shownNext))
+            {
+                var preview = activeLayout.Preview;
+                if (promotePreview) preview.Y = Math.Max(preview.Top, incoming.Bottom + gap);
+                DrawTravellingLine(g, shownNext, preview, activeLayout.Main,
+                    fontSize, (int)(145 * (promotePreview ? eased : 1)), 0);
+            }
+            g.Restore(lyricClip);
             DrawUpcomingQueue(g, bounds, panelLeft);
             DrawQueueNotice(g, content);
             DrawSongTitle(g, bounds);
@@ -2315,6 +2354,14 @@ namespace MusicBeePlugin
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            var showTip = _lyricHitArea.Contains(e.Location);
+            if (showTip != _lyricTipActive)
+            {
+                _lyricTipActive = showTip;
+                _lyricToolTip.SetToolTip(this, showTip ?
+                    (_line2 ?? "") + "\n" + (_line1 ?? "") +
+                    "\n\nMenu → Read full current lyrics" : null);
+            }
             if (_settings.TransparentCanvas && _resizeGrip.Contains(e.Location))
             {
                 Cursor = Cursors.SizeNWSE;
@@ -2376,6 +2423,8 @@ namespace MusicBeePlugin
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
+            _lyricTipActive = false;
+            _lyricToolTip.SetToolTip(this, null);
             _hoverButton = null;
             _hoverQueue = null;
             Cursor = Cursors.Default;
@@ -2474,26 +2523,6 @@ namespace MusicBeePlugin
             Invalidate();
         }
 
-        private void DrawLyricGroup(Graphics g, RectangleF content, float mainHeight,
-            float subHeight, float gap, float scale, string line1, string line2,
-            string nextLine, float opacity, float offsetY, bool drawMain, bool drawPreview)
-        {
-            if (opacity <= 0) return;
-            var layout = LyricCardLayout.Create(content, mainHeight, subHeight, gap,
-                !string.IsNullOrWhiteSpace(line2),
-                !string.IsNullOrWhiteSpace(nextLine), offsetY);
-            var fontSize = (_settings.Font ?? SystemFonts.DefaultFont).SizeInPoints * scale;
-
-            if (!string.IsNullOrWhiteSpace(line2))
-                DrawLine(g, line2, layout.English, fontSize * 0.68f,
-                    (int)(225 * opacity));
-            if (drawMain)
-                DrawLine(g, line1, layout.Main, fontSize, (int)(255 * opacity));
-            if (drawPreview && !string.IsNullOrWhiteSpace(nextLine))
-                DrawLine(g, nextLine, layout.Preview, fontSize * 0.63f,
-                    (int)(145 * opacity));
-        }
-
         private void DrawSpectrum(Graphics g, Rectangle area)
         {
             var usableWidth = area.Width - 46;
@@ -2514,11 +2543,35 @@ namespace MusicBeePlugin
             }
         }
 
-        private void DrawLine(Graphics g, string lyric, RectangleF area, float desiredPoints, int alpha)
+        private static RectangleF BlendRectangle(RectangleF from, RectangleF to, float amount)
+        {
+            return new RectangleF(from.X + (to.X - from.X) * amount,
+                from.Y + (to.Y - from.Y) * amount,
+                from.Width + (to.Width - from.Width) * amount,
+                from.Height + (to.Height - from.Height) * amount);
+        }
+
+        private void DrawTravellingLine(Graphics g, string lyric, RectangleF area,
+            RectangleF main, float points, int alpha, float promotion)
+        {
+            if (string.IsNullOrWhiteSpace(lyric) || alpha <= 0) return;
+            // Shape upcoming text in its final layout, then scale that same
+            // outline as it moves. Wrapped lines never reflow mid-transition.
+            var geometry = GetTextGeometry(g, lyric.Trim(), main, points);
+            if (geometry == null) return;
+            var previewScale = Math.Max(0.63f, Math.Min(1, 10f / geometry.FittedPoints));
+            var scale = Math.Min(previewScale + (1 - previewScale) * promotion,
+                Math.Min(Math.Max(1, area.Width - 8) / Math.Max(1, geometry.Bounds.Width),
+                    Math.Max(1, area.Height - 4) / Math.Max(1, geometry.Bounds.Height)));
+            DrawLine(g, lyric, area, points, alpha, main, scale);
+        }
+
+        private void DrawLine(Graphics g, string lyric, RectangleF area, float desiredPoints, int alpha,
+            RectangleF? layoutArea = null, float glyphScale = 1)
         {
             lyric = lyric?.Trim();
             if (string.IsNullOrEmpty(lyric) || alpha <= 0) return;
-            var geometry = GetTextGeometry(g, lyric, area, desiredPoints);
+            var geometry = GetTextGeometry(g, lyric, layoutArea ?? area, desiredPoints);
             if (geometry == null) return;
             using (var shadow = new SolidBrush(Color.FromArgb(alpha * 2 / 3, 0, 0, 0)))
             using (var outline = new Pen(Color.FromArgb(alpha, _settings.BorderColor),
@@ -2533,9 +2586,12 @@ namespace MusicBeePlugin
                     // Centre the actual glyph bounds. The parser can retain
                     // spaces after LRC timestamps, and font side bearings
                     // otherwise shift some lines within the same card.
-                    var centeredX = (area.Width - geometry.Bounds.Width) / 2f -
-                        geometry.Bounds.Left;
-                    g.TranslateTransform(area.Left + centeredX, area.Top);
+                    var centeredX = (area.Width - geometry.Bounds.Width * glyphScale) / 2f;
+                    g.SetClip(area, CombineMode.Intersect);
+                    g.TranslateTransform(area.Left + centeredX,
+                        area.Top + (area.Height - geometry.Bounds.Height * glyphScale) / 2f);
+                    g.ScaleTransform(glyphScale, glyphScale);
+                    g.TranslateTransform(-geometry.Bounds.Left, -geometry.Bounds.Top);
                     g.TranslateTransform(1f, 2f);
                     g.FillPath(shadow, geometry.Path);
                     g.TranslateTransform(-1f, -2f);
@@ -2575,8 +2631,7 @@ namespace MusicBeePlugin
                    {
                        Alignment = StringAlignment.Center,
                        LineAlignment = StringAlignment.Center,
-                       Trimming = fit.Lines == 1 ?
-                           StringTrimming.EllipsisCharacter : StringTrimming.None
+                       Trimming = StringTrimming.None
                    })
             {
                 using (var fitted = new Font(selected.FontFamily, size,
@@ -2669,6 +2724,7 @@ namespace MusicBeePlugin
                 CancelPartyLookup();
                 Interlocked.Increment(ref _artworkRequestId);
                 _animationTimer?.Dispose();
+                _lyricToolTip.Dispose();
                 DisposePartyDancers();
                 _albumArtwork?.Dispose();
                 _backgroundCache?.Dispose();

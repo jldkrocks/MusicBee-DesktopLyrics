@@ -153,6 +153,28 @@ namespace MusicBeePlugin
             if (partyClock.PositionAt(750, 9000, 1000, true) != 750)
                 throw new Exception("Song changes must clear the old playback position.");
 
+            // Different startup poll delays must not permanently change a saved beat.
+            foreach (var delay in new[] { 0, 30, 60, 85 })
+            {
+                var clock = new PartyPlaybackClock();
+                clock.PositionAt(0, 0, 1000, true);
+                var last = clock.PositionAt(100, 100 + delay, 1000, true);
+                var lastWall = 100 + delay;
+                for (var wall = 200; wall <= 5000; wall += 10)
+                {
+                    var position = clock.PositionAt(wall / 100 * 100, wall, 1000, true);
+                    if (Math.Abs(position - last - (wall - lastWall)) >
+                        Math.Ceiling((wall - lastWall) * 0.03) + 1)
+                        throw new Exception("Anchor correction must slew without a position jump.");
+                    last = position; lastWall = wall;
+                }
+                if (Math.Abs(last - 5000) > 2)
+                    throw new Exception("A delayed first sample must converge to fresh playback samples.");
+                clock.PositionAt(5000, 6000, 1000, false);
+                if (clock.PositionAt(5000, 9000, 1000, true) != 5000)
+                    throw new Exception("Pause must discard the previous timing correction.");
+            }
+
             var beatOrigin = PartyAnimation.OriginForBeat(750, 120);
             if (PartyAnimation.FrameAt(750 - beatOrigin, 120) != 6 ||
                 PartyAnimation.FrameAt(1250 - beatOrigin, 120) == 0 ||
@@ -464,18 +486,26 @@ namespace MusicBeePlugin
                     screenshotTranslation, font, 19, 560, 38);
                 var roomyTranslation = LyricTextLayout.Fit(graphics,
                     screenshotTranslation, font, 19, 560, 60);
-                var shortPromotion = LyricTextLayout.CanPromotePreview(graphics,
-                    "The moon above", font, 19, 30, 560, 60, 76);
-                var longPromotion = LyricTextLayout.CanPromotePreview(graphics,
-                    "I'd fly far into space as long as I am with you",
-                    font, 19, 36, 450, 60, 90);
+                var wrapped = LyricTextLayout.Fit(graphics, english, font, 20, 220, 180);
+                var overflow = LyricTextLayout.Fit(graphics, english, font, 20, 220, 35);
+                if (wrapped.Overflow || wrapped.Lines < 3 ||
+                    wrapped.Text.Replace("\n", " ") != english ||
+                    !overflow.Overflow || !overflow.Text.EndsWith("…"))
+                    throw new Exception("Long translations must wrap or explicitly indicate overflow.");
+                foreach (var compactHeight in new[] { 73, 95, 120 })
+                {
+                    var compact = LyricCardLayout.Create(new RectangleF(0, 0, 320, compactHeight),
+                        50, 30, 6, true, true, 0);
+                    if (compact.English.Top < 0 || compact.English.Bottom > compact.Main.Top ||
+                        compact.Main.Bottom > compact.Preview.Top || compact.Preview.Bottom > compactHeight)
+                        throw new Exception("Compact translation, lyric and preview must have separate visible rows.");
+                }
                 if (longLine.Lines != 2 || !longLine.Text.Contains("\n") ||
                     longLine.Points < 12 || shortLine.Lines != 1 ||
                     unspaced.Lines != 2 ||
                     unspaced.Text.Replace("\n", "") != cjk ||
                     roomyTranslation.Lines != 2 ||
-                    roomyTranslation.Points <= crampedTranslation.Points * 1.15f ||
-                    !shortPromotion || longPromotion)
+                    roomyTranslation.Points <= crampedTranslation.Points * 1.15f)
                     throw new Exception("Long lyrics should wrap within their row without shrinking short lines.");
                 using (var format = new StringFormat(StringFormatFlags.NoWrap)
                        { Alignment = StringAlignment.Center,

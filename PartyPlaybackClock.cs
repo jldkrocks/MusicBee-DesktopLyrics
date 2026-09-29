@@ -1,16 +1,25 @@
 using System;
+using System.Collections.Generic;
 
 namespace MusicBeePlugin
 {
     // MusicBee can return the same millisecond position for several UI ticks,
     // then advance it in a larger step. Once a fresh step has anchored the
     // clock, use monotonic elapsed time between samples for steady pose hits.
+    // Reconcile against the least-delayed recent fresh samples so a late
+    // startup poll does not permanently shift a saved beat alignment.
     internal sealed class PartyPlaybackClock
     {
         private bool _initialized, _playing, _anchored;
         private long _lastTimestamp;
         private int _lastRawPosition;
         private double _positionMs;
+        private readonly Queue<Sample> _samples = new Queue<Sample>();
+        private struct Sample
+        {
+            internal long Timestamp;
+            internal double Offset;
+        }
 
         internal void Reset()
         {
@@ -18,6 +27,16 @@ namespace MusicBeePlugin
             _lastTimestamp = 0;
             _lastRawPosition = 0;
             _positionMs = 0;
+            _samples.Clear();
+        }
+
+        private void Observe(int position, long timestamp, long frequency)
+        {
+            while (_samples.Count > 0 &&
+                (timestamp - _samples.Peek().Timestamp) * 1000d / frequency > 3000)
+                _samples.Dequeue();
+            _samples.Enqueue(new Sample { Timestamp = timestamp,
+                Offset = position - timestamp * 1000d / frequency });
         }
 
         internal int PositionAt(int rawPositionMs, long timestamp,
@@ -31,6 +50,7 @@ namespace MusicBeePlugin
                 _playing = playing;
                 _anchored = false;
                 _positionMs = rawPositionMs;
+                _samples.Clear();
             }
             else if (!playing || !_playing)
             {
@@ -39,6 +59,7 @@ namespace MusicBeePlugin
                 _positionMs = rawPositionMs;
                 _playing = playing;
                 _anchored = false;
+                _samples.Clear();
             }
             else
             {
@@ -51,6 +72,7 @@ namespace MusicBeePlugin
                     // A real seek or stalled player must replace the estimate.
                     _positionMs = rawPositionMs;
                     _anchored = false;
+                    _samples.Clear();
                 }
                 else if (!_anchored && rawPositionMs > _lastRawPosition)
                 {
@@ -58,8 +80,23 @@ namespace MusicBeePlugin
                     // age of the sample taken when the window appeared.
                     _positionMs = rawPositionMs;
                     _anchored = true;
+                    Observe(rawPositionMs, timestamp, frequency);
                 }
-                else _positionMs = predicted;
+                else
+                {
+                    _positionMs = predicted;
+                    if (_anchored && rawPositionMs > _lastRawPosition)
+                        Observe(rawPositionMs, timestamp, frequency);
+                    if (_samples.Count > 0)
+                    {
+                        var best = double.NegativeInfinity;
+                        foreach (var sample in _samples) best = Math.Max(best, sample.Offset);
+                        var target = timestamp * 1000d / frequency + best;
+                        // At most 3% rate correction, never a jump between poses.
+                        var limit = Math.Min(5d, elapsedMs * 0.03);
+                        _positionMs += Math.Max(-limit, Math.Min(limit, target - predicted));
+                    }
+                }
             }
 
             _lastTimestamp = timestamp;

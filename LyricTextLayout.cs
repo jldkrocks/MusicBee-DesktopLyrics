@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Collections.Generic;
 using System.Globalization;
 
 namespace MusicBeePlugin
@@ -9,26 +10,75 @@ namespace MusicBeePlugin
         public string Text;
         public float Points;
         public int Lines;
+        public bool Overflow;
     }
 
     internal static class LyricTextLayout
     {
-        internal static bool CanPromotePreview(Graphics graphics, string lyric,
-            Font font, float previewPoints, float mainPoints, float width,
-            float previewHeight, float mainHeight)
+        internal static LyricTextFit Fit(Graphics graphics, string lyric, Font font,
+            float desiredPoints, float width, float height)
         {
-            var preview = Fit(graphics, lyric, font, previewPoints, width, previewHeight);
-            var main = Fit(graphics, lyric, font, mainPoints, width, mainHeight);
-            // A changing row count or large font jump makes the travelling
-            // lyric reflow while it moves. Let those lines slide and fade at
-            // their fixed sizes instead.
-            return preview.Lines == 1 && main.Lines == 1 &&
-                preview.Points >= previewPoints * 0.88f &&
-                main.Points >= mainPoints * 0.88f &&
-                main.Points <= preview.Points * 1.75f;
+            var fit = FitCore(graphics, lyric, font, desiredPoints, width, height);
+            using (var sample = new Font(font.FontFamily, fit.Points, font.Style, GraphicsUnit.Point))
+            {
+                var fits = fit.Lines * sample.GetHeight(graphics) <= height - 2;
+                foreach (var line in fit.Text.Split('\n'))
+                    fits &= graphics.MeasureString(line, sample).Width <= Math.Max(1, width - 8);
+                if (fits) return fit;
+            }
+            // Keep complete words on additional rows before resorting to an
+            // explicit ellipsis. The full text remains available in the reader.
+            using (var sample = new Font(font.FontFamily, 10, font.Style, GraphicsUnit.Point))
+            {
+                var rows = Wrap(graphics, lyric, sample, Math.Max(1, width - 8));
+                var capacity = Math.Max(1, (int)((height - 2) / sample.GetHeight(graphics)));
+                var overflow = rows.Count > capacity || sample.GetHeight(graphics) > height - 2;
+                if (rows.Count > capacity) rows.RemoveRange(capacity, rows.Count - capacity);
+                if (overflow)
+                {
+                    var last = rows[rows.Count - 1];
+                    while (last.Length > 0 && graphics.MeasureString(last + "…", sample).Width > width - 8)
+                    {
+                        var elements = StringInfo.ParseCombiningCharacters(last);
+                        last = last.Substring(0, elements[elements.Length - 1]).TrimEnd();
+                    }
+                    rows[rows.Count - 1] = last + "…";
+                }
+                return new LyricTextFit { Text = string.Join("\n", rows), Points = 10,
+                    Lines = rows.Count, Overflow = overflow };
+            }
         }
 
-        internal static LyricTextFit Fit(Graphics graphics, string lyric, Font font,
+        private static List<string> Wrap(Graphics graphics, string text, Font font, float width)
+        {
+            var rows = new List<string>();
+            var remaining = text.Trim();
+            while (remaining.Length > 0)
+            {
+                var starts = StringInfo.ParseCombiningCharacters(remaining);
+                int low = 1, high = starts.Length, count = 1;
+                while (low <= high)
+                {
+                    var mid = (low + high) / 2;
+                    var end = mid == starts.Length ? remaining.Length : starts[mid];
+                    if (graphics.MeasureString(remaining.Substring(0, end), font).Width <= width)
+                    { count = mid; low = mid + 1; }
+                    else high = mid - 1;
+                }
+                var take = count == starts.Length ? remaining.Length : starts[count];
+                if (take < remaining.Length)
+                {
+                    var space = remaining.LastIndexOf(' ', Math.Max(0, take - 1));
+                    if (space > 0) take = space;
+                }
+                rows.Add(remaining.Substring(0, take).TrimEnd());
+                remaining = remaining.Substring(take).TrimStart();
+            }
+            if (rows.Count == 0) rows.Add("");
+            return rows;
+        }
+
+        private static LyricTextFit FitCore(Graphics graphics, string lyric, Font font,
             float desiredPoints, float width, float height)
         {
             var availableWidth = Math.Max(8f, width - 8f);

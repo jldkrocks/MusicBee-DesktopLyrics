@@ -21,7 +21,7 @@ namespace MusicBeePlugin
         private readonly Bitmap _sheet;
         private Bitmap _surface;
         private Graphics _graphics;
-        private byte[] _pixels;
+        private readonly Bitmap[] _scaledPoses = new Bitmap[PartyAnimation.FrameCount];
         private IntPtr _memoryDc, _dib, _oldBitmap, _dibBits;
         private int _lastFrame = -1;
         private int _lastSquashPixels = -1;
@@ -131,25 +131,27 @@ namespace MusicBeePlugin
                 _lastLiftQuarterPixels == liftQuarterPixels &&
                 _surface != null && _surface.Size == bounds.Size) return;
             if (_surface == null || _surface.Size != bounds.Size) CreateBuffer(bounds.Size);
+            var pose = _scaledPoses[frame];
+            if (pose == null)
+            {
+                pose = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppPArgb);
+                using (var g = Graphics.FromImage(pose))
+                {
+                    g.CompositingMode = CompositingMode.SourceCopy;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(_sheet, new Rectangle(Point.Empty, bounds.Size),
+                        new Rectangle(frame * FrameWidth, 0, FrameWidth, FrameHeight), GraphicsUnit.Pixel);
+                }
+                _scaledPoses[frame] = pose;
+            }
             _graphics.Clear(Color.Transparent);
-            _graphics.DrawImage(_sheet, new RectangleF(swayQuarterPixels / 4f,
+            _graphics.DrawImage(pose, new RectangleF(swayQuarterPixels / 4f,
                     squashPixels - liftQuarterPixels / 4f,
                     bounds.Width, bounds.Height - squashPixels),
-                new Rectangle(frame * FrameWidth, 0, FrameWidth, FrameHeight), GraphicsUnit.Pixel);
-
-            var data = _surface.LockBits(new Rectangle(Point.Empty, bounds.Size),
-                ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
-            try
-            {
-                // A top-down 32-bit DIB consumes premultiplied BGRA pixels.
-                for (var row = 0; row < bounds.Height; row++)
-                {
-                    Marshal.Copy(IntPtr.Add(data.Scan0, row * data.Stride), _pixels,
-                        row * bounds.Width * 4, bounds.Width * 4);
-                }
-                Marshal.Copy(_pixels, 0, _dibBits, _pixels.Length);
-            }
-            finally { _surface.UnlockBits(data); }
+                new RectangleF(0, 0, pose.Width, pose.Height), GraphicsUnit.Pixel);
+            // GDI+ draws directly into the DIB consumed by UpdateLayeredWindow.
+            // Flush before handing the shared pixels to Windows; no managed copy.
+            _graphics.Flush(FlushIntention.Sync);
 
             var screenDc = GetDC(IntPtr.Zero);
             if (screenDc == IntPtr.Zero) throw new Win32Exception();
@@ -173,11 +175,7 @@ namespace MusicBeePlugin
         private void CreateBuffer(Size size)
         {
             ReleaseBuffer();
-            _surface = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
-            _graphics = Graphics.FromImage(_surface);
-            _graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            _graphics.CompositingMode = CompositingMode.SourceCopy;
-            _pixels = new byte[size.Width * size.Height * 4];
+            var byteCount = checked(size.Width * size.Height * 4);
             var screenDc = GetDC(IntPtr.Zero);
             if (screenDc == IntPtr.Zero) throw new Win32Exception();
             try
@@ -190,7 +188,7 @@ namespace MusicBeePlugin
                         Size = (uint)Marshal.SizeOf(typeof(BitmapInfoHeader)),
                         Width = size.Width, Height = -size.Height,
                         Planes = 1, BitCount = 32,
-                        SizeImage = (uint)_pixels.Length
+                        SizeImage = (uint)byteCount
                     }
                 };
                 _dib = CreateDIBSection(screenDc, ref info, 0, out _dibBits,
@@ -199,7 +197,14 @@ namespace MusicBeePlugin
                     throw new Win32Exception();
                 _oldBitmap = SelectObject(_memoryDc, _dib);
                 if (_oldBitmap == IntPtr.Zero) throw new Win32Exception();
+                _surface = new Bitmap(size.Width, size.Height, size.Width * 4,
+                    PixelFormat.Format32bppPArgb, _dibBits);
+                _graphics = Graphics.FromImage(_surface);
+                _graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+                _graphics.PixelOffsetMode = PixelOffsetMode.Half;
+                _graphics.CompositingMode = CompositingMode.SourceCopy;
             }
+            catch { ReleaseBuffer(); throw; }
             finally { ReleaseDC(IntPtr.Zero, screenDc); }
             _lastFrame = -1;
             _lastSquashPixels = -1;
@@ -218,7 +223,11 @@ namespace MusicBeePlugin
             if (_dib != IntPtr.Zero) DeleteObject(_dib);
             if (_memoryDc != IntPtr.Zero) DeleteDC(_memoryDc);
             _oldBitmap = _dib = _memoryDc = _dibBits = IntPtr.Zero;
-            _pixels = null;
+            for (var i = 0; i < _scaledPoses.Length; i++)
+            {
+                _scaledPoses[i]?.Dispose();
+                _scaledPoses[i] = null;
+            }
         }
 
         protected override void Dispose(bool disposing)
