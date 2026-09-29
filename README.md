@@ -137,3 +137,9 @@ Window controls and dance speed (1.15.41):
 - Maximised Party Mode extends the song colours and spectrum behind both dancers; foreground layout and dancer positions are unchanged.
 - The compact Queue tab shares the top toolbar instead of overlapping lyrics. Its expanded list remains a temporary overlay.
 - Play/pause clicks update the icon and clear paused spectrum immediately, then reconcile with MusicBee's reported state. Rejected commands revert; a delayed report has a short grace period.
+
+Maximised lyrics and pause animation (1.15.42):
+- Pause still updates the icon immediately, but releases spectrum targets to zero instead of erasing the bar heights. The existing falling animation starts on the next frame, without waiting for MusicBee's delayed state report.
+- On sufficiently large maximised windows, larger artwork sits at the upper-left of the centre area and the queue sits at the upper-right. Lyrics use the wider space below, while dancers retain their existing positions.
+- The current lyric uses a larger font and measured row spacing. English and upcoming lyrics have smaller visual emphasis; preview size is capped relative to the fitted current line, so short previews do not overpower long current lyrics. Transition endpoints keep stable text layouts as the lyric card resizes.
+- Smaller/restored windows keep their compact layout. Selectable accent beats and GPU integration remain planned.

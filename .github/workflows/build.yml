@@ -28,7 +28,7 @@ jobs:
         run: msbuild tools/GpuRenderProbe.vcxproj /p:Configuration=Release /p:Platform=x64
       - uses: actions/upload-artifact@v4
         with:
-          name: DesktopLyrics-1.15.41.0
+          name: DesktopLyrics-1.15.42.0
           path: |
             bin/Release/mb_DesktopLyrics.dll
             pkg/*.zip
