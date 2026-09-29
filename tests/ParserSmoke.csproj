@@ -20,6 +20,8 @@
     <Compile Include="..\LyricCardLayout.cs"><Link>LyricCardLayout.cs</Link></Compile>
     <Compile Include="..\LyricTextLayout.cs"><Link>LyricTextLayout.cs</Link></Compile>
     <Compile Include="..\PartyTempoMap.cs"><Link>PartyTempoMap.cs</Link></Compile>
+    <Compile Include="..\PartyTimeline.cs"><Link>PartyTimeline.cs</Link></Compile>
+    <Compile Include="..\FrmPartyTempoMap.cs"><Link>FrmPartyTempoMap.cs</Link></Compile>
     <Compile Include="..\PartyAnimation.cs"><Link>PartyAnimation.cs</Link></Compile>
     <Compile Include="..\PartyPlaybackClock.cs"><Link>PartyPlaybackClock.cs</Link></Compile>
     <Compile Include="..\PartyTapTempo.cs"><Link>PartyTapTempo.cs</Link></Compile>
@@ -48,6 +50,7 @@
     <Compile Include="..\FrmLrcLibPicker.cs"><Link>FrmLrcLibPicker.cs</Link></Compile>
     <Compile Include="BpmLookupChecks.cs" />
     <Compile Include="TempoMapChecks.cs" />
+    <Compile Include="TimelineChecks.cs" />
     <Compile Include="Program.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

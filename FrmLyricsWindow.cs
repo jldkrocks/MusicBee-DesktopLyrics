@@ -712,31 +712,36 @@ namespace MusicBeePlugin
         {
             var track = _artworkTrackUrl;
             if (string.IsNullOrWhiteSpace(track)) return;
+            Func<bool> editingCurrentSong = () => _musicBee.NowPlaying_GetFileUrl?.Invoke() == track;
             var bpm = _partyBpm > 0 ? _partyBpm : _partyBeat.Bpm > 0 ? _partyBeat.Bpm : 120;
             var origin = _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs;
             var map = _partyTempoStore.LoadMap(track) ?? new PartyTempoMap { TrackUrl = track,
                 InitialBeat = -origin * bpm / 60000d,
                 Sections = new List<PartyTempoSection> { new PartyTempoSection { Bpm = bpm } } };
             using (var editor = new FrmPartyTempoMap(map, _songTitle,
-                () => _artworkTrackUrl == track ? (double?)ReadPartyPosition(Stopwatch.GetTimestamp()) / 1000 : null,
+                () => editingCurrentSong() ? (double?)ReadPartyPosition(Stopwatch.GetTimestamp()) / 1000 : null,
                 position =>
                 {
-                    if (_artworkTrackUrl != track) throw new InvalidOperationException("Play the song being edited first.");
+                    if (!editingCurrentSong()) throw new InvalidOperationException("Play the song being edited first.");
                     if (position < 0 || position > (_musicBee.NowPlaying_GetDuration?.Invoke() ?? int.MaxValue))
                         throw new ArgumentException("The selected start is outside this song.");
                     _musicBee.Player_SetPosition(position);
-                    if (_playState != Plugin.PlayState.Playing) _musicBee.Player_PlayPause();
                 },
                 result =>
                 {
                     _partyTempoStore.SaveMap(result);
-                    if (_artworkTrackUrl == track)
+                    if (editingCurrentSong() && _artworkTrackUrl == track)
                     {
                         CancelPartyLookup(); _partyMap = result;
                         if (!result.Enabled) StartPartyOnlineLookup();
                         _lastPartyUpdate = 0; UpdatePartyDancers(); Invalidate();
                     }
-                })) editor.ShowDialog(this);
+                }, (_musicBee.NowPlaying_GetDuration?.Invoke() ?? 0) / 1000d,
+                () =>
+                {
+                    if (!editingCurrentSong()) throw new InvalidOperationException("Play the song being edited first.");
+                    _musicBee.Player_PlayPause();
+                }, () => _musicBee.Player_GetPlayState() == Plugin.PlayState.Playing)) editor.ShowDialog(this);
         }
 
         private void OpenPartyTempoEditor()
