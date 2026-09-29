@@ -114,15 +114,15 @@ namespace MusicBeePlugin
         }
 
         public void Present(Rectangle bounds, int frame, float impact, float sway,
-            float anticipation)
+            float anticipation, float countInLift = 0)
         {
             if (IsDisposed || bounds.Width < 1 || bounds.Height < 1) return;
             if (Bounds != bounds) Bounds = bounds;
             // Every beat lands; the side poses have the stronger squash.
             // A small lift just before the next pose softens the static hold.
             var squashPixels = (int)Math.Round(bounds.Height * 0.045f * impact);
-            var liftQuarterPixels = (int)Math.Round(bounds.Height * 0.009f *
-                anticipation * 4);
+            var liftQuarterPixels = (int)Math.Round(bounds.Height *
+                (0.009f * anticipation + 0.018f * countInLift) * 4);
             // Quarter-pixel steps keep the tiny sway from snapping between
             // whole pixels on slow songs.
             var swayQuarterPixels = (int)Math.Round(bounds.Width * sway * 4);

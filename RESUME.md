@@ -4,6 +4,14 @@ Installed baseline: 1.15.34.0, release code f3352ad. Actions run 36601163777 pas
 
 User authorized these features, with small independently verified checkpoints. Do not overwrite the installed DLL with unfinished work. Build each release through GitHub Actions; back up and verify the DLL before installation. Do not reset or redo completed work. User wants to conserve usage; remaining account allowance is not visible to the agent.
 
+## Current work: 1.15.35.0
+Optional Bob count-in on a Normal row immediately after Half speed. Adds up to four whole vertical bobs before the return at the incoming BPM, with a gentle first bob and zero lift/velocity at cue boundaries. Phase, saved alignment, BPM and pose sequence are unchanged; old maps default off. Short sections fit fewer complete bobs; holds never bob. BPM ramp now explains that equal BPM values do nothing and style changes remain immediate. Editor stores the per-row checkbox. PARTY: Shift-click opens BPM/alignment (read-only explanation while map enabled), Ctrl-click opens tempo map; ordinary click still toggles. Hover hint added.
+Local plugin build and smoke tests passed, including cue boundaries, old-map compatibility, persistence, short sections, seeking, holds and editor repeat-save. Editor snapshot checked with the user's seven-row Asterisk map. GitHub release build/install still pending; do not replace the installed DLL with the local build.
+For the user's screenshot, tick Bob count-in on the Normal row at 196.51 and Save. The video is F:/2026-09-29 18-12-46.mkv. User requested this cue and shortcuts before continuing other work.
+
+## Rhythm options to discuss in a later checkpoint
+Do not lose the user's request for 3/4 waltz and swing. Discuss per-section rhythm choices, three-beat grouping/downbeat emphasis for waltz, long-short subdivision timing/swing ratio, and optional bouncier centre poses. These are distinct from musical BPM and Half speed. Preserve phase across changes and existing songs by default. None of these rhythm options is implemented yet.
+
 ## Current checkpoint
 1.15.32.0 fixes dark submenu text (light enabled text/arrows and muted readable disabled text; off-screen menu rendering verified). Copy song and artist replaces the research prompt: clipboard contains only Artist – Song title, or title if artist missing. No success dialog. User's ChatGPT project already has the research context. Do not restore the verbose prompt. Retry supports Deezer-only configuration and preserves saved timing. These menu/copy features remain intact.
 
@@ -13,10 +21,9 @@ Browser BPM search was implemented in 843763b (1.15.30.0), locally built and smo
 Tempo-map editor has a dark styled layout, live seek timeline with section diamonds/coloured spans, Play/Pause, +/-5 seconds and Seek to row. Marker clicks select a row and seek; dragging seeks once on release without moving sections. Seeking preserves pause state. Save applies and keeps the editor open; Close confirms discarding later unsaved edits without undoing earlier saves. Navigation is disabled for another song; saving stays attached to the original song. Tests cover seek mapping, markers, scrub release, repeated saves, and track changes. Editor snapshot verified. No changes to main lyrics layout, dancer placement, or GPU integration in this release.
 
 ## User-requested follow-ups (one at a time)
-- Shift-click the existing PARTY button should open the regular BPM controls; Ctrl-click should open the tempo map. Not implemented yet. Plain click must continue toggling Party Mode.
 - Make lyrics the visual focus in maximized mode, especially long current lines; current screenshot shows large empty gaps and the shorter upcoming lyric can appear more prominent. Do not move the dancers. Discuss/implement as a separate checkpoint.
 - 4K performance is better but still less smooth than the smaller window. Full GPU integration remains pending; the isolated probe is not the plugin renderer.
-User explicitly requested one thing at a time in case usage runs out. This pass completed only the editor workflow.
+User explicitly requested one thing at a time in case usage runs out. The previous pass completed only the editor workflow; the current checkpoint adds count-in and shortcuts.
 
 ## Implemented in 1.15.33.0
 - Party BPM → Edit tempo map: separate per-song map storage, optional enabled flag, decimal-second starts, BPM, ramp duration, normal/side-to-side/half-speed/hold styles, explicit side-beat alignment. Save sorts and validates; Cancel discards; unchecking the enabled box restores underlying BPM. Existing song timing files are untouched. Tests cover integration, ramps, holds, styles, seeks, persistence and invalid-save preservation.

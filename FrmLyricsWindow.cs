@@ -28,6 +28,7 @@ namespace MusicBeePlugin
         private PartyTempoMap _partyMap;
         private readonly Action<string> _englishSaved;
         private readonly ContextMenuStrip _flyoutMenu;
+        private readonly ToolTip _partyShortcutTip = new ToolTip { InitialDelay = 500, AutoPopDelay = 7000 };
         private readonly float[] _fft = new float[4096];
         private readonly float[] _bars = new float[BarCount];
         private readonly float[] _levels = new float[BarCount];
@@ -387,8 +388,9 @@ namespace MusicBeePlugin
                 timingAction.Visible = _timingButton.IsEmpty;
                 lrcAction.Visible = _lrcButton.IsEmpty;
                 mapAction.Enabled = !string.IsNullOrWhiteSpace(_artworkTrackUrl);
-                tempoAction.Enabled = mapAction.Enabled && !(_partyMap?.Enabled ?? false);
-                tempoAction.ToolTipText = "Disable the tempo map to adjust the single-BPM timing.";
+                tempoAction.Enabled = mapAction.Enabled;
+                tempoAction.ToolTipText = "Shift-click PARTY. While a map is enabled, single-BPM settings are read-only.";
+                mapAction.ToolTipText = "Ctrl-click PARTY to edit the tempo map.";
                 browserBpm.Enabled = copySong.Enabled = !string.IsNullOrWhiteSpace(_songTitle);
                 var savedTempo = !string.IsNullOrWhiteSpace(_artworkTrackUrl) ?
                     _partyTempoStore.Load(_artworkTrackUrl) : null;
@@ -909,6 +911,15 @@ namespace MusicBeePlugin
                         explanation, forget, cancel, save });
                 dialog.AcceptButton = save;
                 dialog.CancelButton = cancel;
+                var mapActive = _partyMap?.Enabled ?? false;
+                if (mapActive)
+                {
+                    bpmInput.Enabled = syncBeat.Enabled = tapButton.Enabled = half.Enabled = twice.Enabled =
+                        forget.Enabled = save.Enabled = false;
+                    tapStatus.Text = "Tempo map active - single BPM is read-only.";
+                    explanation.Text = "To edit these settings, open the tempo map (Ctrl-click PARTY) and uncheck Use this map for this song, then Save.";
+                    cancel.Text = "Close";
+                }
                 DialogResult result;
                 try { result = dialog.ShowDialog(this); }
                 finally
@@ -917,7 +928,7 @@ namespace MusicBeePlugin
                     _lastPartyUpdate = 0;
                     UpdatePartyDancers();
                 }
-                if (result != DialogResult.OK && result != DialogResult.No) return;
+                if (mapActive || (result != DialogResult.OK && result != DialogResult.No)) return;
                 try
                 {
                     if (_musicBee.NowPlaying_GetFileUrl() != trackUrl)
@@ -1007,17 +1018,19 @@ namespace MusicBeePlugin
                     PartyAnimation.CentreImpactAt(phasePosition, bpm);
                 var sway = PartyAnimation.SwayAt(phasePosition, bpm);
                 var anticipation = PartyAnimation.AnticipationAt(phasePosition, bpm);
+                float countInLift = 0;
                 if ((_partyMap?.Enabled ?? false) && _partyPreviewTrackUrl == null)
                 {
                     var mapped = _partyMap.At((position + PartyAnimation.VisualLeadMs) / 1000d);
                     frame = mapped.Frame; impact = mapped.Impact;
                     sway = mapped.Sway; anticipation = mapped.Anticipation;
+                    countInLift = mapped.CountInLift;
                 }
                 RefreshPartyLayout();
                 PlacePartyDancer(_leftDancer, _leftPartyBounds, frame, impact,
-                    sway, anticipation);
+                    sway, anticipation, countInLift);
                 PlacePartyDancer(_rightDancer, _rightPartyBounds, frame, impact,
-                    sway, anticipation);
+                    sway, anticipation, countInLift);
             }
             catch (Exception ex)
             {
@@ -1066,14 +1079,14 @@ namespace MusicBeePlugin
         }
 
         private void PlacePartyDancer(PartyDancerWindow dancer, Rectangle bounds,
-            int frame, float impact, float sway, float anticipation)
+            int frame, float impact, float sway, float anticipation, float countInLift)
         {
             if (bounds.IsEmpty)
             {
                 dancer.Hide();
                 return;
             }
-            dancer.Present(bounds, frame, impact, sway, anticipation);
+            dancer.Present(bounds, frame, impact, sway, anticipation, countInLift);
             if (!dancer.Visible) dancer.Show(this);
         }
 
@@ -2429,6 +2442,8 @@ namespace MusicBeePlugin
                 !_queueDownButton.IsEmpty && _queueDownButton.Contains(e.Location) ? "queue-down" :
                 queueHit == null ? null : "queue";
             if (hit == _hoverButton && queueHit == _hoverQueue) return;
+            _partyShortcutTip.SetToolTip(this, hit == "party" ?
+                "Click: Party on/off\r\nShift-click: BPM and alignment\r\nCtrl-click: tempo map" : null);
             _hoverButton = hit;
             _hoverQueue = queueHit;
             Cursor = hit == null ? Cursors.Default : Cursors.Hand;
@@ -2465,6 +2480,7 @@ namespace MusicBeePlugin
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
+            _partyShortcutTip.SetToolTip(this, null);
             _hoverButton = null;
             _hoverQueue = null;
             Cursor = Cursors.Default;
@@ -2523,6 +2539,9 @@ namespace MusicBeePlugin
             }
             if (_partyButton.Contains(e.Location))
             {
+                _partyShortcutTip.SetToolTip(this, null);
+                if ((ModifierKeys & Keys.Control) != 0) { OpenPartyTempoMap(); return; }
+                if ((ModifierKeys & Keys.Shift) != 0) { OpenPartyTempoEditor(); return; }
                 _settings.PartyMode = !_settings.PartyMode;
                 if (_settings.PartyMode) StartPartyOnlineLookup(true);
                 else CancelPartyLookup();
@@ -2864,6 +2883,7 @@ namespace MusicBeePlugin
                 if (_lrcPicker != null && !_lrcPicker.IsDisposed)
                     _lrcPicker.Close();
                 _flyoutMenu?.Dispose();
+                _partyShortcutTip.Dispose();
             }
             base.Dispose(disposing);
         }

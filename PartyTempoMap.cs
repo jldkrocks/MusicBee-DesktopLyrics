@@ -12,6 +12,7 @@ namespace MusicBeePlugin
         public double RampSeconds;
         public PartyDanceStyle Style;
         public bool AlignBeat;
+        public bool CountIn;
     }
 
     internal sealed class PartyTempoMap
@@ -26,7 +27,7 @@ namespace MusicBeePlugin
         {
             if (Version != 1 || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
                 Sections.Count == 0 || Sections.Count > 500 || !Finite(InitialBeat))
-                throw new ArgumentException("The map needs a song and 1Ã¢â‚¬â€œ500 sections.");
+                throw new ArgumentException("The map needs a song and 1-500 sections.");
             double previous = -1;
             for (int i = 0; i < Sections.Count; i++)
             {
@@ -36,11 +37,14 @@ namespace MusicBeePlugin
                     !Finite(s.Bpm) || s.Bpm < 40 || s.Bpm > 240 ||
                     !Finite(s.RampSeconds) || s.RampSeconds < 0 ||
                     !Enum.IsDefined(typeof(PartyDanceStyle), s.Style))
-                    throw new ArgumentException("Use increasing start times, BPM 40Ã¢â‚¬â€œ240 and nonnegative ramp lengths.");
+                    throw new ArgumentException("Use increasing start times, BPM 40-240 and nonnegative ramp lengths.");
                 if (i == 0 && (s.StartSeconds != 0 || s.RampSeconds != 0))
                     throw new ArgumentException("The first section must start at 0 with no ramp.");
                 if (s.Style == PartyDanceStyle.Hold && (s.RampSeconds != 0 || s.AlignBeat))
                     throw new ArgumentException("Hold sections cannot have tempo ramps or beat alignment.");
+                if (s.CountIn && (i == 0 || s.Style != PartyDanceStyle.Normal ||
+                    Sections[i - 1].Style != PartyDanceStyle.HalfSpeed))
+                    throw new ArgumentException("Count-in belongs on a Normal row immediately after Half speed. It adds up to four bobs before that row starts.");
                 if (i + 1 < Sections.Count && Sections[i + 1] != null &&
                     s.RampSeconds > Sections[i + 1].StartSeconds - s.StartSeconds)
                     throw new ArgumentException("A ramp must finish before the next section.");
@@ -80,9 +84,32 @@ namespace MusicBeePlugin
                         tempo + (section.Bpm - tempo) * elapsed / ramp : section.Bpm;
                 }
                 if (seconds < end || i == Sections.Count - 1)
-                    return MakePose(beat, tempo, style, held);
+                {
+                    var pose = MakePose(beat, tempo, style, held);
+                    if (!held && style == PartyDanceStyle.HalfSpeed && i + 1 < Sections.Count)
+                        pose.CountInLift = CountInLiftAt(section, Sections[i + 1], seconds);
+                    return pose;
+                }
             }
             return MakePose(beat, tempo, style, false);
+        }
+
+        // A visual cue only: never alter phase, BPM or the transition time.
+        // Whole bobs count backwards from the incoming boundary, so even a short
+        // half-speed section starts/ends the cue at rest and seeks are repeatable.
+        private static float CountInLiftAt(PartyTempoSection previous, PartyTempoSection next, double seconds)
+        {
+            if (!next.CountIn || next.Style != PartyDanceStyle.Normal) return 0;
+            var period = 60 / next.Bpm;
+            var beats = Math.Min(4, Math.Floor((next.StartSeconds - previous.StartSeconds) / period + 1e-9));
+            var start = next.StartSeconds - beats * period;
+            if (beats < 1 || seconds <= start || seconds >= next.StartSeconds) return 0;
+            var progress = (seconds - start) / period;
+            var bob = Math.Sin(Math.PI * progress);
+            // Bring the first bob in gently; the squared sine lands with zero
+            // velocity on each incoming beat, including the return to Normal.
+            var strength = 0.65 + 0.35 * Math.Min(1, progress / Math.Max(1, beats - 1));
+            return (float)(bob * bob * strength);
         }
 
         private static PartyMapPose MakePose(double beat, double bpm, PartyDanceStyle style, bool held)
@@ -113,6 +140,6 @@ namespace MusicBeePlugin
         internal double Beat, Bpm;
         internal int Frame;
         internal bool Held;
-        internal float Impact, Sway, Anticipation;
+        internal float Impact, Sway, Anticipation, CountInLift;
     }
 }

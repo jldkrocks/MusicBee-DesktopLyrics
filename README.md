@@ -32,14 +32,17 @@ To add a MusicBee toolbar button, right-click its toolbar and choose **Configure
 The lyrics flyout groups adjustment/alignment, browser search, song copying, online lookup settings and retry under **Party BPM**. **Copy song and artist** copies only `Artist – Song title` for pasting into your existing ChatGPT project or elsewhere (just the title if artist is missing). It copies silently without an extra dialog. It does not contact ChatGPT or replace saved timing. Enabled menu text is light; unavailable actions use a readable muted colour.
 
 
+Hold **Shift** while clicking **PARTY** to open BPM/alignment controls, or **Ctrl** to open the tempo map. Plain click still toggles Party Mode. While a map is enabled, the single-BPM controls are read-only and explain how to return to them.
+
 ### Per-song tempo map
 
 Choose **Party BPM → Edit tempo map…** to mark tempo changes or beatless passages. The first row starts at zero and is seeded from the current BPM (120 if none is known). Each row lasts until the next start time. Times are seconds with optional decimals; Save sorts rows by start time and rejects duplicates.
 
 - **BPM** sets the section's musical tempo, from 40 to 240.
-- **Ramp (s)** gradually reaches that BPM from the previous tempo. Zero changes speed immediately while preserving phase. A ramp must finish before the next section; the first row cannot ramp.
+- **BPM ramp (s)** gradually reaches that BPM from the previous tempo: for example, 120 to 150 over 4 seconds. Equal BPM values have no ramp effect. This controls BPM only; switching dance styles (including Half speed to Normal) still happens at the row start. Zero changes BPM immediately while preserving phase. A ramp must finish before the next section; the first row cannot ramp.
 - **Dance** selects Normal, Side to side (no centre poses), Half speed, or Hold pose. Hold freezes the pose and movement until the next row; its BPM is ignored. A final Hold lasts to the end of the song.
 - **Align** starts a raised-arm side pose exactly at the section boundary (with the existing display-latency lead). Leave it unchecked to keep phase continuous. Hold cannot align or ramp.
+- **Bob count-in** is optional on a Normal row immediately after Half speed. It adds up to four vertical bobs at the incoming BPM before that Normal row starts, without changing saved beat phase or the section's start. Short half-speed sections fit only whole bobs; less than one beat gives no cue. Tick the box on the returning Normal row, then Save. Existing maps keep it off. It cues a style change; it does not gradually accelerate the dance.
 
 The editor has a live timeline with section diamonds and coloured spans. Click a diamond to select its table row and seek to its start. Click or drag elsewhere on the timeline to seek; dragging commits one seek on release and does not move section boundaries. Arrow keys seek five seconds; Home/End go to the song bounds. Unknown-duration streams cannot use the timeline.
 

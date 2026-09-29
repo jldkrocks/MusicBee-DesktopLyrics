@@ -32,13 +32,10 @@ namespace MusicBeePlugin
             _togglePlayback = togglePlayback; _playing = playing;
             Font = _editorFont; BackColor = Color.FromArgb(23, 27, 38); ForeColor = Color.FromArgb(232, 236, 245);
             Text = "Tempo map — " + title;
-            Size = new Size(940, 610); MinimumSize = new Size(800, 540);
+            Size = new Size(980, 650); MinimumSize = new Size(900, 600);
             StartPosition = FormStartPosition.CenterParent; ShowInTaskbar = false;
             MinimizeBox = false; TopMost = true;
-            var help = new Label { Dock = DockStyle.Top, Height = 78, Padding = new Padding(10),
-                Text = "Sections last until the next start time. First row starts at 0. Times are seconds (decimals allowed)." +
-                    "\r\nRamp smoothly reaches the row's BPM from the previous tempo; 0 changes speed immediately." +
-                    "\r\nHold pose freezes until the next row. Align starts a side pose on that row's start; leave it off for continuous phase." };
+            var help = new Label { Dock = DockStyle.Fill };
             _enabled.Text = "Use this map for this song"; _enabled.Checked = map.Enabled;
             _enabled.Dock = DockStyle.Top; _enabled.Height = 28; _enabled.Padding = new Padding(10, 0, 0, 0);
             _grid.Dock = DockStyle.Fill; _grid.AllowUserToAddRows = false;
@@ -46,11 +43,18 @@ namespace MusicBeePlugin
             _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect; _grid.MultiSelect = false;
             _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             _grid.Columns.Add("start", "Start (s)"); _grid.Columns.Add("bpm", "BPM");
-            _grid.Columns.Add("ramp", "Ramp (s)");
+            _grid.Columns.Add("ramp", "BPM ramp (s)");
             _grid.Columns.Add(new DataGridViewComboBoxColumn { Name = "style", HeaderText = "Dance", DataSource = Styles });
             _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "align", HeaderText = "Align" });
+            _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "countIn", HeaderText = "Bob count-in" });
+            _grid.Columns[2].ToolTipText = "Seconds to blend from the previous BPM to this row's BPM. Example: 120 to 150 over 4 seconds. Equal BPM values do not ramp; dance styles switch at the start.";
+            _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start. Leave off to preserve the ongoing pose sequence.";
+            _grid.Columns[5].ToolTipText = "Check on the Normal row after Half speed: up to four vertical bobs at the incoming BPM before this row starts. Does not change beat alignment.";
+            _grid.Columns[3].FillWeight = 140;
+            _grid.Columns[4].FillWeight = 65;
+            _grid.RowTemplate.Height = 29;
             foreach (DataGridViewColumn column in _grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
-            foreach (var section in map.Sections) AddRow(section.StartSeconds, section.Bpm, section.RampSeconds, section.Style, section.AlignBeat);
+            foreach (var section in map.Sections) AddRow(section.StartSeconds, section.Bpm, section.RampSeconds, section.Style, section.AlignBeat, section.CountIn);
             _grid.BackgroundColor = Color.FromArgb(30, 35, 48);
             _grid.BorderStyle = BorderStyle.None; _grid.GridColor = Color.FromArgb(54, 62, 79);
             _grid.EnableHeadersVisualStyles = false; _grid.ColumnHeadersHeight = 32; _grid.RowTemplate.Height = 29;
@@ -90,14 +94,13 @@ namespace MusicBeePlugin
             AddButton(actions, "Close", () => Close());
             _status.Text = "Click a section diamond to select and seek. Drag the playhead to scrub; Save applies edits and keeps this window open.";
             _status.ForeColor = Color.FromArgb(178, 192, 212);
-            help.Dock = DockStyle.Fill; help.Padding = Padding.Empty;
-            help.Text = "Sections last until the next start. Times are seconds; first row starts at 0. " +
-                "Ramp reaches the new BPM gradually; 0 changes it immediately.\r\n" +
-                "Hold pose freezes until the next section. Align restarts a side pose on that row’s start.\r\n" +
-                "Timeline colours: blue = normal, purple = side to side, amber = half speed, grey = hold.";
+            help.Text = "Sections last until the next start; times are seconds. First row starts at 0. Save applies edits without closing.\r\n" +
+                "BPM ramp: 120 to 150 over 4 seconds = gradual tempo change. Equal BPM values do nothing; dance styles change at the start.\r\n" +
+                "Bob count-in: tick the Normal row after Half speed for up to four bobs BEFORE the return, at the incoming BPM.\r\n" +
+                "Hold pose stops all motion. Align restarts a side pose. Colours: blue = normal, purple = side to side, amber = half speed, grey = hold.";
             _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 84));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -109,6 +112,15 @@ namespace MusicBeePlugin
             layout.Controls.Add(_enabled, 0, 4); layout.Controls.Add(_status, 0, 5); layout.Controls.Add(actions, 0, 6);
             Controls.Add(layout);
             _grid.CellValueChanged += (sender, args) => MarkDirty();
+            _grid.CellToolTipTextNeeded += (sender, args) =>
+            {
+                if (args.ColumnIndex >= 0) args.ToolTipText = _grid.Columns[args.ColumnIndex].ToolTipText;
+            };
+            _grid.CurrentCellDirtyStateChanged += (sender, args) =>
+            {
+                if (_grid.IsCurrentCellDirty && (_grid.CurrentCell is DataGridViewCheckBoxCell ||
+                    _grid.CurrentCell is DataGridViewComboBoxCell)) _grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            };
             _grid.CellBeginEdit += (sender, args) => MarkDirty();
             _grid.SelectionChanged += (sender, args) => RefreshMarkers();
             _enabled.CheckedChanged += (sender, args) => MarkDirty();
@@ -123,10 +135,10 @@ namespace MusicBeePlugin
             _grid.DataError += (sender, args) => { args.ThrowException = false; };
         }
 
-        private void AddRow(double start, double bpm, double ramp, PartyDanceStyle style, bool align)
+        private void AddRow(double start, double bpm, double ramp, PartyDanceStyle style, bool align, bool countIn = false)
         {
             _grid.Rows.Add(start.ToString("0.###", CultureInfo.CurrentCulture), bpm.ToString("0.###", CultureInfo.CurrentCulture),
-                ramp.ToString("0.###", CultureInfo.CurrentCulture), Styles[(int)style], align);
+                ramp.ToString("0.###", CultureInfo.CurrentCulture), Styles[(int)style], align, countIn);
         }
 
         private static Button AddButton(FlowLayoutPanel panel, string text, Action action)
@@ -217,7 +229,8 @@ namespace MusicBeePlugin
                 foreach (DataGridViewRow row in _grid.Rows)
                     map.Sections.Add(new PartyTempoSection { StartSeconds = Number(row, 0), Bpm = Number(row, 1),
                         RampSeconds = Number(row, 2), Style = (PartyDanceStyle)Array.IndexOf(Styles, Convert.ToString(row.Cells[3].Value)),
-                        AlignBeat = Convert.ToBoolean(row.Cells[4].Value ?? false) });
+                        AlignBeat = Convert.ToBoolean(row.Cells[4].Value ?? false),
+                        CountIn = Convert.ToBoolean(row.Cells[5].Value ?? false) });
                 map.Sections = map.Sections.OrderBy(s => s.StartSeconds).ToList();
                 map.Validate();
                 _save(map); _dirty = false;

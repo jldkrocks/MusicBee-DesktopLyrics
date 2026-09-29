@@ -30,7 +30,8 @@ internal static class TimelineChecks
             if (seek != 100 || seeks != 2 || timeline.Markers[0].Seconds != 50) throw new Exception("Release seeks without moving markers.");
         }
         var map = new PartyTempoMap { TrackUrl = "original" };
-        map.Sections.Add(new PartyTempoSection { Bpm = 120 });
+        map.Sections.Add(new PartyTempoSection { Bpm = 120, Style = PartyDanceStyle.HalfSpeed });
+        map.Sections.Add(new PartyTempoSection { StartSeconds = 20, Bpm = 120, CountIn = true });
         double? position = 10; int saved = 0; PartyTempoMap last = null; int requestedSeek = -1;
         using (var editor = new FrmPartyTempoMap(map, "Test song", () => position,
             p => requestedSeek = p, m => { saved++; last = m; }, 100, () => {}, () => true))
@@ -39,9 +40,12 @@ internal static class TimelineChecks
             if (saved != 1 || editor.IsDisposed || editor.DialogResult != DialogResult.None)
                 throw new Exception("Save must apply without closing the editor.");
             var grid = (DataGridView)Field(editor, "_grid");
+            if (!Convert.ToBoolean(grid.Rows[1].Cells[5].Value) || !last.Sections[1].CountIn)
+                throw new Exception("Editor must load and save the count-in checkbox.");
+            grid.Rows[1].Cells[5].Value = false;
             grid.Rows[0].Cells[1].Value = "90";
             Call(editor, "SaveMap");
-            if (saved != 2 || last.Sections[0].Bpm != 90 || map.Sections[0].Bpm != 120)
+            if (saved != 2 || last.Sections[0].Bpm != 90 || map.Sections[0].Bpm != 120 || last.Sections[1].CountIn || !map.Sections[1].CountIn)
                 throw new Exception("Repeated saves must apply new values without mutating the original map object.");
             Call(editor, "SeekTo", 105d);
             if (requestedSeek != 100000) throw new Exception("Editor seeks must clamp to song length.");
