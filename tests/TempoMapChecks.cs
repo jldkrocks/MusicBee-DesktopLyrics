@@ -13,49 +13,91 @@ internal static class TempoMapChecks
         map.Sections.Add(new PartyTempoSection { Bpm = 120, Style = PartyDanceStyle.HalfSpeed });
         var returning = new PartyTempoSection { StartSeconds = 10, Bpm = 120, CountIn = true };
         map.Sections.Add(returning); map.Validate();
-        Near(map.At(7.99).CountInLift, 0, "No cue before the last four incoming beats");
-        Near(map.At(8).CountInLift, 0, "Count-in starts at rest");
+        // At the Normal boundary the phase is 10.37, so the next pose beat is
+        // at 10.315. The count-in must share THAT clock, not the marker at 10.
+        var nextPoseBeat = map.At(10.315);
+        Near(nextPoseBeat.Beat, 11, "Incoming pose beat with saved nonzero alignment");
+        Near(map.At(8.20).CountInAccent, 0, "No cue before the first beat preparation");
+        Near(map.At(8.215).CountInAccent, 0, "Count-in starts smoothly");
         for (int i = 0; i < 4; i++)
         {
-            Near(map.At(8 + i * 0.5).CountInLift, 0, "Each count lands on the incoming beat grid");
-            if (map.At(8.25 + i * 0.5).CountInLift < 0.6) throw new Exception("All four bobs must be visible.");
+            var hit = 8.315 + i * 0.5;
+            var pose = map.At(hit);
+            Near(pose.CountInAccent, 1, "All four dips land on the incoming pose clock");
+            Near(pose.Impact, 1.7, "Every count has a strong downward accent");
+            Near(pose.Anticipation, 0, "Half-speed lift must not oppose the downbeat");
+            if (map.At(hit - 0.02).CountInAccent >= pose.CountInAccent ||
+                map.At(hit + 0.02).CountInAccent >= pose.CountInAccent)
+                throw new Exception("The deepest dip must occur on the beat, not halfway between beats.");
         }
-        Near(map.At(9.99999).CountInLift, 0, "Cue lands smoothly before transition");
-        Near(map.At(10).CountInLift, 0, "No residual cue at transition");
-        Near(map.At(12).CountInLift, 0, "No cue after transition");
+        Near(map.At(9.99999).CountInAccent, 0, "Cue fades smoothly before transition");
+        Near(map.At(10).CountInAccent, 0, "No residual cue at transition");
+        Near(map.At(12).CountInAccent, 0, "No cue after transition");
         for (double t = 0; t < 12; t += 0.013)
         {
             returning.CountIn = true; var withCue = map.At(t);
             returning.CountIn = false; var withoutCue = map.At(t);
             if (withCue.Frame != withoutCue.Frame || withCue.Beat != withoutCue.Beat ||
-                withCue.Bpm != withoutCue.Bpm || withCue.Impact != withoutCue.Impact ||
-                withCue.Sway != withoutCue.Sway || withCue.Anticipation != withoutCue.Anticipation || withoutCue.CountInLift != 0)
-                throw new Exception("A count-in must not change existing timing or motion.");
+                withCue.Bpm != withoutCue.Bpm || withCue.Sway != withoutCue.Sway || withoutCue.CountInAccent != 0)
+                throw new Exception("A count-in must not change the pose sequence or saved timing.");
+            if ((t < 8.215 || t >= 10) &&
+                (withCue.Impact != withoutCue.Impact || withCue.Anticipation != withoutCue.Anticipation))
+                throw new Exception("Motion outside the optional cue must be unchanged.");
         }
         returning.CountIn = true;
+        returning.AlignBeat = true;
+        Near(map.At(10).Beat, 10, "Explicit Align restarts the incoming side pose");
+        for (int i = 0; i < 4; i++) Near(map.At(8 + i * 0.5).CountInAccent, 1, "Count-in must anticipate explicit alignment too");
+        returning.AlignBeat = false;
+        // Moving a non-aligned section by a little must retain its fractional
+        // incoming phase instead of making the marker itself an artificial beat.
+        returning.StartSeconds = 10.16;
+        Near(map.At(8.395).CountInAccent, 1, "Off-beat marker still uses the incoming pose clock");
+        Near(map.At(10.395).Beat, 11, "Cue and later normal pose remain one beat grid");
+        returning.StartSeconds = 10;
+        foreach (var origin in new[] { 0.01, 0.05, 0.15, 0.8, -0.2 })
+        {
+            map.InitialBeat = origin;
+            var lastHit = 10 - (origin - Math.Floor(origin)) / 2;
+            Near(map.At(lastHit).CountInAccent, 1, "A nearby marker cannot weaken or shift the final downbeat");
+            if (map.At(lastHit - 0.001).CountInAccent >= 1 || map.At(lastHit + 0.001).CountInAccent >= 1)
+                throw new Exception("Final bob must peak on the beat even near an off-beat boundary.");
+        }
+        map.InitialBeat = 0.37;
         var beforeSeek = map.At(9.17); map.At(25); map.At(0);
-        Near(map.At(9.17).CountInLift, beforeSeek.CountInLift, "Seeking must reproduce the count-in");
+        Near(map.At(9.17).CountInAccent, beforeSeek.CountInAccent, "Seeking must reproduce the count-in");
         returning.RampSeconds = 3;
         Near(map.At(11).Bpm, 120, "Equal BPM values have no ramp effect");
-        returning.RampSeconds = 0;
+        returning.Bpm = 180;
+        Near(map.At(8.315).CountInAccent, 1, "Incoming ramp must count at its initial tempo");
+        returning.RampSeconds = 0; returning.Bpm = 120;
+        // A ramp inside the half-speed section must contribute its integrated
+        // phase to the incoming clock, not an estimate using the final BPM.
+        var rampMap = new PartyTempoMap { TrackUrl = "ramp", InitialBeat = 0.37 };
+        rampMap.Sections.Add(new PartyTempoSection { Bpm = 120 });
+        rampMap.Sections.Add(new PartyTempoSection { StartSeconds = 4, Bpm = 180, RampSeconds = 2, Style = PartyDanceStyle.HalfSpeed });
+        rampMap.Sections.Add(new PartyTempoSection { StartSeconds = 10, Bpm = 90, CountIn = true });
+        rampMap.Validate();
+        Near(rampMap.At(10).Beat, 16.87, "Half-speed ramp endpoint phase");
+        Near(rampMap.At(10 - 0.87 / 1.5).CountInAccent, 1, "Ramped section count-in uses the true endpoint phase");
         // A short half-speed section gets complete bobs only; never a mid-bob pop.
         map.Sections.Insert(0, new PartyTempoSection { Bpm = 120 });
         map.Sections[1].StartSeconds = 9.3; map.Validate();
-        Near(map.At(9.3).CountInLift, 0, "Short section starts without a jump");
-        Near(map.At(9.49).CountInLift, 0, "Short section waits for a whole bob");
-        if (map.At(9.75).CountInLift < 0.6) throw new Exception("Short section should fit one whole bob.");
+        Near(map.At(9.3).CountInAccent, 0, "Short section starts without a jump");
+        Near(map.At(9.49).CountInAccent, 0, "Short section waits for beat preparation");
+        Near(map.At(9.665).CountInAccent, 1, "Short section should fit one strong bob");
         map.Sections[1].StartSeconds = 9.8;
-        Near(map.At(9.9).CountInLift, 0, "Less than one incoming beat cannot fit a bob");
+        Near(map.At(9.9).CountInAccent, 0, "Less than one incoming beat cannot fit a bob");
         map.Sections.RemoveAt(0); map.Sections[0].StartSeconds = 0;
         map.Sections[0].Style = PartyDanceStyle.Hold;
         bool rejected = false;
         try { map.Validate(); } catch (ArgumentException) { rejected = true; }
-        if (!rejected || map.At(9.25).CountInLift != 0) throw new Exception("Count-in must not animate a hold.");
+        if (!rejected || map.At(9.25).CountInAccent != 0) throw new Exception("Count-in must not animate a hold.");
         map.Sections[0].Style = PartyDanceStyle.HalfSpeed; map.Validate();
         // Old v1 maps have no CountIn member and remain valid with the cue off.
         var oldJson = JsonConvert.SerializeObject(map).Replace(",\"CountIn\":true", "").Replace(",\"CountIn\":false", "");
         var legacy = JsonConvert.DeserializeObject<PartyTempoMap>(oldJson); legacy.Validate();
-        if (legacy.Sections[1].CountIn || legacy.At(9.25).CountInLift != 0) throw new Exception("Existing maps must not opt in automatically.");
+        if (legacy.Sections[1].CountIn || legacy.At(9.25).CountInAccent != 0) throw new Exception("Existing maps must not opt in automatically.");
         return map;
     }
 
@@ -98,7 +140,7 @@ internal static class TempoMapChecks
             store.SaveMap(countInMap);
             var countInLoaded = store.LoadMap(countInMap.TrackUrl);
             if (!countInLoaded.Sections[1].CountIn) throw new Exception("Count-in checkbox must persist.");
-            Near(countInLoaded.At(8.25).CountInLift, countInMap.At(8.25).CountInLift, "Saved count-in");
+            Near(countInLoaded.At(8.25).CountInAccent, countInMap.At(8.25).CountInAccent, "Saved count-in");
             store.Save(map.TrackUrl, 85.4, 180, true);
             store.SaveMap(map);
             var loaded = store.LoadMap(map.TrackUrl);
@@ -117,6 +159,6 @@ internal static class TempoMapChecks
                 throw new Exception("Removing a map must preserve saved BPM.");
         }
         finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
-        Console.WriteLine("Tempo-map integration, count-in boundaries, holds, styles, seeks and persistence checks passed.");
+        Console.WriteLine("Tempo-map integration, count-in beat alignment/strength/boundaries, holds, styles, seeks and persistence checks passed.");
     }
 }

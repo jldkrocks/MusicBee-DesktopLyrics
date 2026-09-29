@@ -49,7 +49,7 @@ namespace MusicBeePlugin
             _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "countIn", HeaderText = "Bob count-in" });
             _grid.Columns[2].ToolTipText = "Seconds to blend from the previous BPM to this row's BPM. Example: 120 to 150 over 4 seconds. Equal BPM values do not ramp; dance styles switch at the start.";
             _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start. Leave off to preserve the ongoing pose sequence.";
-            _grid.Columns[5].ToolTipText = "Check on the Normal row after Half speed: up to four vertical bobs at the incoming BPM before this row starts. Does not change beat alignment.";
+            _grid.Columns[5].ToolTipText = "Check on the Normal row after Half speed: up to four strong downward bobs on the incoming pose beats before this row starts. Uses saved alignment, or this row's start when Align is checked.";
             _grid.Columns[3].FillWeight = 140;
             _grid.Columns[4].FillWeight = 65;
             _grid.RowTemplate.Height = 29;
@@ -96,7 +96,7 @@ namespace MusicBeePlugin
             _status.ForeColor = Color.FromArgb(178, 192, 212);
             help.Text = "Sections last until the next start; times are seconds. First row starts at 0. Save applies edits without closing.\r\n" +
                 "BPM ramp: 120 to 150 over 4 seconds = gradual tempo change. Equal BPM values do nothing; dance styles change at the start.\r\n" +
-                "Bob count-in: tick the Normal row after Half speed for up to four bobs BEFORE the return, at the incoming BPM.\r\n" +
+                "Bob count-in: tick the Normal row after Half speed for strong downbeat bobs BEFORE the return, following its beat alignment.\r\n" +
                 "Hold pose stops all motion. Align restarts a side pose. Colours: blue = normal, purple = side to side, amber = half speed, grey = hold.";
             _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };

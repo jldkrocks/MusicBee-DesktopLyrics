@@ -68,6 +68,8 @@ namespace MusicBeePlugin
                 if (section.StartSeconds > seconds) break;
                 if (section.AlignBeat && section.Style != PartyDanceStyle.Hold)
                     beat = Math.Floor(beat / 4) * 4 + (section.Style == PartyDanceStyle.SideToSide ? 3 : 2);
+                var sectionStartBeat = beat;
+                var sectionStartTempo = tempo;
                 var end = i + 1 < Sections.Count ? Sections[i + 1].StartSeconds : seconds;
                 var elapsed = Math.Max(0, Math.Min(seconds, end) - section.StartSeconds);
                 var held = section.Style == PartyDanceStyle.Hold;
@@ -75,10 +77,7 @@ namespace MusicBeePlugin
                 {
                     style = section.Style;
                     var ramp = section.RampSeconds;
-                    var rampElapsed = Math.Min(elapsed, ramp);
-                    var beats = ramp > 0 ?
-                        (tempo * rampElapsed + (section.Bpm - tempo) * rampElapsed * rampElapsed / (2 * ramp)) / 60 : 0;
-                    beats += Math.Max(0, elapsed - ramp) * section.Bpm / 60;
+                    var beats = IntegratedBeats(sectionStartTempo, section, elapsed);
                     beat += beats * (style == PartyDanceStyle.HalfSpeed ? 0.5 : 1);
                     tempo = ramp > 0 && elapsed < ramp ?
                         tempo + (section.Bpm - tempo) * elapsed / ramp : section.Bpm;
@@ -86,30 +85,66 @@ namespace MusicBeePlugin
                 if (seconds < end || i == Sections.Count - 1)
                 {
                     var pose = MakePose(beat, tempo, style, held);
-                    if (!held && style == PartyDanceStyle.HalfSpeed && i + 1 < Sections.Count)
-                        pose.CountInLift = CountInLiftAt(section, Sections[i + 1], seconds);
+                    if (!held && style == PartyDanceStyle.HalfSpeed && i + 1 < Sections.Count && Sections[i + 1].CountIn)
+                    {
+                        var endBeat = sectionStartBeat + IntegratedBeats(sectionStartTempo, section,
+                            end - section.StartSeconds) * 0.5;
+                        ApplyCountIn(ref pose, section, Sections[i + 1], endBeat, seconds);
+                    }
                     return pose;
                 }
             }
             return MakePose(beat, tempo, style, false);
         }
 
-        // A visual cue only: never alter phase, BPM or the transition time.
-        // Whole bobs count backwards from the incoming boundary, so even a short
-        // half-speed section starts/ends the cue at rest and seeks are repeatable.
-        private static float CountInLiftAt(PartyTempoSection previous, PartyTempoSection next, double seconds)
+        private static double IntegratedBeats(double fromBpm, PartyTempoSection section, double elapsed)
         {
-            if (!next.CountIn || next.Style != PartyDanceStyle.Normal) return 0;
-            var period = 60 / next.Bpm;
-            var beats = Math.Min(4, Math.Floor((next.StartSeconds - previous.StartSeconds) / period + 1e-9));
-            var start = next.StartSeconds - beats * period;
-            if (beats < 1 || seconds <= start || seconds >= next.StartSeconds) return 0;
-            var progress = (seconds - start) / period;
-            var bob = Math.Sin(Math.PI * progress);
-            // Bring the first bob in gently; the squared sine lands with zero
-            // velocity on each incoming beat, including the return to Normal.
-            var strength = 0.65 + 0.35 * Math.Min(1, progress / Math.Max(1, beats - 1));
-            return (float)(bob * bob * strength);
+            var rampElapsed = Math.Min(elapsed, section.RampSeconds);
+            var beats = section.RampSeconds > 0 ? (fromBpm * rampElapsed +
+                (section.Bpm - fromBpm) * rampElapsed * rampElapsed / (2 * section.RampSeconds)) / 60 : 0;
+            return beats + Math.Max(0, elapsed - section.RampSeconds) * section.Bpm / 60;
+        }
+
+        // Project the incoming pose clock backwards. A section boundary can be
+        // between beats, so it must not become a new beat origin unless Align is on.
+        // The cue changes vertical motion only, never the saved phase or poses.
+        private static void ApplyCountIn(ref PartyMapPose pose, PartyTempoSection previous,
+            PartyTempoSection next, double endBeat, double seconds)
+        {
+            if (next.Style != PartyDanceStyle.Normal) return;
+            if (next.AlignBeat) endBeat = Math.Floor(endBeat / 4) * 4 + 2;
+            // A BPM ramp begins at the preceding tempo, not at its final target.
+            var incomingBpm = next.RampSeconds > 0 ? previous.Bpm : next.Bpm;
+            var period = 60 / incomingBpm;
+            if (next.StartSeconds - previous.StartSeconds + 1e-9 < period) return;
+            var phase = endBeat - (next.StartSeconds - seconds) / period;
+            var earliestPhase = endBeat - (next.StartSeconds - previous.StartSeconds) / period;
+            var lastBeat = Math.Ceiling(endBeat - 1e-9) - 1;
+            var firstBeat = Math.Max(lastBeat - 3, Math.Ceiling(earliestPhase + 0.2 - 1e-9));
+            if (firstBeat > lastBeat) return;
+            var start = firstBeat - 0.2;
+            var end = Math.Min(endBeat, lastBeat + 0.55);
+            if (phase <= start || phase >= end) return;
+            // If the marker closely follows the last beat, shorten the recovery
+            // fade instead of weakening that hit or pulling it ahead of the beat.
+            var endFade = Math.Min(0.2, end - lastBeat);
+            var mix = SmoothStep((phase - start) / 0.2) * SmoothStep((end - phase) / endFade);
+            var nearestBeat = Math.Max(firstBeat, Math.Min(lastBeat, Math.Floor(phase + 0.5)));
+            var offset = phase - nearestBeat;
+            // Crouch into the beat, reach the deepest dip ON it, then recover.
+            // All count-in beats are equally strong; no faint introductory bob.
+            var accent = offset < 0 ? SmoothStep(1 + offset / 0.2) : 1 - SmoothStep(offset / 0.4);
+            pose.CountInAccent = (float)(accent * mix);
+            // Replace the half-speed squash/lift during the cue. Adding a small
+            // upward float to those opposing movements made the old bob weak.
+            pose.Impact = (float)(pose.Impact * (1 - mix) + 1.7 * pose.CountInAccent);
+            pose.Anticipation *= (float)(1 - mix);
+        }
+
+        private static double SmoothStep(double value)
+        {
+            value = Math.Max(0, Math.Min(1, value));
+            return value * value * (3 - 2 * value);
         }
 
         private static PartyMapPose MakePose(double beat, double bpm, PartyDanceStyle style, bool held)
@@ -140,6 +175,6 @@ namespace MusicBeePlugin
         internal double Beat, Bpm;
         internal int Frame;
         internal bool Held;
-        internal float Impact, Sway, Anticipation, CountInLift;
+        internal float Impact, Sway, Anticipation, CountInAccent;
     }
 }

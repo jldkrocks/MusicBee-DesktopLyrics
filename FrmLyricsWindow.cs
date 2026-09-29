@@ -1018,19 +1018,17 @@ namespace MusicBeePlugin
                     PartyAnimation.CentreImpactAt(phasePosition, bpm);
                 var sway = PartyAnimation.SwayAt(phasePosition, bpm);
                 var anticipation = PartyAnimation.AnticipationAt(phasePosition, bpm);
-                float countInLift = 0;
                 if ((_partyMap?.Enabled ?? false) && _partyPreviewTrackUrl == null)
                 {
                     var mapped = _partyMap.At((position + PartyAnimation.VisualLeadMs) / 1000d);
                     frame = mapped.Frame; impact = mapped.Impact;
                     sway = mapped.Sway; anticipation = mapped.Anticipation;
-                    countInLift = mapped.CountInLift;
                 }
                 RefreshPartyLayout();
                 PlacePartyDancer(_leftDancer, _leftPartyBounds, frame, impact,
-                    sway, anticipation, countInLift);
+                    sway, anticipation);
                 PlacePartyDancer(_rightDancer, _rightPartyBounds, frame, impact,
-                    sway, anticipation, countInLift);
+                    sway, anticipation);
             }
             catch (Exception ex)
             {
@@ -1079,14 +1077,14 @@ namespace MusicBeePlugin
         }
 
         private void PlacePartyDancer(PartyDancerWindow dancer, Rectangle bounds,
-            int frame, float impact, float sway, float anticipation, float countInLift)
+            int frame, float impact, float sway, float anticipation)
         {
             if (bounds.IsEmpty)
             {
                 dancer.Hide();
                 return;
             }
-            dancer.Present(bounds, frame, impact, sway, anticipation, countInLift);
+            dancer.Present(bounds, frame, impact, sway, anticipation);
             if (!dancer.Visible) dancer.Show(this);
         }
 
