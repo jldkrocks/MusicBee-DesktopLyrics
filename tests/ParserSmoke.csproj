@@ -50,6 +50,7 @@
     <Compile Include="..\FrmLrcLibPicker.cs"><Link>FrmLrcLibPicker.cs</Link></Compile>
     <Compile Include="BpmLookupChecks.cs" />
     <Compile Include="TempoMapChecks.cs" />
+    <Compile Include="RhythmChecks.cs" />
     <Compile Include="TimelineChecks.cs" />
     <Compile Include="Program.cs" />
   </ItemGroup>

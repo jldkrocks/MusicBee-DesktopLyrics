@@ -31,7 +31,7 @@ internal static class TimelineChecks
         }
         var map = new PartyTempoMap { TrackUrl = "original" };
         map.Sections.Add(new PartyTempoSection { Bpm = 120, Style = PartyDanceStyle.HalfSpeed });
-        map.Sections.Add(new PartyTempoSection { StartSeconds = 20, Bpm = 120, CountIn = true });
+        map.Sections.Add(new PartyTempoSection { StartSeconds = 20, Bpm = 120, CountIn = true, Rhythm = PartyRhythm.Waltz });
         double? position = 10; int saved = 0; PartyTempoMap last = null; int requestedSeek = -1;
         using (var editor = new FrmPartyTempoMap(map, "Test song", () => position,
             p => requestedSeek = p, m => { saved++; last = m; }, 100, () => {}, () => true))
@@ -42,10 +42,14 @@ internal static class TimelineChecks
             var grid = (DataGridView)Field(editor, "_grid");
             if (!Convert.ToBoolean(grid.Rows[1].Cells[5].Value) || !last.Sections[1].CountIn)
                 throw new Exception("Editor must load and save the count-in checkbox.");
+            if (Convert.ToString(grid.Rows[1].Cells[6].Value) != "Waltz (3/4)" || last.Sections[1].Rhythm != PartyRhythm.Waltz)
+                throw new Exception("Editor must load and save the selected rhythm.");
+            grid.Rows[1].Cells[6].Value = "Swing (2:1)";
             grid.Rows[1].Cells[5].Value = false;
             grid.Rows[0].Cells[1].Value = "90";
             Call(editor, "SaveMap");
-            if (saved != 2 || last.Sections[0].Bpm != 90 || map.Sections[0].Bpm != 120 || last.Sections[1].CountIn || !map.Sections[1].CountIn)
+            if (saved != 2 || last.Sections[0].Bpm != 90 || map.Sections[0].Bpm != 120 || last.Sections[1].CountIn || !map.Sections[1].CountIn ||
+                last.Sections[1].Rhythm != PartyRhythm.Swing || map.Sections[1].Rhythm != PartyRhythm.Waltz)
                 throw new Exception("Repeated saves must apply new values without mutating the original map object.");
             Call(editor, "SeekTo", 105d);
             if (requestedSeek != 100000) throw new Exception("Editor seeks must clamp to song length.");

@@ -24,6 +24,8 @@ namespace MusicBeePlugin
         private bool _dirty, _trackWasAvailable = true;
         private static readonly string[] Styles = { "Normal", "Side to side", "Half speed", "Hold pose" };
 
+        private static readonly string[] Rhythms = { "Straight", "Waltz (3/4)", "Swing (2:1)" };
+
         internal FrmPartyTempoMap(PartyTempoMap map, string title, Func<double?> position,
             Action<int> seek, Action<PartyTempoMap> save, double duration,
             Action togglePlayback, Func<bool> playing)
@@ -32,7 +34,7 @@ namespace MusicBeePlugin
             _togglePlayback = togglePlayback; _playing = playing;
             Font = _editorFont; BackColor = Color.FromArgb(23, 27, 38); ForeColor = Color.FromArgb(232, 236, 245);
             Text = "Tempo map — " + title;
-            Size = new Size(980, 650); MinimumSize = new Size(900, 600);
+            Size = new Size(1040, 690); MinimumSize = new Size(940, 650);
             StartPosition = FormStartPosition.CenterParent; ShowInTaskbar = false;
             MinimizeBox = false; TopMost = true;
             var help = new Label { Dock = DockStyle.Fill };
@@ -47,14 +49,18 @@ namespace MusicBeePlugin
             _grid.Columns.Add(new DataGridViewComboBoxColumn { Name = "style", HeaderText = "Dance", DataSource = Styles });
             _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "align", HeaderText = "Align" });
             _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "countIn", HeaderText = "Bob count-in" });
+            _grid.Columns.Add(new DataGridViewComboBoxColumn { Name = "rhythm", HeaderText = "Rhythm", DataSource = Rhythms });
+            _grid.Columns[6].DisplayIndex = 4;
+            _grid.Columns[6].FillWeight = 140;
+            _grid.Columns[6].ToolTipText = "Straight: existing motion. Waltz: strong 1, lighter 2-3, alternate side each bar. Swing: steady main beats with a lighter bounce at two-thirds of each beat. Half speed slows the chosen pattern; Hold stops it.";
             _grid.Columns[2].ToolTipText = "Seconds to blend from the previous BPM to this row's BPM. Example: 120 to 150 over 4 seconds. Equal BPM values do not ramp; dance styles switch at the start.";
-            _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start. Leave off to preserve the ongoing pose sequence.";
+            _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start (beat 1 for Waltz). Leave off to preserve the ongoing beat phase.";
             _grid.Columns[5].ToolTipText = "Check on the Normal row after Half speed: up to four lead-in bobs, then one final bop on the first beat at or after the return. Uses saved alignment, or this row's start when Align is checked.";
             _grid.Columns[3].FillWeight = 140;
             _grid.Columns[4].FillWeight = 65;
             _grid.RowTemplate.Height = 29;
             foreach (DataGridViewColumn column in _grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
-            foreach (var section in map.Sections) AddRow(section.StartSeconds, section.Bpm, section.RampSeconds, section.Style, section.AlignBeat, section.CountIn);
+            foreach (var section in map.Sections) AddRow(section.StartSeconds, section.Bpm, section.RampSeconds, section.Style, section.AlignBeat, section.CountIn, section.Rhythm);
             _grid.BackgroundColor = Color.FromArgb(30, 35, 48);
             _grid.BorderStyle = BorderStyle.None; _grid.GridColor = Color.FromArgb(54, 62, 79);
             _grid.EnableHeadersVisualStyles = false; _grid.ColumnHeadersHeight = 32; _grid.RowTemplate.Height = 29;
@@ -79,7 +85,9 @@ namespace MusicBeePlugin
                 var selected = _grid.CurrentRow;
                 double bpm = 120;
                 if (selected != null) double.TryParse(Convert.ToString(selected.Cells[1].Value), out bpm);
-                AddRow(Math.Round(now.Value, 3), bpm >= 40 && bpm <= 240 ? bpm : 120, 0, PartyDanceStyle.Normal, false);
+                var rhythm = selected == null ? PartyRhythm.Straight :
+                    (PartyRhythm)Math.Max(0, Array.IndexOf(Rhythms, Convert.ToString(selected.Cells[6].Value)));
+                AddRow(Math.Round(now.Value, 3), bpm >= 40 && bpm <= 240 ? bpm : 120, 0, PartyDanceStyle.Normal, false, false, rhythm);
                 _grid.CurrentCell = _grid.Rows[_grid.Rows.Count - 1].Cells[0];
                 MarkDirty();
             });
@@ -97,10 +105,11 @@ namespace MusicBeePlugin
             help.Text = "Sections last until the next start; times are seconds. First row starts at 0. Save applies edits without closing.\r\n" +
                 "BPM ramp: 120 to 150 over 4 seconds = gradual tempo change. Equal BPM values do nothing; dance styles change at the start.\r\n" +
                 "Bob count-in: tick the Normal row after Half speed for lead-in bobs PLUS a final bop on the return beat.\r\n" +
+                "Rhythm: Waltz = strong 1, light 2-3. Swing = steady main beat + late offbeat bounce (2:1). BPM stays the same.\r\n" +
                 "Hold pose stops all motion. Align restarts a side pose. Colours: blue = normal, purple = side to side, amber = half speed, grey = hold.";
             _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 84));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 108));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -135,10 +144,10 @@ namespace MusicBeePlugin
             _grid.DataError += (sender, args) => { args.ThrowException = false; };
         }
 
-        private void AddRow(double start, double bpm, double ramp, PartyDanceStyle style, bool align, bool countIn = false)
+        private void AddRow(double start, double bpm, double ramp, PartyDanceStyle style, bool align, bool countIn = false, PartyRhythm rhythm = PartyRhythm.Straight)
         {
             _grid.Rows.Add(start.ToString("0.###", CultureInfo.CurrentCulture), bpm.ToString("0.###", CultureInfo.CurrentCulture),
-                ramp.ToString("0.###", CultureInfo.CurrentCulture), Styles[(int)style], align, countIn);
+                ramp.ToString("0.###", CultureInfo.CurrentCulture), Styles[(int)style], align, countIn, Rhythms[(int)rhythm]);
         }
 
         private static Button AddButton(FlowLayoutPanel panel, string text, Action action)
@@ -230,7 +239,8 @@ namespace MusicBeePlugin
                     map.Sections.Add(new PartyTempoSection { StartSeconds = Number(row, 0), Bpm = Number(row, 1),
                         RampSeconds = Number(row, 2), Style = (PartyDanceStyle)Array.IndexOf(Styles, Convert.ToString(row.Cells[3].Value)),
                         AlignBeat = Convert.ToBoolean(row.Cells[4].Value ?? false),
-                        CountIn = Convert.ToBoolean(row.Cells[5].Value ?? false) });
+                        CountIn = Convert.ToBoolean(row.Cells[5].Value ?? false),
+                        Rhythm = (PartyRhythm)Array.IndexOf(Rhythms, Convert.ToString(row.Cells[6].Value)) });
                 map.Sections = map.Sections.OrderBy(s => s.StartSeconds).ToList();
                 map.Validate();
                 _save(map); _dirty = false;

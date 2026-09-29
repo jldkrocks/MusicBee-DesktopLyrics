@@ -17,6 +17,7 @@ namespace MusicBeePlugin
         {
             BpmLookupChecks.Run();
             TempoMapChecks.Run();
+            RhythmChecks.Run();
             TimelineChecks.Run();
             if (PartyAnimation.ReadBpm("120 BPM") != 120 ||
                 PartyAnimation.ReadBpm("96,5") != 96.5 ||
