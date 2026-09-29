@@ -44,7 +44,7 @@ namespace MusicBeePlugin
                     throw new ArgumentException("Hold sections cannot have tempo ramps or beat alignment.");
                 if (s.CountIn && (i == 0 || s.Style != PartyDanceStyle.Normal ||
                     Sections[i - 1].Style != PartyDanceStyle.HalfSpeed))
-                    throw new ArgumentException("Count-in belongs on a Normal row immediately after Half speed. It adds up to four bobs before that row starts.");
+                    throw new ArgumentException("Count-in belongs on a Normal row immediately after Half speed. It adds up to four lead-in bobs and a final bop on the return beat.");
                 if (i + 1 < Sections.Count && Sections[i + 1] != null &&
                     s.RampSeconds > Sections[i + 1].StartSeconds - s.StartSeconds)
                     throw new ArgumentException("A ramp must finish before the next section.");
@@ -89,8 +89,14 @@ namespace MusicBeePlugin
                     {
                         var endBeat = sectionStartBeat + IntegratedBeats(sectionStartTempo, section,
                             end - section.StartSeconds) * 0.5;
-                        ApplyCountIn(ref pose, section, Sections[i + 1], endBeat, seconds);
+                        var incoming = Sections[i + 1];
+                        if (incoming.AlignBeat) endBeat = Math.Floor(endBeat / 4) * 4 + 2;
+                        var incomingBpm = incoming.RampSeconds > 0 ? section.Bpm : incoming.Bpm;
+                        var cuePhase = endBeat - (end - seconds) * incomingBpm / 60;
+                        ApplyCountIn(ref pose, section, incoming, endBeat, cuePhase);
                     }
+                    else if (!held && section.CountIn && i > 0 && Sections[i - 1].Style == PartyDanceStyle.HalfSpeed)
+                        ApplyCountIn(ref pose, Sections[i - 1], section, sectionStartBeat, beat);
                     return pose;
                 }
             }
@@ -109,26 +115,24 @@ namespace MusicBeePlugin
         // between beats, so it must not become a new beat origin unless Align is on.
         // The cue changes vertical motion only, never the saved phase or poses.
         private static void ApplyCountIn(ref PartyMapPose pose, PartyTempoSection previous,
-            PartyTempoSection next, double endBeat, double seconds)
+            PartyTempoSection next, double endBeat, double phase)
         {
             if (next.Style != PartyDanceStyle.Normal) return;
-            if (next.AlignBeat) endBeat = Math.Floor(endBeat / 4) * 4 + 2;
             // A BPM ramp begins at the preceding tempo, not at its final target.
             var incomingBpm = next.RampSeconds > 0 ? previous.Bpm : next.Bpm;
             var period = 60 / incomingBpm;
             if (next.StartSeconds - previous.StartSeconds + 1e-9 < period) return;
-            var phase = endBeat - (next.StartSeconds - seconds) / period;
             var earliestPhase = endBeat - (next.StartSeconds - previous.StartSeconds) / period;
-            var lastBeat = Math.Ceiling(endBeat - 1e-9) - 1;
-            var firstBeat = Math.Max(lastBeat - 3, Math.Ceiling(earliestPhase + 0.2 - 1e-9));
-            if (firstBeat > lastBeat) return;
+            var lastLeadInBeat = Math.Ceiling(endBeat - 1e-9) - 1;
+            var firstBeat = Math.Max(lastLeadInBeat - 3, Math.Ceiling(earliestPhase + 0.2 - 1e-9));
+            if (firstBeat > lastLeadInBeat) return;
+            // Finish with one equally strong landing on the first actual beat
+            // at/after the return, then recover into the regular movement.
+            var lastBeat = lastLeadInBeat + 1;
             var start = firstBeat - 0.2;
-            var end = Math.Min(endBeat, lastBeat + 0.55);
+            var end = lastBeat + 0.55;
             if (phase <= start || phase >= end) return;
-            // If the marker closely follows the last beat, shorten the recovery
-            // fade instead of weakening that hit or pulling it ahead of the beat.
-            var endFade = Math.Min(0.2, end - lastBeat);
-            var mix = SmoothStep((phase - start) / 0.2) * SmoothStep((end - phase) / endFade);
+            var mix = SmoothStep((phase - start) / 0.2) * SmoothStep((end - phase) / 0.2);
             var nearestBeat = Math.Max(firstBeat, Math.Min(lastBeat, Math.Floor(phase + 0.5)));
             var offset = phase - nearestBeat;
             // Crouch into the beat, reach the deepest dip ON it, then recover.
