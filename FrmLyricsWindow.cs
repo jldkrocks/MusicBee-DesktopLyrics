@@ -274,7 +274,7 @@ namespace MusicBeePlugin
             {
                 if ((_settings.ShowVisualizer && !_settings.TransparentCanvas) ||
                     (_settings.PartyMode && _partyBpm == 0 &&
-                     _partyBeat.Bpm == 0 && string.IsNullOrEmpty(_partyApiKey)))
+                     _partyBeat.Bpm == 0 && !PartyOnlineEnabled))
                     SampleSpectrum();
                 _lastSpectrumSample = now;
             }
@@ -427,8 +427,7 @@ namespace MusicBeePlugin
         private void LoadPartyTempo(string trackUrl)
         {
             var saved = _partyTempoStore.Load(trackUrl);
-            if (saved != null && (saved.Manual ||
-                (_partyTagBpm == 0 && (saved.Online || string.IsNullOrEmpty(_partyApiKey)))))
+            if (saved != null && (saved.Manual || _partyTagBpm == 0))
             {
                 _partyBpm = saved.Bpm;
                 _partyOriginMs = saved.OriginMs;
@@ -452,14 +451,15 @@ namespace MusicBeePlugin
             pending?.Cancel();
         }
 
+        private bool PartyOnlineEnabled => !_settings.DisableDeezerBpmLookup ||
+            !string.IsNullOrWhiteSpace(_partyApiKey);
+
         private void StartPartyOnlineLookup(bool retry = false)
         {
             if (_animationDisposed || !_settings.PartyMode ||
-                string.IsNullOrWhiteSpace(_partyApiKey) ||
-                string.IsNullOrWhiteSpace(_artworkTrackUrl)) return;
+                !PartyOnlineEnabled || string.IsNullOrWhiteSpace(_artworkTrackUrl)) return;
             var saved = _partyTempoStore.Load(_artworkTrackUrl);
-            if (_partyTagBpm > 0 || (saved != null && (saved.Manual || saved.Online)))
-                return;
+            if (!PartyOnlineLookup.CanLookup(_partyTagBpm, saved)) return;
             if (string.IsNullOrWhiteSpace(_songTitle) ||
                 string.IsNullOrWhiteSpace(_songArtist))
             {
@@ -485,14 +485,17 @@ namespace MusicBeePlugin
             string artist, string album, string apiKey, CancellationTokenSource pending)
         {
             double bpm = 0;
-            string error = null, detail = null;
+            string error = null, detail = null, source = null, sourceUrl = null;
             var wasCurrent = false;
             try
             {
-                var result = await GetSongBpmClient.SearchAsync(title, artist, album,
-                    apiKey, pending.Token);
+                var duration = (_musicBee.NowPlaying_GetDuration?.Invoke() ?? 0) / 1000;
+                var result = await PartyOnlineLookup.SearchAsync(title, artist, album,
+                    duration, apiKey, !_settings.DisableDeezerBpmLookup, pending.Token);
                 bpm = result.Bpm;
                 detail = result.Detail;
+                source = result.Source;
+                sourceUrl = result.SourceUrl;
             }
             catch (OperationCanceledException) { return; }
             catch (Exception ex) { error = ex.Message; }
@@ -508,7 +511,7 @@ namespace MusicBeePlugin
                 trackUrl != _artworkTrackUrl || _partyTagBpm > 0 ||
                 apiKey != _partyApiKey) return;
             var saved = _partyTempoStore.Load(trackUrl);
-            if (saved != null && saved.Manual) return;
+            if (!PartyOnlineLookup.CanLookup(_partyTagBpm, saved)) return;
             if (error != null)
             {
                 _partyLookupError = error;
@@ -523,11 +526,8 @@ namespace MusicBeePlugin
             {
                 try
                 {
-                    var origin = saved != null ? PartyAnimation.OriginForPhase(
-                        ReadPartyPosition(Stopwatch.GetTimestamp()),
-                        saved.Bpm, saved.OriginMs, bpm) :
-                        PartyAnimation.OriginForBeat(0, bpm);
-                    _partyTempoStore.Save(trackUrl, bpm, origin, false, true);
+                    var origin = PartyAnimation.OriginForBeat(0, bpm);
+                    _partyTempoStore.Save(trackUrl, bpm, origin, false, true, source, sourceUrl);
                     _partyBpm = bpm;
                     _partyOriginMs = origin;
                     _partyTempoSource = PartyTempoSource.Online;
@@ -549,7 +549,7 @@ namespace MusicBeePlugin
         {
             using (var dialog = new Form
             {
-                Text = "Online Party BPM", ClientSize = new Size(420, 222),
+                Text = "Online Party BPM", ClientSize = new Size(420, 274),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition = FormStartPosition.CenterParent,
                 ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false,
@@ -566,18 +566,24 @@ namespace MusicBeePlugin
                     Text = _partyApiKey, UseSystemPasswordChar = true,
                     Bounds = new Rectangle(16, 42, 388, 25)
                 };
+                var deezer = new CheckBox
+                {
+                    Text = "Use Deezer too (no key needed)",
+                    Checked = !_settings.DisableDeezerBpmLookup,
+                    Bounds = new Rectangle(16, 78, 388, 26)
+                };
                 var explanation = new Label
                 {
                     Text = _partyLookupError ?? _partyLookupDetail ??
-                        "Party mode tries artist and title, then a title-only search checked " +
-                        "against the artist. A missing or ambiguous catalog entry can still " +
-                        "show NO MATCH; use Retry online BPM or Adjust Party BPM for that song.",
-                    Bounds = new Rectangle(16, 79, 388, 68)
+                        "Searches GetSongBPM first if a key is set, then Deezer. Sends song " +
+                        "title and artist only. Existing saved timing is kept; forget it " +
+                        "in Adjust Party BPM to request a replacement.",
+                    Bounds = new Rectangle(16, 111, 388, 78)
                 };
                 var credit = new LinkLabel
                 {
                     Text = "GetSongBPM — obtain an API key",
-                    Bounds = new Rectangle(16, 154, 275, 24)
+                    Bounds = new Rectangle(16, 194, 275, 24)
                 };
                 credit.LinkClicked += (sender, args) =>
                 {
@@ -587,20 +593,20 @@ namespace MusicBeePlugin
                 var remove = new Button
                 {
                     Text = "Remove key", DialogResult = DialogResult.No,
-                    Bounds = new Rectangle(16, 184, 100, 28)
+                    Bounds = new Rectangle(16, 236, 100, 28)
                 };
                 var cancel = new Button
                 {
                     Text = "Cancel", DialogResult = DialogResult.Cancel,
-                    Bounds = new Rectangle(238, 184, 76, 28)
+                    Bounds = new Rectangle(238, 236, 76, 28)
                 };
                 var save = new Button
                 {
                     Text = "Save", DialogResult = DialogResult.OK,
-                    Bounds = new Rectangle(322, 184, 82, 28)
+                    Bounds = new Rectangle(322, 236, 82, 28)
                 };
                 dialog.Controls.AddRange(new Control[]
-                    { label, input, explanation, credit, remove, cancel, save });
+                    { label, input, deezer, explanation, credit, remove, cancel, save });
                 dialog.AcceptButton = save;
                 dialog.CancelButton = cancel;
                 var result = dialog.ShowDialog(this);
@@ -611,6 +617,8 @@ namespace MusicBeePlugin
                     _partyTempoStore.SaveApiKey(key);
                     CancelPartyLookup();
                     _partyApiKey = key;
+                    _settings.DisableDeezerBpmLookup = !deezer.Checked;
+                    _settingsChanged?.Invoke(_settings);
                     _partyOnlineStatus = PartyOnlineStatus.None;
                     _partyLookupError = null;
                     _partyLookupDetail = null;
@@ -640,7 +648,7 @@ namespace MusicBeePlugin
             var tapTempo = new PartyTapTempo();
             using (var dialog = new Form
             {
-                Text = "Party BPM for this song", ClientSize = new Size(360, 254),
+                Text = "Party BPM for this song", ClientSize = new Size(360, 324),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition = FormStartPosition.CenterParent,
                 ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false,
@@ -658,9 +666,9 @@ namespace MusicBeePlugin
                 };
                 var bpmInput = new NumericUpDown
                 {
-                    Minimum = 40, Maximum = 240, DecimalPlaces = 1,
+                    Minimum = 40, Maximum = 240, DecimalPlaces = 2,
                     Increment = 0.1m, Value = (decimal)Math.Round(
-                        Math.Max(40, Math.Min(240, currentBpm)), 1),
+                        Math.Max(40, Math.Min(240, currentBpm)), 2),
                     Bounds = new Rectangle(82, 43, 100, 26)
                 };
                 var syncBeat = new Button
@@ -672,30 +680,62 @@ namespace MusicBeePlugin
                 {
                     Text = "Tap beat", Bounds = new Rectangle(16, 83, 328, 44)
                 };
+                var half = new Button
+                {
+                    Text = "½ speed", Bounds = new Rectangle(16, 133, 158, 28)
+                };
+                var twice = new Button
+                {
+                    Text = "2× speed", Bounds = new Rectangle(186, 133, 158, 28)
+                };
+                Action updateSpeedButtons = () =>
+                {
+                    half.Enabled = bpmInput.Value / 2 >= bpmInput.Minimum;
+                    twice.Enabled = bpmInput.Value * 2 <= bpmInput.Maximum;
+                };
+                half.Click += (sender, args) => bpmInput.Value /= 2;
+                twice.Click += (sender, args) => bpmInput.Value *= 2;
+                bpmInput.ValueChanged += (sender, args) => updateSpeedButtons();
+                updateSpeedButtons();
+                var sourceLabel = new LinkLabel
+                {
+                    Text = saved?.Source == null ? "Timing is stored for this song only." :
+                        "Original lookup: " + saved.Source,
+                    Bounds = new Rectangle(16, 249, 328, 24)
+                };
+                if (saved?.SourceUrl == null) sourceLabel.LinkArea = new LinkArea(0, 0);
+                sourceLabel.LinkClicked += (sender, args) =>
+                {
+                    Uri uri;
+                    if (Uri.TryCreate(saved?.SourceUrl, UriKind.Absolute, out uri) &&
+                        uri.Scheme == "https" && (uri.Host == "www.deezer.com" ||
+                        uri.Host == "getsongbpm.com"))
+                        try { Process.Start(uri.AbsoluteUri); } catch (Exception) { }
+                };
                 var tapStatus = new Label
                 {
                     Text = "Tap along with the song at least twice.",
-                    Bounds = new Rectangle(16, 134, 328, 24)
+                    Bounds = new Rectangle(16, 171, 328, 24)
                 };
                 var explanation = new Label
                 {
                     Text = "Click Align as you hear a beat to preview the raised-arm pose timing. Save keeps it for this song; Cancel discards the preview.",
-                    Bounds = new Rectangle(16, 163, 328, 46)
+                    Bounds = new Rectangle(16, 201, 328, 46)
                 };
                 var forget = new Button
                 {
                     Text = "Forget saved BPM", Enabled = saved != null,
-                    Bounds = new Rectangle(16, 215, 140, 28)
+                    Bounds = new Rectangle(16, 286, 140, 28)
                 };
                 var cancel = new Button
                 {
                     Text = "Cancel", DialogResult = DialogResult.Cancel,
-                    Bounds = new Rectangle(188, 215, 74, 28)
+                    Bounds = new Rectangle(188, 286, 74, 28)
                 };
                 var save = new Button
                 {
                     Text = "Save", DialogResult = DialogResult.OK,
-                    Bounds = new Rectangle(270, 215, 74, 28)
+                    Bounds = new Rectangle(270, 286, 74, 28)
                 };
                 Action previewBeat = () =>
                 {
@@ -758,7 +798,7 @@ namespace MusicBeePlugin
                 };
                 forget.Click += (sender, args) => { dialog.DialogResult = DialogResult.No; dialog.Close(); };
                 dialog.Controls.AddRange(new Control[]
-                    { title, bpmLabel, bpmInput, syncBeat, tapButton, tapStatus,
+                    { title, bpmLabel, bpmInput, syncBeat, tapButton, half, twice, sourceLabel, tapStatus,
                         explanation, forget, cancel, save });
                 dialog.AcceptButton = save;
                 dialog.CancelButton = cancel;
@@ -801,7 +841,8 @@ namespace MusicBeePlugin
                             origin = PartyAnimation.OriginForPhase(position,
                                 oldBpm, oldOrigin, bpm);
                         }
-                        _partyTempoStore.Save(trackUrl, bpm, origin, true);
+                        _partyTempoStore.Save(trackUrl, bpm, origin, true, false,
+                            saved?.Source, saved?.SourceUrl);
                         CancelPartyLookup();
                         _partyBpm = bpm;
                         _partyOriginMs = origin;
@@ -1192,12 +1233,12 @@ namespace MusicBeePlugin
 
             var validCount = Math.Min(Math.Max(0, count), _fft.Length);
             var upperBin = Math.Min(validCount / 2, 1024);
-            if (_settings.PartyMode && string.IsNullOrEmpty(_partyApiKey) &&
+            if (_settings.PartyMode && !PartyOnlineEnabled &&
                 _partyBpm == 0 && _partyBeat.Bpm == 0 &&
                 _playState == Plugin.PlayState.Playing)
                 _partySpectrumMisses = upperBin > 8 ? 0 :
                     Math.Min(30, _partySpectrumMisses + 1);
-            if (_settings.PartyMode && string.IsNullOrEmpty(_partyApiKey) &&
+            if (_settings.PartyMode && !PartyOnlineEnabled &&
                 _partyBpm == 0 && _partyBeat.Bpm == 0 &&
                 upperBin > 8 &&
                 _playState == Plugin.PlayState.Playing)
@@ -2074,8 +2115,8 @@ namespace MusicBeePlugin
                         _partyTempoSource == PartyTempoSource.Saved ? "SAVED " :
                         _partyTempoSource == PartyTempoSource.Online ? "WEB " : "TAG ";
                     var tempo = _partyBpm > 0 ? source +
-                        _partyBpm.ToString("0.#", CultureInfo.InvariantCulture) :
-                        !string.IsNullOrEmpty(_partyApiKey) ?
+                        _partyBpm.ToString("0.##", CultureInfo.InvariantCulture) :
+                        PartyOnlineEnabled ?
                             _partyOnlineStatus == PartyOnlineStatus.Searching ? "SEARCHING..." :
                             _partyOnlineStatus == PartyOnlineStatus.Error ? "API ERROR" :
                             "NO MATCH" :

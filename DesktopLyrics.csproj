@@ -115,6 +115,8 @@
     <Compile Include="PartyBeatTracker.cs" />
     <Compile Include="PartyTempoStore.cs" />
     <Compile Include="GetSongBpmClient.cs" />
+    <Compile Include="DeezerBpmClient.cs" />
+    <Compile Include="PartyOnlineLookup.cs" />
     <Compile Include="PartyLayout.cs" />
     <Compile Include="PartyDancerWindow.cs" />
     <Compile Include="LyricCardLayout.cs" />

@@ -35,6 +35,7 @@ namespace MusicBeePlugin
         {
             internal double Bpm;
             internal string Detail;
+            internal string Source, SourceUrl;
         }
 
         private sealed class MatchEvaluation
@@ -59,7 +60,8 @@ namespace MusicBeePlugin
                         cancellationToken).ConfigureAwait(false);
                     var match = Evaluate(json, title, artist, album);
                     if (match.Bpm > 0 && !combined.Ambiguous)
-                        return new LookupResult { Bpm = match.Bpm };
+                        return new LookupResult { Bpm = match.Bpm, Source = "GetSongBPM",
+                            SourceUrl = "https://getsongbpm.com/" };
                     combined.HasResults |= match.HasResults;
                     combined.HasTitle |= match.HasTitle;
                     combined.HasArtist |= match.HasArtist;
@@ -92,6 +94,27 @@ namespace MusicBeePlugin
                     " artist:" + Limit(leadArtist)));
             queries.Add(Tuple.Create("song", Limit(cleanTitle)));
             return queries;
+        }
+
+        internal static string CatalogQuery(string title, string artist)
+        {
+            return Limit(SearchTitle(title)) + " " + Limit(PrimaryArtist(artist));
+        }
+
+        internal static bool CatalogTrackMatches(string candidateTitle, string candidateArtist,
+            string title, string artist)
+        {
+            return !string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(artist) &&
+                Normalize(CoreTitle(candidateTitle)) == Normalize(CoreTitle(title)) &&
+                !(Normalize(title) != Normalize(candidateTitle) &&
+                    HasFeature(title) && HasFeature(candidateTitle)) &&
+                ArtistNameMatches(candidateArtist, Normalize(artist), Normalize(PrimaryArtist(artist)));
+        }
+
+        internal static bool CatalogAlbumMatches(string candidate, string album)
+        {
+            return !string.IsNullOrWhiteSpace(album) &&
+                Normalize(CoreTitle(candidate)) == Normalize(CoreTitle(album));
         }
 
         private static string Limit(string value)

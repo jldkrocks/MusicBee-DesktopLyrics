@@ -13,6 +13,7 @@ namespace MusicBeePlugin
         public int OriginMs;
         public bool Manual;
         public bool Online;
+        public string Source, SourceUrl;
         public bool TwoBeatPhase;
         public int BeatPatternVersion;
     }
@@ -71,7 +72,7 @@ namespace MusicBeePlugin
         }
 
         internal void Save(string trackUrl, double bpm, int originMs, bool manual,
-            bool online = false)
+            bool online = false, string source = null, string sourceUrl = null)
         {
             if (string.IsNullOrWhiteSpace(trackUrl) || bpm < 40 || bpm > 240 ||
                 double.IsNaN(bpm) || double.IsInfinity(bpm) ||
@@ -85,7 +86,8 @@ namespace MusicBeePlugin
                 File.WriteAllText(temporary, JsonConvert.SerializeObject(new PartyTempoEntry
                 {
                     TrackUrl = trackUrl, Bpm = bpm, OriginMs = originMs,
-                    Manual = manual, Online = online, TwoBeatPhase = true,
+                    Manual = manual, Online = online, Source = source, SourceUrl = sourceUrl,
+                    TwoBeatPhase = true,
                     BeatPatternVersion = 3
                 }), new UTF8Encoding(false));
                 if (File.Exists(filename)) File.Replace(temporary, filename, null);

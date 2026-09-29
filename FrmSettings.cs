@@ -190,6 +190,7 @@ namespace MusicBeePlugin
         public bool ShowVisualizer;
         public bool TransparentCanvas;
         public bool PartyMode;
+        public bool DisableDeezerBpmLookup;
         public bool ShowSongQueue;
         public bool SongQueuePreferenceSet;
         public bool ShowTranslation;

@@ -25,6 +25,8 @@
     <Compile Include="..\PartyBeatTracker.cs"><Link>PartyBeatTracker.cs</Link></Compile>
     <Compile Include="..\PartyTempoStore.cs"><Link>PartyTempoStore.cs</Link></Compile>
     <Compile Include="..\GetSongBpmClient.cs"><Link>GetSongBpmClient.cs</Link></Compile>
+    <Compile Include="..\DeezerBpmClient.cs"><Link>DeezerBpmClient.cs</Link></Compile>
+    <Compile Include="..\PartyOnlineLookup.cs"><Link>PartyOnlineLookup.cs</Link></Compile>
     <Compile Include="..\PartyLayout.cs"><Link>PartyLayout.cs</Link></Compile>
     <Compile Include="..\LyricParser.cs"><Link>LyricParser.cs</Link></Compile>
     <Compile Include="..\LrcTimingDocument.cs"><Link>LrcTimingDocument.cs</Link></Compile>
@@ -43,6 +45,7 @@
     <Compile Include="..\LrcLibClient.cs"><Link>LrcLibClient.cs</Link></Compile>
     <Compile Include="..\ImportedLyricsTagStore.cs"><Link>ImportedLyricsTagStore.cs</Link></Compile>
     <Compile Include="..\FrmLrcLibPicker.cs"><Link>FrmLrcLibPicker.cs</Link></Compile>
+    <Compile Include="BpmLookupChecks.cs" />
     <Compile Include="Program.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

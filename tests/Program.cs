@@ -15,6 +15,7 @@ namespace MusicBeePlugin
         [STAThread]
         private static void Main()
         {
+            BpmLookupChecks.Run();
             if (PartyAnimation.ReadBpm("120 BPM") != 120 ||
                 PartyAnimation.ReadBpm("96,5") != 96.5 ||
                 PartyAnimation.ReadBpm("unknown") != 0 ||
@@ -249,6 +250,13 @@ namespace MusicBeePlugin
                 if (loaded == null || !loaded.Manual || loaded.Bpm != 132.5 ||
                     loaded.OriginMs != manualOrigin)
                     throw new Exception("A manual BPM must replace the saved automatic value.");
+                tempoStore.Save("first.mp3", 85.42, manualOrigin, true, false,
+                    "Deezer", "https://www.deezer.com/track/398570642");
+                loaded = new PartyTempoStore(tempoRoot).Load("first.mp3");
+                if (loaded.Bpm != 85.42 || loaded.OriginMs != manualOrigin ||
+                    loaded.Source != "Deezer" ||
+                    loaded.SourceUrl != "https://www.deezer.com/track/398570642")
+                    throw new Exception("Fractional BPM, alignment and original lookup source must survive restart.");
                 tempoStore.Delete("first.mp3");
                 if (new PartyTempoStore(tempoRoot).Load("first.mp3") != null)
                     throw new Exception("Forgetting a BPM must allow fresh detection.");
