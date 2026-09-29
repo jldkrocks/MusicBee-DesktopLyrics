@@ -27,9 +27,13 @@ The **PARTY** button near the lower-left corner shows the supplied Rem and Ram d
 
 To add a MusicBee toolbar button, right-click its toolbar and choose **Configure Toolbar**. Add a button and choose **View: Toggle Desktop Lyrics Window** from the command dropdown. MusicBee's toolbar layout remains yours to arrange; the command also appears in Hotkeys.
 
+### Party BPM menu
+
+The lyrics flyout groups adjustment/alignment, browser search, research prompt copying, online lookup settings and retry under **Party BPM**. **Copy ChatGPT research prompt** copies the current artist, title, album and duration with instructions to compare sourced BPM values, recording versions, half/double-time interpretations and uncertainty. Paste it into your own ChatGPT chat, review the answer, then use **Adjust BPM and alignment…** to save a value. Copying does not contact ChatGPT, require an API key, or replace saved timing.
+
 ### Browser BPM search
 
-For catalog misses, choose **Search Google for this song’s BPM…** in the lyrics flyout. This opens your browser with the current artist and title; nothing is sent until you click. Review the recording/version and enter the result in **Adjust Party BPM…**, then align and save as usual. This uses no paid API and never replaces timing automatically.
+For catalog misses, open **Party BPM → Search Google…** in the lyrics flyout. This opens your browser with the current artist and title; nothing is sent until you click. Review the recording/version and enter the result in **Adjust Party BPM…**, then align and save as usual. This uses no paid API and never replaces timing automatically.
 
 ### Online BPM source
 

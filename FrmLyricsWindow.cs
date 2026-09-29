@@ -361,27 +361,30 @@ namespace MusicBeePlugin
                 BeginInvoke(new Action(OpenTimingEditor)));
             var lrcAction = menu.Items.Add("Find lyrics on LRCLIB…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenLrcLibPicker)));
-            var tempoAction = menu.Items.Add("Adjust Party BPM…", null, (sender, args) =>
+            var partyBpm = new ToolStripMenuItem("Party BPM");
+            menu.Items.Add(partyBpm);
+            var tempoAction = partyBpm.DropDownItems.Add("Adjust BPM and alignment…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyTempoEditor)));
-            var browserBpm = menu.Items.Add("Search Google for this song’s BPM…", null,
+            var browserBpm = partyBpm.DropDownItems.Add("Search Google…", null,
                 (sender, args) => BeginInvoke(new Action(OpenBrowserBpmSearch)));
-            menu.Items.Add("Online Party BPM…", null, (sender, args) =>
+            var researchBpm = partyBpm.DropDownItems.Add("Copy ChatGPT research prompt", null,
+                (sender, args) => BeginInvoke(new Action(CopyBpmResearchPrompt)));
+            partyBpm.DropDownItems.Add(new ToolStripSeparator());
+            partyBpm.DropDownItems.Add("Online lookup settings…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyOnlineSettings)));
-            var retryOnline = menu.Items.Add("Retry online BPM for this song", null,
+            var retryOnline = partyBpm.DropDownItems.Add("Retry online lookup for this song", null,
                 (sender, args) => BeginInvoke(new Action(() => StartPartyOnlineLookup(true))));
             menu.Opening += (sender, args) =>
             {
                 timingAction.Visible = _timingButton.IsEmpty;
                 lrcAction.Visible = _lrcButton.IsEmpty;
                 tempoAction.Enabled = !string.IsNullOrWhiteSpace(_artworkTrackUrl);
-                browserBpm.Enabled = !string.IsNullOrWhiteSpace(_songTitle);
+                browserBpm.Enabled = researchBpm.Enabled = !string.IsNullOrWhiteSpace(_songTitle);
                 var savedTempo = !string.IsNullOrWhiteSpace(_artworkTrackUrl) ?
                     _partyTempoStore.Load(_artworkTrackUrl) : null;
                 retryOnline.Enabled = _settings.PartyMode &&
-                    !string.IsNullOrWhiteSpace(_partyApiKey) &&
-                    !string.IsNullOrWhiteSpace(_artworkTrackUrl) &&
-                    _partyTagBpm == 0 && (savedTempo == null ||
-                    (!savedTempo.Manual && !savedTempo.Online));
+                    PartyOnlineEnabled && !string.IsNullOrWhiteSpace(_artworkTrackUrl) &&
+                    PartyOnlineLookup.CanLookup(_partyTagBpm, savedTempo);
             };
             menu.Items.Add("More settings…", null, (sender, args) =>
                 BeginInvoke(new Action(() => _openSettings?.Invoke())));
@@ -637,6 +640,44 @@ namespace MusicBeePlugin
                     MessageBox.Show(this, "Could not save the API key: " + ex.Message,
                         "Online Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
+            }
+        }
+
+        private void CopyBpmResearchPrompt()
+        {
+            if (string.IsNullOrWhiteSpace(_songTitle)) return;
+            var duration = 0;
+            try { duration = _musicBee.NowPlaying_GetDuration?.Invoke() ?? 0; }
+            catch (Exception) { }
+            var durationText = duration > 0 ?
+                TimeSpan.FromMilliseconds(duration).ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture) : "Unknown";
+            var prompt = "Research the best BPM setting for this recording in MusicBee's dancer animation. " +
+                "Search the web and compare reported values rather than returning only the first result.\r\n\r\n" +
+                "Artist: " + (string.IsNullOrWhiteSpace(_songArtist) ? "Unknown" : _songArtist) + "\r\n" +
+                "Title: " + _songTitle + "\r\n" +
+                "Album: " + (string.IsNullOrWhiteSpace(_songAlbum) ? "Unknown" : _songAlbum) + "\r\n" +
+                "Duration: " + durationText + "\r\n\r\n" +
+                "Check the recording/version and duration; distinguish live, remix, sped-up and cover versions. " +
+                "List the reported BPMs with source links, explain disagreements and half/double-time equivalents, " +
+                "and recommend the best-supported BPM with confidence and any alternative worth trying. " +
+                "Do not average conflicting values blindly or invent decimal precision. " +
+                "Distinguish the reported musical tempo from a slower dance setting. " +
+                "Flag evidence of tempo changes or beatless sections, but do not invent timestamps. " +
+                "If evidence is insufficient or web search is unavailable, say so. " +
+                "You have metadata, not my audio, so do not claim to have measured this file. " +
+                "End with a concise recommended BPM and whether half-speed may suit the animation. " +
+                "Beat alignment is a separate manual step in the plugin.";
+            try
+            {
+                Clipboard.SetText(prompt);
+                MessageBox.Show(this, "Prompt copied. Paste it into your ChatGPT chat.\r\n\r\n" +
+                    "Review the recommendation, then use Party BPM → Adjust BPM and alignment to save it.",
+                    "BPM research prompt", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not copy the prompt: " + ex.Message,
+                    "BPM research prompt", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
