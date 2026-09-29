@@ -27,6 +27,10 @@ The **PARTY** button near the lower-left corner shows the supplied Rem and Ram d
 
 To add a MusicBee toolbar button, right-click its toolbar and choose **Configure Toolbar**. Add a button and choose **View: Toggle Desktop Lyrics Window** from the command dropdown. MusicBee's toolbar layout remains yours to arrange; the command also appears in Hotkeys.
 
+### Browser BPM search
+
+For catalog misses, choose **Search Google for this song’s BPM…** in the lyrics flyout. This opens your browser with the current artist and title; nothing is sent until you click. Review the recording/version and enter the result in **Adjust Party BPM…**, then align and save as usual. This uses no paid API and never replaces timing automatically.
+
 ### Online BPM source
 
 Party mode can look up missing BPMs using [GetSongBPM](https://getsongbpm.com/) and [Deezer](https://www.deezer.com/). Deezer lookup is enabled by default and needs no API key; switch **Use Deezer too (no key needed)** off in **Online Party BPM…** to disable it. If a GetSongBPM key is configured, that service is tried first; Deezer is used when it has no match or cannot be reached. Only the song title and artist are sent to Deezer. Returned title, artist, recording version and duration are checked locally, with album matches preferred; conflicting BPMs are rejected. The provider's decimal BPM is kept and the original lookup source is saved with the song. **Adjust Party BPM…** shows that source link and offers **½ speed / 2× speed** without rounding to whole BPM (170.84 becomes 85.42). Click **Align to this beat** to preview, then **Save** to remember both speed and alignment. A catalog BPM is not a beat offset or a tempo map; it can still be inaccurate for a particular recording.

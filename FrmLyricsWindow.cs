@@ -363,6 +363,8 @@ namespace MusicBeePlugin
                 BeginInvoke(new Action(OpenLrcLibPicker)));
             var tempoAction = menu.Items.Add("Adjust Party BPM…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyTempoEditor)));
+            var browserBpm = menu.Items.Add("Search Google for this song’s BPM…", null,
+                (sender, args) => BeginInvoke(new Action(OpenBrowserBpmSearch)));
             menu.Items.Add("Online Party BPM…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyOnlineSettings)));
             var retryOnline = menu.Items.Add("Retry online BPM for this song", null,
@@ -372,6 +374,7 @@ namespace MusicBeePlugin
                 timingAction.Visible = _timingButton.IsEmpty;
                 lrcAction.Visible = _lrcButton.IsEmpty;
                 tempoAction.Enabled = !string.IsNullOrWhiteSpace(_artworkTrackUrl);
+                browserBpm.Enabled = !string.IsNullOrWhiteSpace(_songTitle);
                 var savedTempo = !string.IsNullOrWhiteSpace(_artworkTrackUrl) ?
                     _partyTempoStore.Load(_artworkTrackUrl) : null;
                 retryOnline.Enabled = _settings.PartyMode &&
@@ -634,6 +637,22 @@ namespace MusicBeePlugin
                     MessageBox.Show(this, "Could not save the API key: " + ex.Message,
                         "Online Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
+            }
+        }
+
+        private void OpenBrowserBpmSearch()
+        {
+            if (string.IsNullOrWhiteSpace(_songTitle)) return;
+            var query = ((_songArtist ?? "").Trim() + " " + _songTitle.Trim() + " BPM").Trim();
+            try
+            {
+                Process.Start(new ProcessStartInfo("https://www.google.com/search?q=" +
+                    Uri.EscapeDataString(query)) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not open your browser: " + ex.Message,
+                    "Search for BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
