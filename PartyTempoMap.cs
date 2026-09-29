@@ -13,6 +13,7 @@ namespace MusicBeePlugin
         public double RampSeconds;
         public PartyDanceStyle Style;
         public PartyRhythm Rhythm;
+        public double SwingPercent = 66.67;
         public bool AlignBeat;
         public bool CountIn;
     }
@@ -41,6 +42,8 @@ namespace MusicBeePlugin
                     !Enum.IsDefined(typeof(PartyDanceStyle), s.Style) ||
                     !Enum.IsDefined(typeof(PartyRhythm), s.Rhythm))
                     throw new ArgumentException("Use increasing start times, BPM 40-240, nonnegative ramps and a listed dance/rhythm.");
+                if (!Finite(s.SwingPercent) || s.SwingPercent < 50 || s.SwingPercent > 75)
+                    throw new ArgumentException("Swing % must be between 50 (even) and 75 (strong swing).");
                 if (i == 0 && (s.StartSeconds != 0 || s.RampSeconds != 0))
                     throw new ArgumentException("The first section must start at 0 with no ramp.");
                 if (s.Style == PartyDanceStyle.Hold && (s.RampSeconds != 0 || s.AlignBeat))
@@ -65,6 +68,7 @@ namespace MusicBeePlugin
             var tempo = Sections[0].Bpm;
             var style = PartyDanceStyle.Normal;
             var rhythm = PartyRhythm.Straight;
+            var swingPercent = 66.67;
             seconds = Math.Max(0, seconds);
             for (var i = 0; i < Sections.Count; i++)
             {
@@ -81,6 +85,7 @@ namespace MusicBeePlugin
                 {
                     style = section.Style;
                     rhythm = section.Rhythm;
+                    swingPercent = section.SwingPercent;
                     var ramp = section.RampSeconds;
                     var beats = IntegratedBeats(sectionStartTempo, section, elapsed);
                     beat += beats * (style == PartyDanceStyle.HalfSpeed ? 0.5 : 1);
@@ -89,7 +94,7 @@ namespace MusicBeePlugin
                 }
                 if (seconds < end || i == Sections.Count - 1)
                 {
-                    var pose = MakePose(beat, tempo, style, rhythm, held);
+                    var pose = MakePose(beat, tempo, style, rhythm, swingPercent, held);
                     if (!held && style == PartyDanceStyle.HalfSpeed && i + 1 < Sections.Count && Sections[i + 1].CountIn)
                     {
                         var endBeat = sectionStartBeat + IntegratedBeats(sectionStartTempo, section,
@@ -105,13 +110,14 @@ namespace MusicBeePlugin
                     return pose;
                 }
             }
-            return MakePose(beat, tempo, style, rhythm, false);
+            return MakePose(beat, tempo, style, rhythm, swingPercent, false);
         }
 
         private static double AlignedBeat(double beat, PartyTempoSection section)
         {
             // In waltz, Align marks the first (strong) beat of a three-beat bar.
-            return section.Rhythm == PartyRhythm.Waltz ? Math.Floor(beat / 6) * 6 :
+            return section.Rhythm == PartyRhythm.Swing ? Math.Floor(beat / 2) * 2 :
+                section.Rhythm == PartyRhythm.Waltz ? Math.Floor(beat / 6) * 6 :
                 Math.Floor(beat / 4) * 4 + (section.Style == PartyDanceStyle.SideToSide ? 3 : 2);
         }
 
@@ -163,9 +169,9 @@ namespace MusicBeePlugin
             return value * value * (3 - 2 * value);
         }
 
-        private static readonly int[] WaltzFrames = { 6, 3, 9, 0, 9, 3 };
+        private static readonly int[] WaltzFrames = { 6, 3, 3, 0, 9, 9 };
 
-        private static PartyMapPose MakePose(double beat, double bpm, PartyDanceStyle style, PartyRhythm rhythm, bool held)
+        private static PartyMapPose MakePose(double beat, double bpm, PartyDanceStyle style, PartyRhythm rhythm, double swingPercent, bool held)
         {
             var waltz = rhythm == PartyRhythm.Waltz;
             var swing = rhythm == PartyRhythm.Swing;
@@ -176,6 +182,7 @@ namespace MusicBeePlugin
             var fraction = phase - Math.Floor(phase + 1e-9);
             fraction = Math.Max(0, fraction);
             var sideOnly = style == PartyDanceStyle.SideToSide;
+            if (swing) return MakeSwingPose(beat, bpm, effective, slot, fraction, swingPercent / 100, sideOnly, held);
             var frame = waltz ? (sideOnly ? (slot % 2 == 0 ? 6 : 0) : WaltzFrames[slot]) :
                 sideOnly ? slot % 2 * 6 : slot * 3;
             var since = fraction * 60000 / effective;
@@ -184,18 +191,40 @@ namespace MusicBeePlugin
             var remaining = Math.Max(0, 1 - since / duration);
             var anticipationDuration = Math.Min(130, 60000 / effective * 0.24);
             var lift = Math.Max(0, 1 - (1 - fraction) * 60000 / effective / anticipationDuration);
-            var strength = side ? 1 : waltz ? 0.42 : swing ? 0.65 : 0.28;
-            // Swing leaves the main beat/pose clock steady. Its additional,
-            // lighter bounce falls two-thirds of the way through each beat.
-            var offbeat = fraction - 2d / 3;
-            var swingAccent = !swing ? 0 : offbeat < 0 ? SmoothStep(1 + offbeat / 0.08) :
-                1 - SmoothStep(offbeat / 0.14);
+            var strength = side ? 1 : waltz ? 0.55 : 0.28;
+            // The repeated centre drawing still lands separately on beats 2 and 3.
+            // A slightly larger rise at the end of beat 3 prepares the side hit.
+            var rise = waltz && slot % 3 == 2 ? 1.3 : 1;
             return new PartyMapPose { Beat = beat, Bpm = bpm, Held = held, Frame = frame,
-                Impact = held ? 0 : (float)(remaining * remaining * strength + 0.4 * swingAccent),
-                Anticipation = held ? 0 : (float)(lift * lift * (3 - 2 * lift)),
+                Impact = held ? 0 : (float)(remaining * remaining * strength),
+                Anticipation = held ? 0 : (float)(rise * lift * lift * (3 - 2 * lift)),
                 Sway = held || effective >= 120 ? 0 : (float)(0.014 * Math.Min(1, (120 - effective) / 20) *
                     Math.Sin(Math.PI * fraction) * (slot % 2 == 0 ? 1 : -1)) };
         }
+
+        private static PartyMapPose MakeSwingPose(double beat, double bpm, double effective,
+            int slot, double fraction, double split, bool sideOnly, bool held)
+        {
+            // Each main beat lands on a side. The late subdivision briefly uses
+            // the centre drawing before the opposite side lands on the next beat.
+            var late = fraction + 1e-9 >= split;
+            var sideFrame = slot % 2 == 0 ? 6 : 0;
+            var frame = sideOnly || !late ? sideFrame : slot % 2 == 0 ? 3 : 9;
+            var segment = late ? 1 - split : split;
+            var progress = Math.Max(0, (fraction - (late ? split : 0)) / segment);
+            var segmentMs = 60000 / effective * segment;
+            var since = progress * segmentMs;
+            var duration = Math.Min(late ? 90 : 150, segmentMs * (late ? 0.4 : 0.35));
+            var remaining = Math.Max(0, 1 - since / duration);
+            var anticipationMs = Math.Min(100, segmentMs * 0.3);
+            var lift = Math.Max(0, 1 - (segmentMs - since) / anticipationMs);
+            return new PartyMapPose { Beat = beat, Bpm = bpm, Frame = frame, Held = held,
+                Impact = held ? 0 : (float)(remaining * remaining * (late ? 0.4 : 1)),
+                Anticipation = held ? 0 : (float)(lift * lift * (3 - 2 * lift)),
+                Sway = held || effective >= 120 ? 0 : (float)(0.014 * Math.Min(1, (120 - effective) / 20) *
+                    Math.Sin(Math.PI * progress) * (slot % 2 == 0 ? 1 : -1)) };
+        }
+
     }
 
     internal struct PartyMapPose

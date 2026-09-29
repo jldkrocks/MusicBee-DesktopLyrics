@@ -44,12 +44,15 @@ internal static class TimelineChecks
                 throw new Exception("Editor must load and save the count-in checkbox.");
             if (Convert.ToString(grid.Rows[1].Cells[6].Value) != "Waltz (3/4)" || last.Sections[1].Rhythm != PartyRhythm.Waltz)
                 throw new Exception("Editor must load and save the selected rhythm.");
-            grid.Rows[1].Cells[6].Value = "Swing (2:1)";
+            if (!grid.Rows[1].Cells[7].ReadOnly) throw new Exception("Swing amount must be disabled for Waltz.");
+            grid.Rows[1].Cells[6].Value = "Swing";
+            if (grid.Rows[1].Cells[7].ReadOnly) throw new Exception("Selecting Swing must enable its amount.");
+            grid.Rows[1].Cells[7].Value = "70";
             grid.Rows[1].Cells[5].Value = false;
             grid.Rows[0].Cells[1].Value = "90";
             Call(editor, "SaveMap");
             if (saved != 2 || last.Sections[0].Bpm != 90 || map.Sections[0].Bpm != 120 || last.Sections[1].CountIn || !map.Sections[1].CountIn ||
-                last.Sections[1].Rhythm != PartyRhythm.Swing || map.Sections[1].Rhythm != PartyRhythm.Waltz)
+                last.Sections[1].SwingPercent != 70 || last.Sections[1].Rhythm != PartyRhythm.Swing || map.Sections[1].Rhythm != PartyRhythm.Waltz)
                 throw new Exception("Repeated saves must apply new values without mutating the original map object.");
             Call(editor, "SeekTo", 105d);
             if (requestedSeek != 100000) throw new Exception("Editor seeks must clamp to song length.");
