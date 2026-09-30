@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <mfapi.h>
+#include <mfidl.h>
 #include <mfreadwrite.h>
 #include <wrl/client.h>
 #include <algorithm>
@@ -30,12 +31,12 @@ extern "C" HRESULT __cdecl DL_Waveform(const wchar_t* path,double start,double d
  try {
   std::fill(peaks,peaks+count,0.f);WaveRuntime runtime;HRESULT hr=runtime.Init();if(FAILED(hr))return hr;
   ComPtr<IMFSourceReader> reader;hr=runtime.source(path,nullptr,&reader);if(FAILED(hr))return hr;
-  hr=reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS,FALSE);if(FAILED(hr))return hr;
-  hr=reader->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM,TRUE);if(FAILED(hr))return hr;
+  hr=reader->SetStreamSelection((DWORD)MF_SOURCE_READER_ALL_STREAMS,FALSE);if(FAILED(hr))return hr;
+  hr=reader->SetStreamSelection((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,TRUE);if(FAILED(hr))return hr;
   ComPtr<IMFMediaType> type;hr=runtime.mediaType(&type);if(FAILED(hr))return hr;
   type->SetGUID(MF_MT_MAJOR_TYPE,MFMediaType_Audio);type->SetGUID(MF_MT_SUBTYPE,MFAudioFormat_PCM);type->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE,16);
-  hr=reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM,nullptr,type.Get());if(FAILED(hr))return hr;
-  type.Reset();hr=reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM,&type);if(FAILED(hr))return hr;
+  hr=reader->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,nullptr,type.Get());if(FAILED(hr))return hr;
+  type.Reset();hr=reader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,&type);if(FAILED(hr))return hr;
   UINT32 rate=0,channels=0,bits=0;
   type->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND,&rate);type->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS,&channels);type->GetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE,&bits);
   if(rate<1||rate>768000||channels<1||channels>32||bits!=16)return E_NOTIMPL;
@@ -45,7 +46,7 @@ extern "C" HRESULT __cdecl DL_Waveform(const wchar_t* path,double start,double d
   for(int packets=0;packets<100000;++packets){
    if(cancel()||GetTickCount64()>deadline)return HRESULT_FROM_WIN32(ERROR_CANCELLED);
    DWORD flags=0;LONGLONG stamp=0;ComPtr<IMFSample> sample;
-   hr=reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM,0,nullptr,&flags,&stamp,&sample);if(FAILED(hr))return hr;
+   hr=reader->ReadSample((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,0,nullptr,&flags,&stamp,&sample);if(FAILED(hr))return hr;
    if(flags&MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED)return E_NOTIMPL;
    if(flags&MF_SOURCE_READERF_ENDOFSTREAM)return S_OK;
    double time=stamp/10000000.;if(time>=start+duration)return S_OK;

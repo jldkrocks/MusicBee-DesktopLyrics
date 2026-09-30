@@ -36,6 +36,7 @@ namespace MusicBeePlugin
         [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern IntPtr LoadLibraryEx(string path,IntPtr reserved,uint flags);
         [DllImport("kernel32.dll",CharSet=CharSet.Ansi,ExactSpelling=true)] private static extern IntPtr GetProcAddress(IntPtr library,string name);
         [DllImport("kernel32.dll")] private static extern bool FreeLibrary(IntPtr library);
+        private static readonly SemaphoreSlim DecodeGate = new SemaphoreSlim(1,1);
         private Task<Range> _task;
         private CancellationTokenSource _cancel;
         private double _start=-1,_length;
@@ -58,7 +59,12 @@ namespace MusicBeePlugin
             _requested=true;
             if(string.IsNullOrEmpty(path)||path.StartsWith(@"\\")||!File.Exists(path)){Status="Waveform unavailable: local audio file required.";return;}
             Status="Loading waveform...";_cancel=new CancellationTokenSource();var token=_cancel.Token;
-            _task=Task.Run(()=>Read(path,start,length,token));
+            _task=Task.Run(()=>{
+                bool entered=false;
+                try { DecodeGate.Wait(token);entered=true;return Read(path,start,length,token); }
+                catch(OperationCanceledException){return new Range {Start=start,Length=length,Error="Waveform cancelled."};}
+                finally{if(entered)DecodeGate.Release();}
+            });
         }
         internal static Range Read(string path,double start,double length,CancellationToken token)
         {

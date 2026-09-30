@@ -566,7 +566,7 @@ namespace MusicBeePlugin
 
         private static double SafeDuration(DataGridViewRow row,int column,double fallback)
         {
-            double value;return double.TryParse(Convert.ToString(row.Cells[column].Value),out value) && !double.IsNaN(value) && !double.IsInfinity(value) && value>=0 ? value : fallback;
+            double value;return double.TryParse(Convert.ToString(row.Cells[column].Value),out value) && !double.IsNaN(value) && !double.IsInfinity(value) && value>=0 ? Math.Min(column==2?1:column==3?5:2,value) : fallback;
         }
         private void PollPlayback()
         {

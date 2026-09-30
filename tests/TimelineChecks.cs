@@ -66,6 +66,19 @@ internal static class TimelineChecks
             Call(t,"OnMouseWheel",new MouseEventArgs(MouseButtons.None,0,83,15,-120));
             if(t.LoopStart!=31 || t.LoopEnd!=36)throw new Exception("Overview wheel must pan by visible span.");
         }
+        using(var t=new PartyTimeline {Width=236,Duration=10,EditAccents=true,SelectedAccent=0}) {
+            var cue=new PartyTimeline.Marker {Row=0,Seconds=2,Prepare=.5,Hold=.5,Recovery=.5};t.Accents.Add(cue);
+            int changes=0;t.EnvelopeChanged+=(r,p,h,recovery)=>{changes++;if(recovery!=1)throw new Exception("Recovery handle used wrong origin.");};
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,78,138,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,88,138,0));
+            if(changes!=0)throw new Exception("Duration drag must commit only on release.");
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,88,138,0));
+            if(changes!=1)throw new Exception("Duration drag did not commit.");
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,48,138,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,38,138,0));
+            Call(t,"OnKeyDown",new KeyEventArgs(Keys.Escape));
+            if(cue.Prepare!=.5 || changes!=1)throw new Exception("Escape must restore duration without committing.");
+        }
         var map = new PartyTempoMap { TrackUrl = "original" };
         map.Sections.Add(new PartyTempoSection { Bpm = 120, Style = PartyDanceStyle.HalfSpeed });
         map.Sections.Add(new PartyTempoSection { StartSeconds = 20, Bpm = 120, CountIn = true, Rhythm = PartyRhythm.Waltz });
