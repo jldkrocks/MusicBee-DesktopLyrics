@@ -48,6 +48,7 @@ namespace MusicBeePlugin
         private DancersFn _dancers;
         private readonly DancerCommand[] _dancerCommands = new DancerCommand[2];
         private readonly Size[] _dancerSizes = new Size[8];
+        private readonly Bitmap[] _dancerSheets = new Bitmap[2]; // at most 5.82 MiB decoded
         private int _dancerBytes;
         private int _dancerCount;
         internal void BeginDancers() { _dancerCount = 0; }
@@ -59,6 +60,7 @@ namespace MusicBeePlugin
                 _dancerSizes[i]=Size.Empty;
             }
             _dancerBytes=0;
+            for (int i=0;i<2;i++) { _dancerSheets[i]?.Dispose(); _dancerSheets[i]=null; }
         }
         internal void CommitDancers() { Marshal.ThrowExceptionForHR(_dancers(_renderer,_dancerCommands,_dancerCount)); }
         internal void AddDancer(int character, Rectangle bounds, int frame, float impact, float sway, float anticipation)
@@ -78,10 +80,12 @@ namespace MusicBeePlugin
                 var stamp=Profile?.Stamp ?? 0;
                 // Preserve the existing bicubic enlargement. Only the changing
                 // transform moves to the GPU; dispose the staging raster at once.
-                using (var stream=typeof(GpuSceneRenderer).Assembly.GetManifestResourceStream(
-                    character==0?"MusicBeePlugin.PartyRem.png":"MusicBeePlugin.PartyRam.png"))
-                using (var sheet=new Bitmap(stream))
-                using (var pose=PartyDancerWindow.CreatePose(sheet,bounds.Size,frame)) {
+                if (_dancerSheets[character]==null) {
+                    using (var stream=typeof(GpuSceneRenderer).Assembly.GetManifestResourceStream(
+                        character==0?"MusicBeePlugin.PartyRem.png":"MusicBeePlugin.PartyRam.png"))
+                    using (var image=Image.FromStream(stream)) _dancerSheets[character]=new Bitmap(image);
+                }
+                using (var pose=PartyDancerWindow.CreatePose(_dancerSheets[character],bounds.Size,frame)) {
                     var bits=pose.LockBits(new Rectangle(Point.Empty,pose.Size),ImageLockMode.ReadOnly,PixelFormat.Format32bppPArgb);
                     try { Marshal.ThrowExceptionForHR(_dancerTexture(_renderer,slot,(uint)pose.Width,(uint)pose.Height,bits.Scan0,(uint)bits.Stride)); }
                     finally { pose.UnlockBits(bits); }
@@ -209,6 +213,7 @@ namespace MusicBeePlugin
         {
             Foreground?.Dispose(); Foreground = null;
             Array.Clear(_textImages,0,_textImages.Length);
+            for (int i=0;i<2;i++) { _dancerSheets[i]?.Dispose(); _dancerSheets[i]=null; }
             if (_renderer != IntPtr.Zero) { _destroy(_renderer); _renderer = IntPtr.Zero; }
             if (_library != IntPtr.Zero) { FreeLibrary(_library); _library = IntPtr.Zero; }
         }

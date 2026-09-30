@@ -1471,7 +1471,11 @@ namespace MusicBeePlugin
                 _partyVisualFrame=frame; _partyVisualImpact=impact;
                 _partyVisualSway=sway; _partyVisualAnticipation=anticipation;
                 _partyVisualValid=true;
-                if (!UseGpuDancers) PresentStoredPartyDancers();
+                // Initial GPU creation happens at paint. Do not rasterize a
+                // second full-size GDI pair first; a failed paint restores the
+                // stored snapshot through the existing fallback path.
+                if (!GpuEligible || WindowState != FormWindowState.Maximized)
+                    PresentStoredPartyDancers();
             }
             catch (Exception ex)
             {

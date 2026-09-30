@@ -240,6 +240,7 @@ class GpuCompositionChecks
             actual.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"gpu-check-images","dancers-gpu.png"));
             expected.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"gpu-check-images","dancers-gdi.png"));
             Call(renderer,"ClearDancers");Check((int)Get(renderer,"_dancerBytes")==0,"Restore must release dancer cache");
+            Check(((Bitmap[])Get(renderer,"_dancerSheets")).All(b=>b==null),"Restore must release decoded sheets");
             Console.WriteLine("Dancer-region RGB mean error, worst case: "+worst.ToString("F3"));
         }
         // Production path: no clock calls and no foreground refresh for a
