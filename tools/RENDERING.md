@@ -14,7 +14,28 @@ Hidden/minimized windows stop requests. HWND recreation discards the old worker/
 
 Opt-in reports now include the selected target, actual pacing path, wake lateness and summed skipped deadlines, plus10/16.667ms threshold counts. Existing caps/three-report retention remain. Changing target/backend ends the current capture to prevent mixed results. New tests cover blocked/reentrant messages, stop/restart, disposal, failed posting, real window hide/show and HWND recreation, target selection and timer/GDI failure. The full timing/storage/seek regression suite remains required, as do hardware image/cache/device-loss checks in both architectures.
 
-Measurements and verified release links will be added after the checkpoint completes. Future work stays prioritized by evidence: foreground dirty-region/upload reduction (moderate difficulty, low ongoing cost), cached GPU dancer transforms (higher difficulty, likely CPU saving), optional DirectWrite glyph creation (higher visual-compatibility difficulty), then bounded song-programmed effects (variable GPU/overdraw cost). No additional features are implemented here.
+Three matched fresh-lyric runs per size/target are preserved in `render-comparison-1.15.55.json`. The harness uses the same pacer on an actual STA message loop, GPU HWND submissions, artwork/queue/background/spectrum/translated/current/upcoming text, and two hidden layered dancers. It changes text every 2 seconds, and includes palette changes. Local 64-bit results, with no busy-spin pacing:
+
+| Size / target | Draws/s | Mean interval | p95 interval | p99 interval |
+| --- | --- | --- | --- | --- |
+| Restored, original timer | 39.89-39.93 | 24.99-25.03 ms | 32.64-32.88 ms | 35.34-37.59 ms |
+| Restored, 60 | 59.85-60.00 | 16.666 ms | 17.08-17.13 ms | 17.21-17.34 ms |
+| Restored, 120 | 119.63-119.98 | 8.333 ms | 8.68-8.72 ms | 8.80-8.93 ms |
+| 4K, original timer | 39.99-40.04 | 24.97-25.02 ms | 32.51-32.57 ms | 36.04-37.55 ms |
+| 4K, 60 | 59.88-60.05 | 16.666-16.677 ms | 17.06-17.10 ms | 17.14-17.32 ms |
+| 4K, 120 | 118.21-118.69 | 8.42-8.46 ms | 8.72-8.97 ms | 9.99-11.12 ms |
+
+At 4K/120 the three runs have 5/1173, 2/1177 and 1/1176 intervals above 16.667 ms (0.43%, 0.17%, 0.09%); none above 33.333 ms. Maximum intervals remain 17.68-18.80 ms. At 4K/60 no intervals exceed 33.333 ms; maxima 17.50-18.98 ms. Both targets pass their synthetic scheduling gates. Physical presentation and MusicBee responsiveness still require user validation, not an automated pass.
+
+At 4K/120 average CPU drawing/submission work is 4.21-4.34 ms, p95 7.89-8.28 ms, p99 9.82-10.70 ms, maximum 17.24-18.24 ms. Foreground redraw averages 3.39-3.50 ms (p99 11.16-11.86), upload 0.92-1.02 ms (p99 1.57-1.70), GPU submission 0.32-0.36 ms (p99 0.57-0.62), dancers 2.94-3.01 ms (p99 3.60-3.84). Nested metrics must not be added. This checkpoint improves wakeups, not the renderer's work per frame. More cheap frames change the percentile weighting of rare fresh-glyph work; its remaining maxima must not be hidden.
+
+Benchmark CPU is 49.37-51.62% of one logical core at 4K/120 versus 25.90-29.36% at 60 and 8.49-11.89% with the original timer. Working set averages 257-267 MiB at 120, 255-265 MiB at 60 and 253-272 MiB with the original timer. These are whole benchmark-process values, not extra plugin/VRAM allocations or live MusicBee CPU. The higher rate intentionally spends more CPU on more frames. No claim is made that the GPU is now the only limiter.
+
+Release `ee2843e63aa54f256da1ef7728f5aecea3dff6de` passed the full local regression suite and local x86/x64 hardware image/cache/lifecycle/failure checks. [Actions 36734907678](https://github.com/jldkrocks/MusicBee-DesktopLyrics/actions/runs/36734907678) passed the full suite and both hardware architectures. [Artifact 11105918412](https://github.com/jldkrocks/MusicBee-DesktopLyrics/actions/runs/36734907678/artifacts/11105918412) ZIP SHA256 `dd2cb0b4c15ad9fd840fe2a91aa6bc1c2b2e8d389798577f32faf7d453c62c9c` and its normal plugin ZIP contents were verified. Installed with MusicBee closed, using `../install-musicbee-1.15.55.ps1`; all previous binaries are backed up in `../backups/MusicBee-20260930-1.15.54.0` with independently matched hashes. Installed hashes: managed `aa6cea6acbd922723069f2c494c35bf1da66c31524490fcdb925521011b81502`, Win32 `0621fe5bafebdea944d966e29a684fbcbb967b4ea3b1086bbb2104d5c789dfc2`, x64 `4cb6f8a3d24c7eb61e485443a9bf2eedbd84cbb62aed6afbd55fc1f68a0d5283`. Managed DLL is 2,658,816 bytes, exactly 7,168 bytes larger; native sizes remain 527,360 / 683,008 bytes.
+
+Next validation: keep GPU rendering enabled and `Animation frame rate > 120 FPS target`, capture three restored and three maximized 4K runs with active lyrics/English/preview/spectrum/artwork/queue/dancers. Include lyric changes and MusicBee scrolling/artwork loading. Check pause/resume, hide/minimize/restore and resizing. Compare 60 if the higher target causes host sluggishness, and report which target was used. Actual remote-session changes/driver reset and physical scan-out have not been validated locally; injected loss and compatibility recovery have.
+
+Future work stays prioritized by evidence: foreground dirty-region/upload reduction (moderate difficulty, low ongoing cost), cached GPU dancer transforms (higher difficulty, likely CPU saving), optional DirectWrite glyph creation (higher visual-compatibility difficulty), then bounded song-programmed effects (variable GPU/overdraw cost). No additional features are implemented here.
 
 ## Checkpoint 3: GPU lyric composition, version 1.15.54
 
