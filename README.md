@@ -178,6 +178,10 @@ Playback controls and accent motion (1.15.46):
 - Existing cues load as Bop and are not rewritten until Save. Save writes map version 6; older plugin versions cannot load newly saved maps. New cue styles never change BPM, beat phase, rhythm, speed or lyric timing.
 
 
+External seek correction (1.15.48):
+- Seeking with MusicBee's main seek bar no longer triggers the dancer clock's 20% resume catch-up. Resume easing is reserved for an explicit ordinary Play command from the plugin; temporary non-playing states during external seeks use the fresh playback position directly.
+- Play after a paused seek also bypasses resume easing. BPM, saved beat alignment, tempo maps and accent timing are unchanged. MusicBee's audio buffering/fade latency is outside this correction.
+
 Seek anchoring, independent accents and timestamp actions (1.15.47):
 - An accepted tempo-map seek immediately publishes the requested position, resets the dancer clock to that position, bypasses resume easing, and redraws the dancers. Playback reads started before the seek are discarded instead of replacing it with a stale position. Playback then continues from fresh samples. This fixes the plugin-side catch-up; MusicBee's own audio output/seek latency still applies.
 - **Motion** and **Pose** are independent in Accent cues. Choose Bop or Rebound, then Current pose, Left hit, Right hit or Alternate sides. For stronger alternating hits choose **Rebound + Alternate sides**, your preferred Strength, then Save. Old directional motions already included the rebound; they now appear as that explicit combination, without changing their strength or timing. Saves use map version 7; earlier files still load and are not rewritten until Save.
