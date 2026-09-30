@@ -49,6 +49,8 @@ class GpuCompositionChecks
                 Check(args.Length==0 || args[0]!="require-hardware","Local hardware test did not run");
             }
             else {
+                Check((bool)Get(form,"_gpuOutlineText"),"User-approved outlines must default on");
+                ArtworkChecks(assembly,form);
                 OutlineChecks(assembly,form);
                 PixelCompare(assembly,form);
                 foreach(var size in new[]{new Size(814,272),new Size(3840,2160)}) {
@@ -477,5 +479,30 @@ class GpuCompositionChecks
         form.WindowState=FormWindowState.Normal;form.ClientSize=new Size(960,540);Set(form,"_transitionStarted",0L);
         Check((bool)Call(form,"TryDrawGpu"),"Bitmap rendering could not resume after outlines");
         Console.WriteLine("Outline group opacity, gradients, cache bounds, transitions and bitmap switch passed.");
+    }
+    static void ArtworkChecks(Assembly assembly,Form form) {
+        Func<Color,Bitmap> cover=color=>{var b=new Bitmap(256,256,PixelFormat.Format32bppPArgb);using(var g=Graphics.FromImage(b))g.Clear(color);return b;};
+        long now=Stopwatch.GetTimestamp();long duration=(long)(Stopwatch.Frequency*.55);
+        Call(form,"StartArtwork",cover(Color.Red),now);Call(form,"AdvanceArtwork",now+duration+1);
+        Check(Get(form,"_previousArtwork")==null && (float)Get(form,"_artworkProgress")==1,"Completed art fade retained history");
+        now+=duration+1;Call(form,"StartArtwork",cover(Color.Blue),now);Call(form,"AdvanceArtwork",now+duration/2);
+        Check(Math.Abs((float)Get(form,"_artworkProgress")-.5)<.001,"Artwork duration disagrees with background duration");
+        PixelCompare(assembly,form);
+        var gpu=Get(form,"_gpu");form.Invalidate();Call(form,"TryDrawGpu");gpu=Get(form,"_gpu");
+        var generation=(long)Get(gpu,"_capture");var overlay=(Bitmap)gpu.GetType().GetProperty("Foreground",Flags).GetValue(gpu);
+        using(var saved=(Bitmap)overlay.Clone()) {
+            Call(form,"AdvanceArtwork",now+duration*3/4);Call(form,"TryDrawGpu");
+            Check((long)Get(gpu,"_capture")==generation && EqualPixels(saved,overlay),"Artwork opacity forced a foreground raster/upload");
+        }
+        // Redirect at the midpoint: the new outgoing image must equal the
+        // currently visible red/blue blend, not jump to either original cover.
+        Call(form,"AdvanceArtwork",now+duration/2);Call(form,"StartArtwork",cover(Color.Green),now+duration/2);
+        var snapshot=(Bitmap)Get(form,"_previousArtwork");var pixel=snapshot.GetPixel(128,128);
+        Check(snapshot.Size==new Size(256,256) && Math.Abs(pixel.R-127)<3 && Math.Abs(pixel.B-127)<3,"Interrupted art fade jumped or grew its snapshot");
+        Call(form,"AdvanceArtwork",now+duration*2);Check(Get(form,"_previousArtwork")==null,"Old snapshot survived fade completion");
+        now+=duration*2;Call(form,"StartArtwork",null,now);Call(form,"AdvanceArtwork",now+duration/2);PixelCompare(assembly,form);
+        Call(form,"AdvanceArtwork",now+duration+1);Check(Get(form,"_albumArtwork")==null && Get(form,"_previousArtwork")==null,"Missing artwork retained old covers");
+        form.Invalidate();Call(form,"TryDrawGpu");
+        Console.WriteLine("Artwork fade, interruption snapshot, missing cover, cleanup and retained overlay passed.");
     }
 }

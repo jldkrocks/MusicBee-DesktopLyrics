@@ -13,6 +13,7 @@ struct Scene {
 };
 struct TextCommand { int slot; D2D1_RECT_F destination, clip; float opacity; int nearest; };
 struct DancerCommand { int slot; D2D1_RECT_F destination, clip; };
+struct ArtCommand { D2D1_RECT_F bounds;float progress;int enabled,previous,current; };
 struct OutlineCommand { int slot; D2D1_RECT_F clip; float x,y,scale,stroke,opacity; UINT color1,color2,border; int gradient; };
 struct Outline {
     ComPtr<ID2D1PathGeometry> path;
@@ -46,6 +47,10 @@ struct Renderer {
     ComPtr<ID2D1SolidColorBrush> ink;
     ComPtr<ID2D1StrokeStyle> roundStroke;
     ComPtr<ID2D1Layer> textLayer;
+    ComPtr<ID2D1Bitmap> artwork[2];
+    ArtCommand art={};
+    ComPtr<ID2D1RoundedRectangleGeometry> artClip;
+    ComPtr<ID2D1Layer> artLayer;
 };
 static D2D1_COLOR_F Color(UINT argb, float alpha = 1) {
     return D2D1::ColorF((argb >> 16 & 255) / 255.f, (argb >> 8 & 255) / 255.f, (argb & 255) / 255.f, alpha);
@@ -193,6 +198,29 @@ extern "C" HRESULT __cdecl DL_Lyrics(Renderer* r, const D2D1_RECT_F* panel, cons
     if(count)memcpy(r->commands,commands,sizeof(TextCommand)*count);
     return S_OK;
 }
+extern "C" HRESULT __cdecl DL_ArtTexture(Renderer* r,int slot,UINT width,UINT height,const void* pixels,UINT stride) noexcept {
+    if(!r || slot<0 || slot>1)return E_INVALIDARG;
+    r->artwork[slot].Reset();if(!pixels)return S_OK;
+    if(!width||!height||width>1024||height>1024||stride<width*4)return E_INVALIDARG;
+    return r->target->CreateBitmap(D2D1::SizeU(width,height),pixels,stride,
+        D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_PREMULTIPLIED),96,96),&r->artwork[slot]);
+}
+extern "C" HRESULT __cdecl DL_Artwork(Renderer* r,const ArtCommand* command) noexcept {
+    if(!r||!command)return E_INVALIDARG;
+    const auto& c=*command;
+    if(c.enabled){
+        if(!std::isfinite(c.progress)||c.progress<0||c.progress>1||
+           (c.previous&&!r->artwork[0])||(c.current&&!r->artwork[1]))return E_INVALIDARG;
+        if(!std::isfinite(c.bounds.left)||!std::isfinite(c.bounds.top)||!std::isfinite(c.bounds.right)||!std::isfinite(c.bounds.bottom)||
+           c.bounds.right<=c.bounds.left||c.bounds.bottom<=c.bounds.top)return E_INVALIDARG;
+        if(!r->artLayer){HRESULT hr=r->target->CreateLayer(nullptr,&r->artLayer);if(FAILED(hr))return hr;}
+        if(!r->artClip || memcmp(&r->art.bounds,&c.bounds,sizeof c.bounds)){
+            r->artClip.Reset();HRESULT hr=r->factory->CreateRoundedRectangleGeometry(D2D1::RoundedRect(c.bounds,10,10),&r->artClip);
+            if(FAILED(hr))return hr;
+        }
+    }
+    r->art=c;return S_OK;
+}
 extern "C" HRESULT __cdecl DL_Draw(Renderer* r, const Scene* s, HDC diagnosticOutput) noexcept {
     if(!r || !s) return E_INVALIDARG;
     HRESULT hr=Brushes(*r,*s); if(FAILED(hr)) return hr;
@@ -215,6 +243,24 @@ extern "C" HRESULT __cdecl DL_Draw(Renderer* r, const Scene* s, HDC diagnosticOu
             r->target->FillRectangle(D2D1::RectF(std::round(23+i*spacing),floor-std::round(h),
                 std::round(23+i*spacing)+std::round(barWidth),floor),r->spectrum.Get());
         }
+    }
+    if(r->art.enabled) {
+        const auto& c=r->art;auto rect=c.bounds;
+        r->target->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        auto rounded=D2D1::RoundedRect(rect,10,10);
+        r->panelBrush->SetColor(D2D1::ColorF(9/255.f,12/255.f,22/255.f,115/255.f));
+        r->target->FillRoundedRectangle(rounded,r->panelBrush.Get());
+        auto middle=D2D1::Point2F((rect.left+rect.right)/2,(rect.top+rect.bottom)/2);
+        float radius=(rect.right-rect.left<rect.bottom-rect.top?rect.right-rect.left:rect.bottom-rect.top)*.27f;
+        r->panelBrush->SetColor(Color(s->colors[4],80/255.f));
+        r->target->DrawEllipse(D2D1::Ellipse(middle,radius,radius),r->panelBrush.Get(),2);
+        r->panelBrush->SetColor(Color(s->colors[4],90/255.f));
+        r->target->FillEllipse(D2D1::Ellipse(middle,4,4),r->panelBrush.Get());
+        r->target->PushLayer(D2D1::LayerParameters(rect,r->artClip.Get()),r->artLayer.Get());
+        if(c.previous)r->target->DrawBitmap(r->artwork[0].Get(),rect,c.current?1:1-c.progress,D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        if(c.current)r->target->DrawBitmap(r->artwork[1].Get(),rect,c.progress,D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        r->target->PopLayer();
+        r->panelBrush->SetColor(Color(s->colors[4],110/255.f));r->target->DrawRoundedRectangle(rounded,r->panelBrush.Get());
     }
     if(r->panel.right>r->panel.left && r->panel.bottom>r->panel.top) {
         r->target->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);

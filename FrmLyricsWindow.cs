@@ -72,6 +72,7 @@ namespace MusicBeePlugin
         {
             renderer.Profile=_renderProfile;
             renderer.UseOutlines=_gpuOutlineText;
+            if(!_gpuLyricsOnly)renderer.HideArtwork();
             renderer.BeginLyrics();
             _gpuLyrics=renderer;
             try {
@@ -82,7 +83,7 @@ namespace MusicBeePlugin
             finally { _gpuLyrics=null; }
         }
         private bool _gpuDisabled, _gpuFailed, _foregroundDirty = true, _animationInvalidating;
-        private bool _gpuOutlineText; // Comparison option, deliberately not a saved song setting.
+        private bool _gpuOutlineText = true; // Per-window comparison toggle; no song setting.
         private string _gpuFailure;
         private double _foregroundAutoBpm;
         private bool _foregroundNoSignal;
@@ -173,6 +174,7 @@ namespace MusicBeePlugin
                 _gpu.Profile=_renderProfile;
                 ComposeGpuDancers();
                 submitted = _renderProfile?.Stamp ?? 0;
+                _gpu.UpdateArtwork(_previousArtwork,_albumArtwork,_artworkProgress);
                 _gpu.Draw(_palette, _bars, _settings.ShowVisualizer);
                 _renderProfile?.End(RenderMetric.GpuSubmit, submitted);
                 if (UseGpuDancers) { _leftDancer?.Hide(); _rightDancer?.Hide(); }
@@ -237,6 +239,9 @@ namespace MusicBeePlugin
         private bool _loaded;
         private bool _animationDisposed;
         private Bitmap _albumArtwork;
+        private Bitmap _previousArtwork;
+        private long _artworkStarted;
+        private float _artworkProgress=1;
         private Bitmap _backgroundCache, _spectrumCache;
         private ArtworkPalette _cachedBackgroundPalette;
         private string _songTitle = "", _songArtist = "";
@@ -567,6 +572,7 @@ namespace MusicBeePlugin
                 RefreshQueue();
             StepSpectrum(elapsedMs);
             AdvancePalette();
+            AdvanceArtwork(Stopwatch.GetTimestamp());
             var barsMoving = false;
             if (_settings.ShowVisualizer && !_settings.TransparentCanvas)
                 for (var i = 0; i < BarCount; i++)
@@ -574,7 +580,7 @@ namespace MusicBeePlugin
                     { barsMoving = true; break; }
             // Keep the fade to zero at full speed, even after pausing.
             if (!_movingOrResizing && _playState != Plugin.PlayState.Playing &&
-                !barsMoving && _transitionStarted == 0 && _paletteStarted == 0 &&
+                !barsMoving && _transitionStarted == 0 && _paletteStarted == 0 && _artworkStarted == 0 &&
                 !HasQueueNotice && _lastPaintRequest != 0 &&
                 (now - _lastPaintRequest) * 1000.0 / Stopwatch.Frequency < 40)
                 return;
@@ -1643,11 +1649,12 @@ namespace MusicBeePlugin
                 RefreshQueue();
             }
             RefreshPlayState();
-            if (trackChanged || (!_settings.ShowAlbumArt && !_useArtworkColors))
+            if (!_settings.ShowAlbumArt && !_useArtworkColors)
             {
                 var previousArt = _albumArtwork;
                 _albumArtwork = null;
                 previousArt?.Dispose();
+                _previousArtwork?.Dispose();_previousArtwork=null;_artworkStarted=0;_artworkProgress=1;
             }
             Invalidate();
             if (!_settings.ShowAlbumArt && !_useArtworkColors)
@@ -1715,10 +1722,8 @@ namespace MusicBeePlugin
                             cover?.Dispose();
                             return;
                         }
-                        var previousArt = _albumArtwork;
-                        _albumArtwork = cover;
-                        previousArt?.Dispose();
                         if (_useArtworkColors) SetPalette(palette);
+                        StartArtwork(cover,_useArtworkColors?_paletteStarted:Stopwatch.GetTimestamp());
                         Invalidate();
                     }));
                 }
@@ -1779,6 +1784,37 @@ namespace MusicBeePlugin
             _paletteFrom = _palette;
             _paletteTo = target;
             _paletteStarted = Stopwatch.GetTimestamp();
+        }
+
+        private void StartArtwork(Bitmap cover,long now)
+        {
+            // Collapse an interrupted fade to one bounded source image so rapid
+            // next/previous presses neither jump back nor retain a song history.
+            AdvanceArtwork(now);
+            if(_artworkStarted!=0 && (_previousArtwork!=null || _albumArtwork!=null)) {
+                var snapshot=new Bitmap(256,256,System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                using(var g=Graphics.FromImage(snapshot)) {
+                    DrawArtworkImage(g,_previousArtwork,new Rectangle(0,0,256,256),_albumArtwork==null?1-_artworkProgress:1);
+                    DrawArtworkImage(g,_albumArtwork,new Rectangle(0,0,256,256),_artworkProgress);
+                }
+                _previousArtwork?.Dispose();_albumArtwork?.Dispose();_previousArtwork=snapshot;
+            } else {_previousArtwork?.Dispose();_previousArtwork=_albumArtwork;}
+            _albumArtwork=cover;_artworkProgress=0;_artworkStarted=now;
+        }
+        private void AdvanceArtwork(long now)
+        {
+            if(_artworkStarted==0)return;
+            _artworkProgress=Math.Max(0,Math.Min(1,(float)((now-_artworkStarted)*1000d/Stopwatch.Frequency/550d)));
+            if(_artworkProgress>=1){_artworkStarted=0;_previousArtwork?.Dispose();_previousArtwork=null;}
+        }
+        private static void DrawArtworkImage(Graphics g,Bitmap image,Rectangle rect,float opacity)
+        {
+            if(image==null || opacity<=0)return;
+            using(var attributes=new System.Drawing.Imaging.ImageAttributes()) {
+                attributes.SetColorMatrix(new System.Drawing.Imaging.ColorMatrix {Matrix33=opacity});
+                attributes.SetWrapMode(WrapMode.TileFlipXY);
+                g.DrawImage(image,rect,0,0,image.Width,image.Height,GraphicsUnit.Pixel,attributes);
+            }
         }
 
         private void AdvancePalette()
@@ -2433,6 +2469,11 @@ namespace MusicBeePlugin
         private void DrawAlbumArt(Graphics g, RectangleF area)
         {
             var rect = Rectangle.Round(area);
+            if(_gpuLyrics!=null) {
+                using(var transform=g.Transform){var offset=transform.Elements;var target=new RectangleF(rect.X+offset[4],rect.Y+offset[5],rect.Width,rect.Height);
+                    _gpuLyrics.SetArtwork(target,_previousArtwork,_albumArtwork,_artworkProgress);}
+                return;
+            }
             using (var path = RoundedRectangle(rect, 10))
             using (var background = new SolidBrush(Color.FromArgb(
                        _settings.TransparentCanvas ? 255 : 115, 9, 12, 22)))
@@ -2440,14 +2481,6 @@ namespace MusicBeePlugin
                 var smoothing = g.SmoothingMode;
                 if (_settings.TransparentCanvas) g.SmoothingMode = SmoothingMode.None;
                 g.FillPath(background, path);
-                if (_albumArtwork != null)
-                {
-                    var clip = g.Save();
-                    g.SetClip(path);
-                    g.DrawImage(_albumArtwork, rect);
-                    g.Restore(clip);
-                }
-                else
                 {
                     var middle = new PointF(rect.Left + rect.Width / 2f,
                         rect.Top + rect.Height / 2f);
@@ -2461,6 +2494,10 @@ namespace MusicBeePlugin
                         g.FillEllipse(centre, middle.X - 4, middle.Y - 4, 8, 8);
                     }
                 }
+                var clip = g.Save();g.SetClip(path);
+                DrawArtworkImage(g,_previousArtwork,rect,_albumArtwork==null?1-_artworkProgress:1);
+                DrawArtworkImage(g,_albumArtwork,rect,_previousArtwork==null && _artworkStarted==0?1:_artworkProgress);
+                g.Restore(clip);
                 if (!_settings.TransparentCanvas)
                     using (var border = new Pen(Color.FromArgb(110, _palette.Border)))
                         g.DrawPath(border, path);
@@ -3472,6 +3509,7 @@ namespace MusicBeePlugin
                 _stopHideTimer?.Dispose();
                 DisposePartyDancers();
                 _albumArtwork?.Dispose();
+                _previousArtwork?.Dispose();
                 _backgroundCache?.Dispose();
                 _spectrumCache?.Dispose();
                 ClearTextGeometries();

@@ -38,6 +38,33 @@ namespace MusicBeePlugin
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int LyricsFn(IntPtr renderer, ref Rect panel, [In] TextCommand[] commands, int count);
         private TextFn _text;
         private LyricsFn _lyrics;
+        [StructLayout(LayoutKind.Sequential)] private struct ArtCommand {
+            public Rect Bounds;public float Progress;public int Enabled,Previous,Current;
+        }
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int ArtworkFn(IntPtr renderer,ref ArtCommand command);
+        private TextFn _artTexture;
+        private ArtworkFn _artwork;
+        private ArtCommand _artCommand;
+        private readonly Bitmap[] _artImages=new Bitmap[2]; // borrowed; at most two 256px decoded covers
+        internal void HideArtwork(){_artCommand.Enabled=0;}
+        internal void SetArtwork(RectangleF bounds,Bitmap previous,Bitmap current,float progress) {
+            _artCommand.Bounds=new Rect(bounds);_artCommand.Enabled=1;UpdateArtwork(previous,current,progress);
+        }
+        internal void UpdateArtwork(Bitmap previous,Bitmap current,float progress) {
+            if(_artCommand.Enabled==0){previous=null;current=null;}
+            for(int i=0;i<2;i++){
+                var image=i==0?previous:current;if(ReferenceEquals(image,_artImages[i]))continue;
+                if(image==null)Marshal.ThrowExceptionForHR(_artTexture(_renderer,i,0,0,IntPtr.Zero,0));
+                else {
+                    if((long)image.Width*image.Height*4>4*1024*1024)throw new InvalidOperationException("Artwork exceeds GPU budget.");
+                    var bits=image.LockBits(new Rectangle(Point.Empty,image.Size),ImageLockMode.ReadOnly,PixelFormat.Format32bppPArgb);
+                    try{Marshal.ThrowExceptionForHR(_artTexture(_renderer,i,(uint)image.Width,(uint)image.Height,bits.Scan0,(uint)bits.Stride));}
+                    finally{image.UnlockBits(bits);}
+                }
+                _artImages[i]=image;
+            }
+            _artCommand.Progress=progress;_artCommand.Previous=previous!=null?1:0;_artCommand.Current=current!=null?1:0;
+        }
         [StructLayout(LayoutKind.Sequential)] private struct OutlineCommand {
             public int Slot; public Rect Clip;
             public float X,Y,Scale,Stroke,Opacity;
@@ -243,6 +270,7 @@ namespace MusicBeePlugin
                 // helper safely selects GDI instead of reading a mismatched ABI.
                 _text = Export<TextFn>("DL_Text"); _lyrics = Export<LyricsFn>("DL_Lyrics");
                 _outline = Export<OutlineFn>("DL_Outline"); _outlineLyrics=Export<OutlineLyricsFn>("DL_OutlineLyrics");
+                _artTexture=Export<TextFn>("DL_ArtTexture");_artwork=Export<ArtworkFn>("DL_Artwork");
                 _dancerTexture = Export<DancerTextureFn>("DL_DancerTexture"); _dancers = Export<DancersFn>("DL_Dancers");
                 Marshal.ThrowExceptionForHR(Export<CreateFn>("DL_Create")(hwnd, (uint)size.Width, (uint)size.Height, diagnosticReadback ? 1 : 0, out _renderer));
                 Resize(size);
@@ -275,6 +303,7 @@ namespace MusicBeePlugin
             if(Profile?.Stamp > 0) Profile.Add(RenderMetric.LyricTextureMiB,_textureBytes/1048576d);
             if(Profile?.Stamp > 0) Profile.Add(RenderMetric.DancerTextureMiB,_dancerBytes/1048576d);
             if(Profile?.Stamp > 0) Profile.Add(RenderMetric.LyricOutlinePoints,_pointCount);
+            Marshal.ThrowExceptionForHR(_artwork(_renderer,ref _artCommand));
             Marshal.ThrowExceptionForHR(_draw(_renderer, ref _scene, diagnosticOutput));
         }
         public void Dispose()
@@ -282,6 +311,7 @@ namespace MusicBeePlugin
             Foreground?.Dispose(); Foreground = null;
             Array.Clear(_textImages,0,_textImages.Length);
             Array.Clear(_paths,0,_paths.Length);
+            Array.Clear(_artImages,0,_artImages.Length);
             _dancerPreparation?.Dispose(); _dancerPreparation = null;
             if (_renderer != IntPtr.Zero) { _destroy(_renderer); _renderer = IntPtr.Zero; }
             if (_library != IntPtr.Zero) { FreeLibrary(_library); _library = IntPtr.Zero; }
