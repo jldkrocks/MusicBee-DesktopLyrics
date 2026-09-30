@@ -15,6 +15,9 @@ namespace MusicBeePlugin
             internal int Row;
             internal PartyDanceStyle Style;
         }
+        internal readonly List<Marker> Accents = new List<Marker>();
+        internal int SelectedAccent = -1;
+        internal event Action<int> AccentSelected;
         internal readonly List<Marker> Markers = new List<Marker>();
         internal double Duration, Position;
         internal int SelectedRow = -1;
@@ -55,7 +58,8 @@ namespace MusicBeePlugin
             {
                 var marker = ordered[i];
                 var end = i + 1 < ordered.Count ? ordered[i + 1].Seconds : Duration;
-                var color = marker.Style == PartyDanceStyle.Hold ? Color.FromArgb(124, 135, 155) :
+                var color = marker.Style == PartyDanceStyle.Rest ? Color.FromArgb(88, 205, 183) :
+                    marker.Style == PartyDanceStyle.Hold ? Color.FromArgb(124, 135, 155) :
                     marker.Style == PartyDanceStyle.SideToSide ? Color.FromArgb(170, 138, 235) :
                     marker.Style == PartyDanceStyle.HalfSpeed ? Color.FromArgb(223, 172, 100) : Color.FromArgb(98, 178, 221);
                 using (var fill = new SolidBrush(Color.FromArgb(105, color)))
@@ -64,6 +68,9 @@ namespace MusicBeePlugin
                 using (var fill = new SolidBrush(marker.Row == SelectedRow ? Color.White : color))
                     g.FillPolygon(fill, new[] { new PointF(x, 32), new PointF(x + 6, 39), new PointF(x, 46), new PointF(x - 6, 39) });
             }
+            foreach (var cue in Accents)
+                using (var fill = new SolidBrush(cue.Row == SelectedAccent ? Color.White : Color.FromArgb(247, 206, 115)))
+                    g.FillEllipse(fill, X(cue.Seconds) - 4, 23, 8, 8);
             using (var pen = new Pen(Color.FromArgb(247, 206, 115), 2))
                 g.DrawLine(pen, X(Position), 29, X(Position), 62);
             var divisions = Math.Max(2, Math.Min(8, Width / 115));
@@ -81,6 +88,17 @@ namespace MusicBeePlugin
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left || Duration <= 0 || !Enabled) return;
             Focus();
+            if (e.Y >= 20 && e.Y <= 31)
+            {
+                Marker accent = null; float best = 8;
+                foreach (var cue in Accents)
+                    if (Math.Abs(X(cue.Seconds) - e.X) < best) { accent = cue; best = Math.Abs(X(cue.Seconds) - e.X); }
+                if (accent != null)
+                {
+                    AccentSelected?.Invoke(accent.Row); Position = Math.Max(0, Math.Min(Duration, accent.Seconds));
+                    SeekRequested?.Invoke(Position); Invalidate(); return;
+                }
+            }
             Marker nearest = null; float distance = 8;
             foreach (var marker in Markers)
                 if (Math.Abs(X(marker.Seconds) - e.X) < distance && e.Y >= 27 && e.Y <= 55)

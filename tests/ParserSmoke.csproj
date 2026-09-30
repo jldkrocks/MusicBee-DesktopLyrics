@@ -51,6 +51,7 @@
     <Compile Include="..\PlaybackSnapshotReader.cs" />
     <Compile Include="..\LyricsWindowThread.cs" />
     <Compile Include="AsyncPlaybackChecks.cs" />
+    <Compile Include="RestAccentChecks.cs" />
     <Compile Include="RampShortcutChecks.cs" />
     <Compile Include="BpmLookupChecks.cs" />
     <Compile Include="TempoMapChecks.cs" />

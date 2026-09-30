@@ -15,6 +15,7 @@ namespace MusicBeePlugin
         [STAThread]
         private static void Main()
         {
+            RestAccentChecks.Run();
             AsyncPlaybackChecks.Run();
             RampShortcutChecks.Run();
             BpmLookupChecks.Run();

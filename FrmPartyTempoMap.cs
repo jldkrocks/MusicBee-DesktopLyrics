@@ -9,6 +9,10 @@ namespace MusicBeePlugin
     internal sealed class FrmPartyTempoMap : Form
     {
         private readonly DataGridView _grid = new DataGridView();
+        private readonly DataGridView _accentGrid = new DataGridView();
+        private readonly TabControl _tabs = new TabControl { Dock = DockStyle.Fill };
+        private readonly ToolTip _tips = new ToolTip { InitialDelay = 350, AutoPopDelay = 20000, ShowAlways = true };
+        private DataGridView ActiveGrid => _tabs.SelectedIndex == 1 ? _accentGrid : _grid;
         private readonly CheckBox _enabled = new CheckBox();
         private readonly PartyTempoMap _source;
         private readonly Func<double?> _position;
@@ -26,7 +30,7 @@ namespace MusicBeePlugin
         private readonly System.Diagnostics.Stopwatch _seekAge = new System.Diagnostics.Stopwatch();
         private double? _pendingSeek;
         private bool _dirty, _trackWasAvailable = true;
-        private static readonly string[] Styles = { "Normal", "Side to side", "Hold pose" };
+        private static readonly string[] Styles = { "Normal", "Side to side", "Hold pose", "Rest (keep counting)" };
 
         private static readonly string[] Speeds = { "Half (0.5x)", "Normal (1x)", "Double (2x)" };
 
@@ -73,8 +77,16 @@ namespace MusicBeePlugin
             _grid.Columns[2].ToolTipText = "Seconds after this row starts to reach its BPM; starts from From BPM if set, otherwise the preceding tempo. Example: 120 to 150 over 4 seconds. Equal BPM values do not ramp; dance styles switch at the start.";
             _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start (beat 1 for Waltz; strong FOUR for 4/4 accent on 4). Uses the row Start time, NOT when you click Align or Save. Save applies the setting. Leave off to preserve the ongoing beat phase.";
             _grid.Columns[5].ToolTipText = "Check on a Normal-speed row after Half speed: up to four lead-in bobs, then one final bop on the first beat at or after the return. Uses saved alignment, or this row's start when Align is checked.";
-            _grid.Columns[3].FillWeight = 140;
+            _grid.Columns[0].ToolTipText = "Song position in seconds. A section lasts until the next start; the first starts at 0. Save applies edits without closing.";
+            _grid.Columns[1].ToolTipText = "Musical beats per minute, 40-240. With a ramp this is its target BPM. Speed changes the dance rate separately.";
+            _grid.Columns[3].ToolTipText = "Normal or Side to side chooses the dance. Hold pose freezes movement AND the beat counter. Rest freezes movement but keeps counting at this row's BPM and Speed. End either with a new dancing row; leave Align off after Rest to keep phase.";
+            _grid.Columns[4].ToolTipText += " For a smooth slowdown leave Align off. Use an accent cue for emphasis without restarting the side poses.";
+            _grid.Columns[3].FillWeight = 205;
             _grid.Columns[4].FillWeight = 65;
+            _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            var weights = new float[] { 85, 75, 95, 185, 50, 95, 170, 65, 110, 80 };
+            for (int c = 0; c < weights.Length; c++) _grid.Columns[c].FillWeight = weights[c];
+            _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             _grid.RowTemplate.Height = 29;
             foreach (DataGridViewColumn column in _grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
             foreach (var section in map.Sections) AddRow(section.StartSeconds, section.Bpm, section.RampSeconds, section.Style, section.AlignBeat, section.CountIn, section.Rhythm, section.SwingPercent, section.EffectiveSpeed, section.RampStartBpm);
@@ -107,12 +119,18 @@ namespace MusicBeePlugin
             };
             _timeline.Duration = Math.Max(0, duration); _timeline.Dock = DockStyle.Fill;
             _timeline.SeekRequested += SeekTo;
-            _timeline.MarkerSelected += row => { if (row >= 0 && row < _grid.Rows.Count) _grid.CurrentCell = _grid.Rows[row].Cells[0]; };
+            _timeline.MarkerSelected += row => { _tabs.SelectedIndex = 0; if (row >= 0 && row < _grid.Rows.Count) _grid.CurrentCell = _grid.Rows[row].Cells[0]; };
             var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
             _add = AddButton(actions, "Add at playhead", () =>
             {
                 var now = EditingPosition();
                 if (!now.HasValue) { _status.Text = "Play the original song to capture its position."; return; }
+                if (_tabs.SelectedIndex == 1)
+                {
+                    _accentGrid.Rows.Add(Math.Round(now.Value, 3).ToString(CultureInfo.CurrentCulture), 1.7.ToString(CultureInfo.CurrentCulture), 0.1.ToString(CultureInfo.CurrentCulture), "0");
+                    _accentGrid.CurrentCell = _accentGrid.Rows[_accentGrid.Rows.Count - 1].Cells[0];
+                    MarkDirty(); return;
+                }
                 var selected = _grid.CurrentRow;
                 double bpm = 120;
                 if (selected != null) double.TryParse(Convert.ToString(selected.Cells[1].Value), out bpm);
@@ -124,28 +142,35 @@ namespace MusicBeePlugin
                 _grid.CurrentCell = _grid.Rows[_grid.Rows.Count - 1].Cells[0];
                 MarkDirty();
             });
-            AddButton(actions, "Delete row", () => { if (_grid.CurrentRow != null) { _grid.Rows.Remove(_grid.CurrentRow); MarkDirty(); } });
+            AddButton(actions, "Delete row", () => { if (ActiveGrid.CurrentRow != null) { ActiveGrid.Rows.Remove(ActiveGrid.CurrentRow); MarkDirty(); } });
             _seekRow = AddButton(actions, "Seek to row", () =>
             {
-                if (_grid.CurrentRow == null) return;
-                try { SeekTo(Number(_grid.CurrentRow, 0)); }
+                if (ActiveGrid.CurrentRow == null) return;
+                try { SeekTo(Number(ActiveGrid.CurrentRow, 0)); }
                 catch (Exception ex) { _status.Text = ex.Message; }
             });
-            AddButton(actions, "Ramp to row", RampToRow);
+            var rampButton = AddButton(actions, "Ramp to row", RampToRow);
+            _tips.SetToolTip(rampButton, "Select a destination section. This makes the previous row ramp from its starting BPM to the selected BPM over their exact time gap. It does not turn on Align. Save applies.");
             AddButton(actions, "Save", SaveMap);
             AddButton(actions, "Close", () => Close());
-            _status.Text = "Click a section diamond to select and seek. Drag the playhead to scrub; Save applies edits and keeps this window open.";
+            _status.Text = "Diamonds select sections; gold circles select accents. Save applies both tabs and keeps this window open.";
             _status.ForeColor = Color.FromArgb(178, 192, 212);
-            help.Text = "Sections last until the next start; times are seconds. First row starts at 0. Save applies edits without closing.\r\n" +
-                "Ramp to row: select the destination BPM/time; ramp starts at the previous row. Save applies. From BPM overrides the starting tempo.\r\n" +
-                "Bob count-in: tick a Normal-speed row after Half speed for lead-in bobs PLUS a final bop on the return beat.\r\n" +
-                "Waltz = side, centre bop, centre bop. Swing = long side, short middle; Swing %: 50 = even, 66.67 = about 2:1, 75 = strong.\r\n" +
-                "4/4 accent on 4 = centre, centre, centre, SIDE. Align marks FOUR; BPM counts every beat.\r\n" +
-                "Align uses the row Start time, not when clicked. Save applies it; no need to time your click. Pause for precise seeking.\r\n" +
-                "Speed: Half / Normal / Double, independent of Dance. Hold stops all motion. Colours: blue = normal, purple = side to side, grey = hold.";
+            help.Text = "Sections control tempo and rests. Accent cues add timed bops. Hover over columns or controls for help.";
+            _tips.SetToolTip(_seekStep, "Seconds moved by - step and + step. Pause for precise placement; 0.01 s is the smallest step.");
+            _tips.SetToolTip(_seekTime, "Exact song position in seconds. Enter or Seek moves playback without changing your rows.");
+            _tips.SetToolTip(_enabled, "Apply this song's saved sections and accent cues. Uncheck to use its ordinary BPM settings.");
+            _tips.SetToolTip(_timeline, "Diamonds select sections; gold circles select accent cues. Both seek to their saved time. Drag the playhead to seek. Blue = Normal, purple = Side to side, grey = Hold, teal = Rest.");
+            _tips.SetToolTip(_add, "Add a section or accent at the playhead, depending on the selected tab. Pause and fine-seek first for exact placement. Save applies the new row.");
+            SetupAccentGrid(map);
+            var sectionsTab = new TabPage("Sections") { BackColor = BackColor, Padding = new Padding(3) };
+            var accentsTab = new TabPage("Accent cues") { BackColor = BackColor, Padding = new Padding(3) };
+            sectionsTab.Controls.Add(_grid); accentsTab.Controls.Add(_accentGrid);
+            _tabs.TabPages.Add(sectionsTab); _tabs.TabPages.Add(accentsTab);
+            _tabs.SelectedIndexChanged += (sender, args) => { rampButton.Enabled = _tabs.SelectedIndex == 0; RefreshMarkers(); };
+            _timeline.AccentSelected += row => { _tabs.SelectedIndex = 1; if (row >= 0 && row < _accentGrid.Rows.Count) _accentGrid.CurrentCell = _accentGrid.Rows[row].Cells[0]; };
             _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 144));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -153,7 +178,7 @@ namespace MusicBeePlugin
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             layout.Controls.Add(help, 0, 0); layout.Controls.Add(_timeline, 0, 1);
-            layout.Controls.Add(transport, 0, 2); layout.Controls.Add(_grid, 0, 3);
+            layout.Controls.Add(transport, 0, 2); layout.Controls.Add(_tabs, 0, 3);
             layout.Controls.Add(_enabled, 0, 4); layout.Controls.Add(_status, 0, 5); layout.Controls.Add(actions, 0, 6);
             Controls.Add(layout);
             _grid.CellValueChanged += (sender, args) => { RefreshSwingCells(); MarkDirty(); };
@@ -180,6 +205,36 @@ namespace MusicBeePlugin
                     args.Cancel = true;
             };
             _grid.DataError += (sender, args) => { args.ThrowException = false; };
+        }
+
+        private void SetupAccentGrid(PartyTempoMap map)
+        {
+            _accentGrid.Dock = DockStyle.Fill; _accentGrid.AllowUserToAddRows = false;
+            _accentGrid.AllowUserToDeleteRows = false; _accentGrid.RowHeadersVisible = false;
+            _accentGrid.MultiSelect = false; _accentGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            _accentGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            _accentGrid.BackgroundColor = _grid.BackgroundColor; _accentGrid.GridColor = _grid.GridColor;
+            _accentGrid.BorderStyle = BorderStyle.None; _accentGrid.EnableHeadersVisualStyles = false;
+            _accentGrid.ColumnHeadersHeight = 32; _accentGrid.RowTemplate.Height = 29;
+            _accentGrid.DefaultCellStyle = _grid.DefaultCellStyle.Clone();
+            _accentGrid.AlternatingRowsDefaultCellStyle = _grid.AlternatingRowsDefaultCellStyle.Clone();
+            _accentGrid.ColumnHeadersDefaultCellStyle = _grid.ColumnHeadersDefaultCellStyle.Clone();
+            _accentGrid.Columns.Add("time", "Hit time (s)");
+            _accentGrid.Columns.Add("strength", "Strength");
+            _accentGrid.Columns.Add("prepare", "Lead-in (s)");
+            _accentGrid.Columns.Add("hold", "Hold after hit (s)");
+            _accentGrid.Columns[0].ToolTipText = "Exact song time of the deepest downward bop. Not when you click Save. Cues do not change BPM, rhythm or beat alignment. They can also add a hit during Rest or Hold.";
+            _accentGrid.Columns[1].ToolTipText = "Bop strength: 0.5 = light, 1 = regular, 1.7 = strong (default), 2.5 = maximum. An accent emphasizes the current pose without forcing another side landing.";
+            _accentGrid.Columns[2].ToolTipText = "Seconds to crouch into the hit, 0-1. Default 0.1. Zero gives an immediate hit. The deepest dip occurs at Hit time, followed by a 0.22 s recovery.";
+            _accentGrid.Columns[3].ToolTipText = "Optional 0-5 seconds to keep the landing pose and dip after the hit. Zero recovers immediately. The beat keeps counting, then the normal pose sequence resumes. For a longer silent passage use Rest in Sections.";
+            foreach (DataGridViewColumn c in _accentGrid.Columns) c.SortMode = DataGridViewColumnSortMode.NotSortable;
+            foreach (var cue in map.Accents)
+                _accentGrid.Rows.Add(cue.TimeSeconds.ToString("0.###", CultureInfo.CurrentCulture), cue.Strength.ToString(CultureInfo.CurrentCulture),
+                    cue.PrepareSeconds.ToString(CultureInfo.CurrentCulture), cue.HoldSeconds.ToString(CultureInfo.CurrentCulture));
+            _accentGrid.CellToolTipTextNeeded += (sender, args) => { if (args.ColumnIndex >= 0) args.ToolTipText = _accentGrid.Columns[args.ColumnIndex].ToolTipText; };
+            _accentGrid.CellValueChanged += (sender, args) => MarkDirty();
+            _accentGrid.SelectionChanged += (sender, args) => RefreshMarkers();
+            _accentGrid.DataError += (sender, args) => { args.ThrowException = false; };
         }
 
         private static void ConfigureSeekNumber(NumericUpDown input, decimal minimum, decimal maximum,
@@ -221,6 +276,7 @@ namespace MusicBeePlugin
             if (value == "Normal") return PartyDanceStyle.Normal;
             if (value == "Side to side") return PartyDanceStyle.SideToSide;
             if (value == "Hold pose") return PartyDanceStyle.Hold;
+            if (value == "Rest (keep counting)") return PartyDanceStyle.Rest;
             throw new ArgumentException("Choose a listed dance.");
         }
 
@@ -234,7 +290,7 @@ namespace MusicBeePlugin
         private void AddRow(double start, double bpm, double ramp, PartyDanceStyle style, bool align, bool countIn = false, PartyRhythm rhythm = PartyRhythm.Straight, double swingPercent = 66.67, double speed = 1, double? fromBpm = null)
         {
             _grid.Rows.Add(start.ToString("0.###", CultureInfo.CurrentCulture), bpm.ToString("0.###", CultureInfo.CurrentCulture),
-                ramp.ToString("0.###", CultureInfo.CurrentCulture), style == PartyDanceStyle.Hold ? "Hold pose" : style == PartyDanceStyle.SideToSide ? "Side to side" : "Normal", align, countIn, Rhythms[(int)rhythm], swingPercent.ToString("0.##", CultureInfo.CurrentCulture), Speeds[(style == PartyDanceStyle.HalfSpeed || speed == 0.5) ? 0 : speed == 2 ? 2 : 1], fromBpm?.ToString("0.#########", CultureInfo.CurrentCulture));
+                ramp.ToString("0.###", CultureInfo.CurrentCulture), style == PartyDanceStyle.Rest ? "Rest (keep counting)" : style == PartyDanceStyle.Hold ? "Hold pose" : style == PartyDanceStyle.SideToSide ? "Side to side" : "Normal", align, countIn, Rhythms[(int)rhythm], swingPercent.ToString("0.##", CultureInfo.CurrentCulture), Speeds[(style == PartyDanceStyle.HalfSpeed || speed == 0.5) ? 0 : speed == 2 ? 2 : 1], fromBpm?.ToString("0.#########", CultureInfo.CurrentCulture));
             RefreshSwingCells();
         }
 
@@ -248,11 +304,16 @@ namespace MusicBeePlugin
             }
         }
 
-        private static Button AddButton(FlowLayoutPanel panel, string text, Action action)
+        private Button AddButton(FlowLayoutPanel panel, string text, Action action)
         {
             var button = new Button { Text = text, AutoSize = true, Height = 30, FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(43, 53, 73), ForeColor = Color.FromArgb(238, 241, 248), Padding = new Padding(6, 2, 6, 2) };
             button.FlatAppearance.BorderColor = Color.FromArgb(83, 99, 124);
+            _tips.SetToolTip(button, text == "Save" ? "Apply both tabs to this song and keep the editor open. Saving does not capture the current beat." :
+                text == "Delete row" ? "Delete the selected row from the current tab. Save applies the deletion." :
+                text == "Seek to row" ? "Seek to the selected section or accent without changing it." :
+                text == "Close" ? "Close the editor; unsaved edits require confirmation." :
+                text == "Play / pause" ? "Toggle playback to preview your saved changes." : "Move playback by the Step (s) value without changing row times.");
             button.Click += (sender, args) => action(); panel.Controls.Add(button); return button;
         }
 
@@ -271,10 +332,19 @@ namespace MusicBeePlugin
                 if (double.TryParse(Convert.ToString(row.Cells[0].Value), out seconds) &&
                     !double.IsNaN(seconds) && !double.IsInfinity(seconds) && seconds >= 0 && seconds <= _timeline.Duration)
                     _timeline.Markers.Add(new PartyTimeline.Marker { Row = row.Index, Seconds = seconds,
-                        Style = Convert.ToString(row.Cells[3].Value) == "Hold pose" ? PartyDanceStyle.Hold :
+                        Style = Convert.ToString(row.Cells[3].Value) == "Rest (keep counting)" ? PartyDanceStyle.Rest :
+                            Convert.ToString(row.Cells[3].Value) == "Hold pose" ? PartyDanceStyle.Hold :
                             Convert.ToString(row.Cells[3].Value) == "Side to side" ? PartyDanceStyle.SideToSide : PartyDanceStyle.Normal });
             }
-            _timeline.SelectedRow = _grid.CurrentRow?.Index ?? -1;
+            _timeline.Accents.Clear();
+            foreach (DataGridViewRow row in _accentGrid.Rows)
+            {
+                double time;
+                if (double.TryParse(Convert.ToString(row.Cells[0].Value), out time) && !double.IsNaN(time) && !double.IsInfinity(time) && time >= 0 && time <= _timeline.Duration)
+                    _timeline.Accents.Add(new PartyTimeline.Marker { Row = row.Index, Seconds = time });
+            }
+            _timeline.SelectedRow = _tabs.SelectedIndex == 0 ? _grid.CurrentRow?.Index ?? -1 : -1;
+            _timeline.SelectedAccent = _tabs.SelectedIndex == 1 ? _accentGrid.CurrentRow?.Index ?? -1 : -1;
             _timeline.Invalidate();
         }
 
@@ -319,7 +389,7 @@ namespace MusicBeePlugin
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _timer.Dispose(); _editorFont.Dispose(); }
+            if (disposing) { _timer.Dispose(); _tips.Dispose(); _editorFont.Dispose(); }
             base.Dispose(disposing);
         }
 
@@ -328,7 +398,7 @@ namespace MusicBeePlugin
             double value;
             if (!double.TryParse(Convert.ToString(row.Cells[column].Value), NumberStyles.Float,
                 CultureInfo.CurrentCulture, out value) || double.IsNaN(value) || double.IsInfinity(value))
-                throw new ArgumentException("Enter valid numbers for start, BPM, ramp and Swing % on every row.");
+                throw new ArgumentException("Enter a valid number in " + row.DataGridView.Columns[column].HeaderText + " on row " + (row.Index + 1) + ".");
             return value;
         }
 
@@ -366,8 +436,8 @@ namespace MusicBeePlugin
         {
             try
             {
-                _grid.EndEdit();
-                var map = new PartyTempoMap { Version = 3, TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
+                _grid.EndEdit(); _accentGrid.EndEdit();
+                var map = new PartyTempoMap { Version = 4, TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
                 foreach (DataGridViewRow row in _grid.Rows)
                     map.Sections.Add(new PartyTempoSection { StartSeconds = Number(row, 0), Bpm = Number(row, 1),
                         RampSeconds = Number(row, 2), RampStartBpm = string.IsNullOrWhiteSpace(Convert.ToString(row.Cells[9].Value)) ? (double?)null : Number(row, 9), Style = StyleAt(row),
@@ -375,6 +445,10 @@ namespace MusicBeePlugin
                         CountIn = Convert.ToBoolean(row.Cells[5].Value ?? false),
                         Rhythm = (PartyRhythm)Array.IndexOf(Rhythms, Convert.ToString(row.Cells[6].Value)),
                         SwingPercent = Number(row, 7), Speed = SpeedAt(row) });
+                foreach (DataGridViewRow row in _accentGrid.Rows)
+                    map.Accents.Add(new PartyAccentCue { TimeSeconds = Number(row, 0), Strength = Number(row, 1),
+                        PrepareSeconds = Number(row, 2), HoldSeconds = Number(row, 3) });
+                map.Accents = map.Accents.OrderBy(c => c.TimeSeconds).ToList();
                 map.Sections = map.Sections.OrderBy(s => s.StartSeconds).ToList();
                 map.Validate();
                 _save(map); _dirty = false;

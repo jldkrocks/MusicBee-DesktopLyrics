@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace MusicBeePlugin
 {
-    internal enum PartyDanceStyle { Normal, SideToSide, HalfSpeed, Hold }
+    internal enum PartyDanceStyle { Normal, SideToSide, HalfSpeed, Hold, Rest }
     internal enum PartyRhythm { Straight, Waltz, Swing, AccentFour }
 
     internal sealed class PartyTempoSection
@@ -21,19 +21,41 @@ namespace MusicBeePlugin
         public bool CountIn;
     }
 
+    internal sealed class PartyAccentCue
+    {
+        public double TimeSeconds;
+        public double Strength = 1.7;
+        public double PrepareSeconds = 0.1;
+        public double HoldSeconds;
+        internal const double ReleaseSeconds = 0.22;
+    }
+
     internal sealed class PartyTempoMap
     {
         public int Version = 1;
         public bool Enabled = true;
         public string TrackUrl;
         public double InitialBeat;
+        public List<PartyAccentCue> Accents = new List<PartyAccentCue>();
         public List<PartyTempoSection> Sections = new List<PartyTempoSection>();
 
         internal void Validate()
         {
-            if ((Version != 1 && Version != 2 && Version != 3) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
+            if ((Version != 1 && Version != 2 && Version != 3 && Version != 4) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
                 Sections.Count == 0 || Sections.Count > 500 || !Finite(InitialBeat))
                 throw new ArgumentException("The map needs a song and 1-500 sections.");
+            if (Accents == null || Accents.Count > 1000)
+                throw new ArgumentException("Use at most 1000 accent cues.");
+            double lastCue = -1;
+            foreach (var cue in Accents)
+            {
+                if (cue == null || !Finite(cue.TimeSeconds) || cue.TimeSeconds < 0 || cue.TimeSeconds > 604800 ||
+                    cue.TimeSeconds <= lastCue || !Finite(cue.Strength) || cue.Strength < 0.5 || cue.Strength > 2.5 ||
+                    !Finite(cue.PrepareSeconds) || cue.PrepareSeconds < 0 || cue.PrepareSeconds > 1 ||
+                    !Finite(cue.HoldSeconds) || cue.HoldSeconds < 0 || cue.HoldSeconds > 5)
+                    throw new ArgumentException("Accent times must be distinct and increasing; strength 0.5-2.5, lead-in 0-1 s, hold 0-5 s.");
+                lastCue = cue.TimeSeconds;
+            }
             double previous = -1;
             for (int i = 0; i < Sections.Count; i++)
             {
@@ -56,8 +78,10 @@ namespace MusicBeePlugin
                     throw new ArgumentException("The first section must start at 0; a ramp here also needs From BPM.");
                 if (s.Style == PartyDanceStyle.Hold && (s.RampSeconds != 0 || s.AlignBeat))
                     throw new ArgumentException("Hold sections cannot have tempo ramps or beat alignment.");
-                if (s.CountIn && (i == 0 || s.Style == PartyDanceStyle.Hold || s.EffectiveSpeed != 1 ||
-                    Sections[i - 1].Style == PartyDanceStyle.Hold || Sections[i - 1].EffectiveSpeed != 0.5))
+                if (s.Style == PartyDanceStyle.Rest && s.AlignBeat)
+                    throw new ArgumentException("Rest keeps counting; use Align only on the next dancing row if you need a new beat origin.");
+                if (s.CountIn && (i == 0 || s.Style == PartyDanceStyle.Hold || s.Style == PartyDanceStyle.Rest || s.EffectiveSpeed != 1 ||
+                    Sections[i - 1].Style == PartyDanceStyle.Hold || Sections[i - 1].Style == PartyDanceStyle.Rest || Sections[i - 1].EffectiveSpeed != 0.5))
                     throw new ArgumentException("Count-in belongs on a Normal-speed row immediately after Half speed (neither may Hold). It adds up to four lead-in bobs and a final bop on the return beat.");
                 if (i + 1 < Sections.Count && Sections[i + 1] != null &&
                     s.RampSeconds > Sections[i + 1].StartSeconds - s.StartSeconds)
@@ -72,12 +96,41 @@ namespace MusicBeePlugin
         // pause and dropped frames therefore produce the same pose at a time.
         internal PartyMapPose At(double seconds)
         {
+            var pose = CoreAt(seconds);
+            PartyAccentCue strongest = null;
+            double weight = 0, amount = 0;
+            foreach (var cue in Accents)
+            {
+                var relative = seconds - cue.TimeSeconds;
+                if (relative < -cue.PrepareSeconds || relative >= cue.HoldSeconds + PartyAccentCue.ReleaseSeconds) continue;
+                var envelope = relative < 0 ? SmoothStep(1 + relative / cue.PrepareSeconds) :
+                    relative <= cue.HoldSeconds ? 1 : 1 - SmoothStep((relative - cue.HoldSeconds) / PartyAccentCue.ReleaseSeconds);
+                if (envelope * cue.Strength <= amount) continue;
+                strongest = cue; weight = envelope; amount = envelope * cue.Strength;
+            }
+            if (strongest != null)
+            {
+                pose.Impact = (float)(pose.Impact * (1 - weight) + amount);
+                pose.Anticipation *= (float)(1 - weight);
+                pose.Sway *= (float)(1 - weight);
+                // A cue never modifies beat integration. Only an explicit post-hit
+                // hold pins the drawing; release returns to the running timeline.
+                if (strongest.HoldSeconds > 0 && seconds >= strongest.TimeSeconds &&
+                    seconds < strongest.TimeSeconds + strongest.HoldSeconds)
+                    pose.Frame = CoreAt(strongest.TimeSeconds).Frame;
+            }
+            return pose;
+        }
+
+        private PartyMapPose CoreAt(double seconds)
+        {
             var beat = InitialBeat;
             var tempo = Sections[0].RampStartBpm ?? Sections[0].Bpm;
             var style = PartyDanceStyle.Normal;
             var rhythm = PartyRhythm.Straight;
             var swingPercent = 66.67;
             var speed = 1d;
+            var restFrame = -1;
             seconds = Math.Max(0, seconds);
             for (var i = 0; i < Sections.Count; i++)
             {
@@ -90,9 +143,13 @@ namespace MusicBeePlugin
                 var end = i + 1 < Sections.Count ? Sections[i + 1].StartSeconds : seconds;
                 var elapsed = Math.Max(0, Math.Min(seconds, end) - section.StartSeconds);
                 var held = section.Style == PartyDanceStyle.Hold;
+                var rest = section.Style == PartyDanceStyle.Rest;
+                if (rest && restFrame < 0)
+                    restFrame = MakePose(beat, tempo, style, rhythm, swingPercent, speed, true).Frame;
+                if (!rest) restFrame = -1;
                 if (!held)
                 {
-                    style = section.Style;
+                    if (!rest) style = section.Style;
                     speed = section.EffectiveSpeed;
                     rhythm = section.Rhythm;
                     swingPercent = section.SwingPercent;
@@ -105,7 +162,12 @@ namespace MusicBeePlugin
                 if (seconds < end || i == Sections.Count - 1)
                 {
                     var pose = MakePose(beat, tempo, style, rhythm, swingPercent, speed, held);
-                    if (!held && speed == 0.5 && i + 1 < Sections.Count && Sections[i + 1].CountIn)
+                    if (rest)
+                    {
+                        pose.Frame = restFrame; pose.Held = true;
+                        pose.Impact = pose.Anticipation = pose.Sway = 0;
+                    }
+                    if (!held && !rest && speed == 0.5 && i + 1 < Sections.Count && Sections[i + 1].CountIn)
                     {
                         var endBeat = sectionStartBeat + IntegratedBeats(sectionStartTempo, section,
                             end - section.StartSeconds) * 0.5;
@@ -115,7 +177,7 @@ namespace MusicBeePlugin
                         var cuePhase = endBeat - (end - seconds) * incomingBpm / 60;
                         ApplyCountIn(ref pose, section, incoming, endBeat, cuePhase);
                     }
-                    else if (!held && section.CountIn && i > 0 && Sections[i - 1].EffectiveSpeed == 0.5)
+                    else if (!held && !rest && section.CountIn && i > 0 && Sections[i - 1].EffectiveSpeed == 0.5)
                         ApplyCountIn(ref pose, Sections[i - 1], section, sectionStartBeat, beat);
                     return pose;
                 }

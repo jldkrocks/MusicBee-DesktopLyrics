@@ -20,7 +20,7 @@ internal static class RampShortcutChecks
             var grid = (DataGridView)Field(editor, "_grid");
             grid.CurrentCell = grid.Rows[1].Cells[0];
             Call(editor, "RampToRow"); Call(editor, "SaveMap");
-            if (saved == null || saved.Version != 3) throw new Exception("Ramp shortcut must save.");
+            if (saved == null || saved.Version != 4) throw new Exception("Ramp shortcut must save.");
             Near(saved.Sections[0].RampSeconds, 10.123); Near(saved.Sections[0].RampStartBpm.Value, 120);
             Near(saved.At(0).Bpm, 120); Near(saved.At(5.0615).Bpm, 90); Near(saved.At(10.123).Bpm, 60);
             Near(saved.At(10.123).Beat, 10.123 * 1.5); Near(saved.At(20).Bpm, 90);
