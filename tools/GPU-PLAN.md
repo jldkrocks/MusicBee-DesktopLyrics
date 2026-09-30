@@ -1,5 +1,7 @@
 # GPU rendering checkpoint
 
+Current follow-up: 1.15.61 addresses the maximize gap and drag-restore freeze reported on60 by retaining restored dancer windows, seeding the GPU from prepared poses, and preparing restored sizes asynchronously. Source sheets for hidden restored windows are released. Tests and Actions pass; actual TV transition feedback remains pending.
+
 Current checkpoint: version 1.15.60 moves maximized dancer preparation off the UI thread and completes an isolated DirectWrite quality investigation. Natural DirectWrite changes spacing and Japanese fallback appearance, so production text stays unchanged; next text experiment should isolate Direct2D drawing of existing shaped outlines. Cold UI preparation falls from204ms to at most4.53ms in the three-run test, while first image readiness stilltakes~0.2s. Await real4K feedback. Details in RENDERING.md and RESUME.md. Version1.15.59 integrates the user-approved refined AI-upscaled dancer poses, with four packed source cells per dancer and unchanged choreography. Validation/installation progress is recorded in RESUME.md. Version 57 GPU dancer live captures showed improved 4K frame tails. The reported NVIDIA116FPS cap is unchanged; see RENDERING.md for measurements and limitations.
 
 User-authorized existing-feature sequence, developed as separate working checkpoints with TV feedback before expanding:
