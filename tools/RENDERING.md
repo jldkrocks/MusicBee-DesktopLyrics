@@ -1,3 +1,11 @@
+## Checkpoint 1.15.63: artwork crossfades
+
+User accepted62 without additional captures. Outlines now default on, retaining the per-window comparison toggle. Artwork crossfades over550ms from the same start as background colours, beginning only when the new decode completes. Interrupted fades use a256px snapshot, with only two retained covers. Missing art fades to the placeholder. Static no-art UI stays on its existing retained layer; active artwork is drawn through two bounded Direct2D texture slots with GDI fallback. No new runtime dependency; the normal three-DLL package grows8KiB.
+
+Three restored and three4K synthetic32bit120Hz runs include all layers, fresh lyrics and new artwork every2s. 4K frame interval average8.333-8.347ms,p958.694-8.790,p998.847-9.391,max12.885; no>16.667ms. Average frame work2.306-2.594ms, CPU30.36-31.36% of one core, private memory261.2-277.6MiB. Restored p998.940-9.080ms, max9.463; no>16.667ms. Cost remains near62outline baseline. Full metrics `render-check-1.15.63.json`; raw workspace `render63-artwork`. This is not a physical-TV or MusicBee scrolling measurement.
+
+Opacity-only artwork updates do not invalidate/upload the full foreground; existing background-palette changes still update foreground colour-dependent controls. Tests cover interruption continuity, completion cleanup, missing art, retained overlay, native failure fallback and both architectures. RGB threshold remains3/255. Retaining the original static placeholder fixed a local combined-image failure instead of relaxing that threshold. Actual normal/rapid song-switch feedback remains the final visual check.
+
 ## Checkpoint 1.15.61: maximize and drag-restore handoff
 
 User validation of60 exposed a missing transition: restored dancers were disposed on every successful maximized GPU frame. Consequently maximize had no seed images, and restoring recreated/decoded the GDI sheets synchronously. Native drag restore also changes layout while moving, potentially requesting more sizes in that synchronous path.
