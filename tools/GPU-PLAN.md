@@ -1,5 +1,7 @@
 # GPU rendering checkpoint
 
+Current62: optional hardware drawing of existing glyph outlines installed, OFF by default. Paired120Hz tests meet cadence (4Kp998.87-9.00ms, no >16.667ms intervals), but average renderingwork rises0.9to2.5ms and CPUuse rises. This is a quality option, not a speedup. Group opacity, gradients, cache budgets, native failure/GDI recovery and botharchitectures pass. Await user's actual4K visual/scrolling feedback before defaulting or expanding. See RESUME.md and render-check-1.15.62.json.
+
 Latest: user accepted61. The next isolated text experiment exports the existing GDI-shaped paths and rasterizes them through Direct2D, avoiding the DirectWrite font/spacing changes. All40 local fixtures preserve exported geometry bounds within CSV rounding (0.006px). Large moving text appears crisper; small text has different edge weight/pixel coverage. This is a quality feasibility result, not a production text switch or a frame-rate result. See RESUME.md and tools/text-quality-outlines.json. Next: hardware motion comparison, gradient/group-opacity parity and bounded geometry-cache/fallback checks before enabling a live path.
 
 Current follow-up: 1.15.61 addresses the maximize gap and drag-restore freeze reported on60 by retaining restored dancer windows, seeding the GPU from prepared poses, and preparing restored sizes asynchronously. Source sheets for hidden restored windows are released. Tests and Actions pass; actual TV transition feedback remains pending.

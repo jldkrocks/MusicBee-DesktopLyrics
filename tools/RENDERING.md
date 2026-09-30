@@ -318,3 +318,24 @@ The live data adds two important constraints. First, about10-11ms lies outside t
 Second, even the inexpensive restored paints average only40 paints/s, while timer intervals average25ms and p95 is about32.7ms. This suggests frame scheduling/message delivery is another limit. A16ms WinForms timer is a request, not a guarantee of60Hz presentation. GPU conversion alone cannot be assumed to fix it. Measure and improve render wake-up pacing separately, with one outstanding frame request and no changes to song-position/beat/lyric clocks. Do not change system-wide timer resolution as an unmeasured shortcut.
 
 Both modes miss the proposed60FPS numerical cadence/tail gates; only the small mode passed the user's perceived-responsiveness check. The live baseline is now available. User authorization for the staged GPU implementation remains in place. Checkpoint2 (the first GPU composition layer, diagnostics activity counts and safe fallback) is next; no GPU plugin renderer has been implemented yet. Keep32-bit native packaging in scope, preserve the verified1.15.52 GDI fallback and backup, and compare against these retained live runs as well as the synthetic baseline before expanding to other layers.
+# 1.15.62 optional outline text comparison
+
+The menu item **Sharper lyric outlines (experimental)** enables hardware Direct2D drawing of the existing GDI-shaped paths. Off is the default and closing the window resets it. Font selection, shaping, wrapping and animation timing are unchanged. Edges can look sharper and slightly different in weight, especially at small sizes. This path is not a DirectWrite shaping migration.
+
+Three runs per mode and window size, all layers active with fresh lyrics, target120FPS:
+
+| 4K metric | Existing bitmap text | Outline text |
+|---|---:|---:|
+| Mean frame interval | 8.347-8.351ms | 8.335-8.341ms |
+| p95 interval | 8.747-8.788ms | 8.709-8.736ms |
+| p99 interval | 8.942-9.236ms | 8.874-8.997ms |
+| Worst interval | 16.392ms | 13.142ms |
+| Frames over16.667ms | 0 | 0 |
+| Mean frame work | .881-.920ms | 2.527-2.556ms |
+| CPU, one core equivalent | 10.77-14.79% | 31.82-32.61% |
+| Mean private memory | 271.2-278.2MiB | 264.3-284.8MiB |
+
+Cadence target met in this synthetic hidden-window workload. This does not prove physical presentation or MusicBee scrolling responsiveness. CPU cost increases, so the option remains experimental. Test it on the actual TV before choosing it permanently. Complete layer timings and restored-size results: `render-check-1.15.62.json`. Raw runs are in the workspace's `render62-bitmap` and `render62-outline` directories.
+
+No new runtime dependencies. Existing Windows Direct2D and two helper DLLs remain; normal plugin package has three DLLs and grows17,920bytes. Geometry cache is bounded to24paths and262,144points, with65,536points perpath and8activecommands. Native tessellation/layer storage is additional to point data, so point count is not a claimed exact VRAM measurement. Group-opacity/gradient correctness, cache exhaustion, upload-failure fallback, transition screenshots and existing regressions pass locally and in Actions36777957305.
+
