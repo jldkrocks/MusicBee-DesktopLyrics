@@ -245,6 +245,7 @@ namespace MusicBeePlugin
         private Bitmap _backgroundCache, _spectrumCache;
         private ArtworkPalette _cachedBackgroundPalette;
         private string _songTitle = "", _songArtist = "";
+        private Rectangle _songTitleHit;
         private Plugin.PlayState _playState = Plugin.PlayState.Undefined;
         private long _lastPlayStateCheck, _playStateRequestedAt;
         private Plugin.PlayState? _requestedPlayState;
@@ -685,7 +686,7 @@ namespace MusicBeePlugin
             var browserBpm = partyBpm.DropDownItems.Add("Search Google…", null,
                 (sender, args) => BeginInvoke(new Action(OpenBrowserBpmSearch)));
             var copySong = partyBpm.DropDownItems.Add("Copy song and artist", null,
-                (sender, args) => BeginInvoke(new Action(CopySongAndArtist)));
+                (sender, args) => BeginInvoke(new Action(() => CopySongAndArtist())));
             partyBpm.DropDownItems.Add(new ToolStripSeparator());
             partyBpm.DropDownItems.Add("Online lookup settings…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenPartyOnlineSettings)));
@@ -1122,19 +1123,21 @@ namespace MusicBeePlugin
             }
         }
 
-        private void CopySongAndArtist()
+        private bool CopySongAndArtist()
         {
-            if (string.IsNullOrWhiteSpace(_songTitle)) return;
+            if (string.IsNullOrWhiteSpace(_songTitle)) return false;
             var song = string.IsNullOrWhiteSpace(_songArtist) ? _songTitle.Trim() :
                 _songArtist.Trim() + " – " + _songTitle.Trim();
             try
             {
                 Clipboard.SetText(song);
+                return true;
             }
             catch (Exception ex)
             {
                 MessageBox.Show(this, "Could not copy the song and artist: " + ex.Message,
                     "Copy song and artist", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
             }
         }
 
@@ -1202,7 +1205,13 @@ namespace MusicBeePlugin
                 {
                     if (!editingCurrentSong()) { complete(false); return; }
                     RequestPlayback(playing, complete, track);
-                }, () => _playCommandPending, () => _playState == Plugin.PlayState.Playing)) editor.ShowDialog(this);
+                }, () => _playCommandPending, () => _playState == Plugin.PlayState.Playing,
+                preview=>{
+                    if(IsDisposed || _animationDisposed || !editingCurrentSong() || _artworkTrackUrl!=track)return;
+                    CancelPartyLookup();_partyMap=preview??_partyTempoStore.LoadMap(track);
+                    if(preview==null && !(_partyMap?.Enabled??false))StartPartyOnlineLookup();
+                    _lastPartyUpdate=0;UpdatePartyDancers();Invalidate();
+                })) editor.ShowDialog(this);
         }
 
         private void OpenPartyTempoEditor()
@@ -2510,6 +2519,7 @@ namespace MusicBeePlugin
 
         private void DrawSongTitle(Graphics g, Rectangle bounds)
         {
+            _songTitleHit=Rectangle.Empty;
             if (!_settings.ShowSongTitle || string.IsNullOrWhiteSpace(_songTitle)) return;
             var text = _songTitle.Trim();
             if (!string.IsNullOrWhiteSpace(_songArtist)) text += "  ·  " + _songArtist.Trim();
@@ -2527,6 +2537,7 @@ namespace MusicBeePlugin
                 titleArea.Width = Math.Max(1, _queueTab.Left - 22);
                 titleArea.Y = 7;
             }
+            using(var transform=g.Transform){var offset=transform.Elements;_songTitleHit=Rectangle.Round(titleArea);_songTitleHit.Offset((int)offset[4],(int)offset[5]);}
             if (_settings.TransparentCanvas)
                 using (var path = RoundedRectangle(Rectangle.Round(titleArea), 10))
                 using (var shade = new SolidBrush(Color.FromArgb(255, 13, 17, 28)))
@@ -3026,10 +3037,10 @@ namespace MusicBeePlugin
                 _nextButton.Contains(e.Location) ? "next" :
                 !_queueUpButton.IsEmpty && _queueUpButton.Contains(e.Location) ? "queue-up" :
                 !_queueDownButton.IsEmpty && _queueDownButton.Contains(e.Location) ? "queue-down" :
-                queueHit == null ? null : "queue";
+                queueHit == null ? (_songTitleHit.Contains(e.Location) ? "song-title" : null) : "queue";
             if (hit == _hoverButton && queueHit == _hoverQueue) return;
             _partyShortcutTip.SetToolTip(this, hit == "party" ?
-                "Click: Party on/off\r\nShift-click: BPM and alignment\r\nCtrl-click: tempo map" : null);
+                "Click: Party on/off\r\nShift-click: BPM and alignment\r\nCtrl-click: tempo map" : hit == "song-title" ? "Shift-click: copy artist and song title" : null);
             _hoverButton = hit;
             _hoverQueue = queueHit;
             Cursor = hit == null ? Cursors.Default : Cursors.Hand;
@@ -3068,6 +3079,9 @@ namespace MusicBeePlugin
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            if(e.Button==MouseButtons.Left && (ModifierKeys&Keys.Shift)!=0 && _songTitleHit.Contains(e.Location)){
+                if(CopySongAndArtist())ShowQueueFeedback("Copied artist and song title");return;
+            }
             if (!_settings.TransparentCanvas || e.Button != MouseButtons.Left ||
                 _resizeGrip.Contains(e.Location) || _queueCard.Contains(e.Location) ||
                 _queueTab.Contains(e.Location) ||

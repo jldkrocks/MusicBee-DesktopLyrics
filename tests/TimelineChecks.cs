@@ -29,6 +29,21 @@ internal static class TimelineChecks
             Call(timeline, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, 218, 60, 0));
             if (seek != 100 || seeks != 2 || timeline.Markers[0].Seconds != 50) throw new Exception("Release seeks without moving markers.");
         }
+        using(var timeline=new PartyTimeline {Width=236,Duration=100,Position=50,EditAccents=true}) {
+            timeline.Zoom(.1);
+            if(timeline.ViewLength!=10 || timeline.ViewStart!=45)throw new Exception("Zoom must center around playhead.");
+            var cue=new PartyTimeline.Marker {Row=0,Seconds=50};timeline.Accents.Add(cue);
+            int moves=0,seeks=0;timeline.SeekRequested+=t=>seeks++;
+            timeline.AccentMoved+=(r,t)=>{moves++;cue.Seconds=t;};
+            Call(timeline,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,118,27,0));
+            Call(timeline,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,138,27,0));
+            if(moves!=0 || seeks!=0)throw new Exception("Dragging must not submit changes or seek before release.");
+            Call(timeline,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,138,27,0));
+            if(moves!=1 || seeks!=0 || cue.Seconds!=51)throw new Exception("Drag must commit in zoom coordinates without seeking.");
+            Call(timeline,"OnKeyDown",new KeyEventArgs(Keys.Right));
+            Call(timeline,"OnKeyDown",new KeyEventArgs(Keys.Left|Keys.Shift));
+            if(Math.Abs(cue.Seconds-51.009)>1e-8)throw new Exception("Accent nudges must support 10 and 1 milliseconds.");
+        }
         var map = new PartyTempoMap { TrackUrl = "original" };
         map.Sections.Add(new PartyTempoSection { Bpm = 120, Style = PartyDanceStyle.HalfSpeed });
         map.Sections.Add(new PartyTempoSection { StartSeconds = 20, Bpm = 120, CountIn = true, Rhythm = PartyRhythm.Waltz });

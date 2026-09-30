@@ -1,3 +1,9 @@
+## In progress: 1.15.64.0, precise accent audition
+
+User approved zoom/direct accent editing and loop audition, plus Shift-click song title/artist to copy. Whole-song overview pans a 10-second detail view without seeking; mouse wheel or buttons zoom. Gold accent drag changes time only on release. Selected accent arrows nudge 10ms, Shift-arrows 1ms. Shift-drag selects loop, numeric bounds and Use view also available. Loop preview has 0.5s lead-in, uses existing ordered pause/seek/play, is not gapless. Valid unsaved maps audition in memory; invalid edits retain last valid audition. Stop/close restore latest saved map; Save persists normally. No map schema, beat calculations, renderer or stored lyrics changes. Waveform and visual preparation/hold handles remain later work.
+
+Added regression coverage for zoom-coordinate drag/no seek, nudges, loop ordering/stop/stale position, temporary map/live changes/invalid draft/restoration. Full regression and real x86/x64 hardware tests passed before final stale-loop-position guard; final build/CI/install pending. Editor layout snapshot ../editor64.png reviewed. Initial full-suite dropdown check had transient failure; clean rerun and final pre-guard suite passed without changing assertions.
+
 ## Installed release: 1.15.63.0, artwork crossfades and default lyric outlines
 
 User accepted62 appearance/performance and explicitly declined more captures for that checkpoint. Requested keeping the toggle but making outlines default, then proceeding to artwork crossfades. Inspected clean dfd1d90 and draftPR1. Release a45f266c64b7992321d1d983757e89a6c1fc26d9. Sharper lyric outlines now default ON each time a window is opened, still switchable to bitmap text. No new saved setting, clocks, BPM/maps, timing, English storage, song data or dancer asset edits.

@@ -30,6 +30,15 @@ internal static class PreviewChecks
         Check(!preview.Active && seeks.Count == before, "Rejected pause must not seek.");
         var broken = new PartyPreviewSession((p,c) => c(true), t => {throw new Exception("seek rejected");}, () => true, s=>{});
         broken.Start(2, 10); Check(!broken.Active, "Seek failure must stop preview.");
+        preview.StartLoop(4,6,30); callbacks.Dequeue()(true); callbacks.Dequeue()(true);
+        Check(seeks[seeks.Count-1]==3.5 && preview.Looping,"Loop must include lead-in.");
+        int commandCount=commands.Count; preview.Tick(6); Check(commands.Count==commandCount,"Stale pre-seek position must not restart loop.");
+        preview.Tick(4); preview.Tick(6); Check(!commands[commands.Count-1],"Loop must await pause before seeking.");
+        callbacks.Dequeue()(true); callbacks.Dequeue()(true);
+        Check(seeks[seeks.Count-1]==3.5 && preview.Active,"Loop must repeat.");
+        preview.Stop(); callbacks.Dequeue()(true);
+        Check(!preview.Active && !preview.Looping && seeks[seeks.Count-1]==4,"Loop stop must restore anchor paused.");
+        preview.StartLoop(double.NaN,6,30); Check(!preview.Active,"Reject invalid range.");
         var map = new PartyTempoMap { TrackUrl = "test" }; map.Sections.Add(new PartyTempoSection {Bpm=100});
         map.Sections.Add(new PartyTempoSection {StartSeconds=10, Bpm=90});
         double duration = 0; double? position = 0; bool playing = false; bool busy = false; bool displayPlaying = false; int lastSeek = -1;
@@ -51,6 +60,20 @@ internal static class PreviewChecks
             Call(editor,"SeekTo",20d); Check(lastSeek==12365,"Stable enabled controls must still reject competing seeks.");
             busy=false; displayPlaying=false; Call(editor,"PollPlayback");
             Check(play.Text=="Play" && play.Width==originalWidth,"Play label must keep stable layout.");
+        }
+        int saves=0, restores=0; PartyTempoMap audition=null;
+        using(var editor=new FrmPartyTempoMap(map,"Audition",()=>position,t=>{},m=>saves++,30,()=>{},()=>false,()=>30,
+            (p,c)=>c(true),()=>false,()=>false,m=>{audition=m;if(m==null)restores++;})) {
+            var grid=(DataGridView)Field(editor,"_grid");
+            grid.Rows[0].Cells[1].Value="110";
+            Call(editor,"BeginPreview",true);
+            Check(audition!=null && audition.Sections[0].Bpm==110 && saves==0 && map.Sections[0].Bpm==100,"Audition must not persist or mutate original.");
+            grid.Rows[0].Cells[1].Value="115"; Call(editor,"PollPlayback");
+            Check(audition.Sections[0].Bpm==115,"Valid edits must update live preview.");
+            grid.Rows[0].Cells[1].Value="invalid"; Call(editor,"PollPlayback");
+            Check(audition.Sections[0].Bpm==115,"Invalid edits must preserve last valid preview.");
+            Call(editor,"BeginPreview",true); Call(editor,"PollPlayback");
+            Check(restores==1 && audition==null && saves==0,"Stopping audition must restore saved map.");
         }
         Console.WriteLine("Preview command ordering, early stop, track changes, failures, precise seeking and duration recovery passed.");
     }

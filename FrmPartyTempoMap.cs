@@ -29,6 +29,11 @@ namespace MusicBeePlugin
         private Button _previewButton;
         private bool _closeAfterPreview;
         private readonly PartyTimeline _timeline = new PartyTimeline();
+        private readonly PartyTimeline _overview = new PartyTimeline { Overview=true };
+        private readonly NumericUpDown _loopStart=new NumericUpDown(),_loopEnd=new NumericUpDown();
+        private Button _loopButton;
+        private readonly Action<PartyTempoMap> _previewMap;
+        private bool _previewApplied,_previewDirty;
         private readonly Timer _timer = new Timer { Interval = 120 };
         private readonly Label _status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
         private readonly Font _editorFont = new Font("Segoe UI", 9f);
@@ -49,9 +54,11 @@ namespace MusicBeePlugin
         internal FrmPartyTempoMap(PartyTempoMap map, string title, Func<double?> position,
             Action<int> seek, Action<PartyTempoMap> save, double duration,
             Action togglePlayback, Func<bool> playing, Func<double> durationProvider = null,
-            Action<bool, Action<bool>> setPlaying = null, Func<bool> playbackBusy = null, Func<bool> displayPlaying = null)
+            Action<bool, Action<bool>> setPlaying = null, Func<bool> playbackBusy = null, Func<bool> displayPlaying = null,
+            Action<PartyTempoMap> previewMap = null)
         {
             _source = map; _position = position; _seek = seek; _save = save;
+            _previewMap=previewMap;
             _togglePlayback = togglePlayback; _playing = playing; _displayPlaying = displayPlaying ?? playing;
             DoubleBuffered = true;
             _duration = durationProvider ?? (() => duration); _playbackBusy = playbackBusy ?? (() => false);
@@ -145,8 +152,8 @@ namespace MusicBeePlugin
             _seekTime.Width = 105;
             transport.Controls.Add(_seekTime);
             _seekExact = AddButton(transport, "Seek", () => SeekTo((double)_seekTime.Value));
-            _previewButton = AddButton(transport, "Preview 2 s", () => { if (!_playbackBusy() || _preview.Active) _preview.Start((double)_seekTime.Value, _timeline.Duration); });
-            _tips.SetToolTip(_previewButton, "Hear 0.5 s before and 1.5 s after the Seek to time. Playback then pauses and returns to that exact time. Click again to stop early. Preview uses saved changes; Save first to audition edits.");
+            _previewButton = AddButton(transport, "Preview 2 s", () => BeginPreview(false));
+            _tips.SetToolTip(_previewButton, "Hear 0.5 s before and 1.5 s after the Seek to time, using valid unsaved edits. Stop returns paused. Save commits edits; stopping restores the last saved map.");
             _seekTime.KeyDown += (sender, args) =>
             {
                 if (args.KeyCode != Keys.Enter) return;
@@ -154,6 +161,12 @@ namespace MusicBeePlugin
             };
             _timeline.Duration = Math.Max(0, duration); _timeline.Dock = DockStyle.Fill;
             _timeline.SeekRequested += SeekTo;
+            _timeline.EditAccents=true;
+            _timeline.AccentMoved += MoveAccent;
+            _timeline.LoopRangeSelected += (start,end)=>{if(!_preview.Active){_loopStart.Value=(decimal)Math.Round(start,3);_loopEnd.Value=(decimal)Math.Round(end,3);}};
+            _tips.SetToolTip(_timeline,"Mouse wheel zooms around the playhead. Shift-drag selects a loop range. Drag gold accents to move their hit time. Select an accent, then Left/Right nudges 10 ms; Shift nudges 1 ms. Clicking a section still selects and seeks. Editing does not seek playback.");
+            _overview.Duration=_timeline.Duration;_overview.Dock=DockStyle.Fill;
+            _overview.SeekRequested += seconds=>{_timeline.ViewLength=Math.Min(10,_timeline.Duration);_timeline.ViewStart=Math.Max(0,Math.Min(_timeline.Duration-_timeline.ViewLength,seconds-_timeline.ViewLength/2));_timeline.Invalidate();};
             _timeline.MarkerSelected += row => { _tabs.SelectedIndex = 0; if (row >= 0 && row < _grid.Rows.Count) _grid.CurrentCell = _grid.Rows[row].Cells[0]; };
             var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
             _add = AddButton(actions, "Add at playhead", () =>
@@ -190,7 +203,7 @@ namespace MusicBeePlugin
             AddButton(actions, "Close", () => Close());
             _status.Text = "Diamonds select sections; gold circles select accents. Save applies both tabs and keeps this window open.";
             _status.ForeColor = Color.FromArgb(178, 192, 212);
-            help.Text = "BPM belongs to each point. Right-click a row to copy its time to the other tab. Hover for help.";
+            help.Text = "Overview: click to zoom. Detail: drag gold accents; Shift-drag a loop. Hover for help.";
             _tips.SetToolTip(_seekStep, "Seconds moved by - step and + step. Pause for precise placement; 0.01 s is the smallest step.");
             _tips.SetToolTip(_seekTime, "Exact song position in seconds. Enter or Seek moves playback without changing your rows.");
             _tips.SetToolTip(_enabled, "Apply this song's saved sections and accent cues. Uncheck to use its ordinary BPM settings.");
@@ -207,13 +220,27 @@ namespace MusicBeePlugin
             _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 172));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-            layout.Controls.Add(help, 0, 0); layout.Controls.Add(_timeline, 0, 1);
+            var detail=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Margin=Padding.Empty};
+            detail.RowStyles.Add(new RowStyle(SizeType.Absolute,32));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,100));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,40));
+            var editing=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
+            AddButton(editing,"Zoom +",()=>_timeline.Zoom(.5));AddButton(editing,"Zoom -",()=>_timeline.Zoom(2));
+            AddButton(editing,"Whole song",()=>{_timeline.ViewStart=_timeline.ViewLength=0;_timeline.Invalidate();});
+            editing.Controls.Add(new Label {Text="Loop (s)",AutoSize=true,Margin=new Padding(6,9,3,0)});
+            ConfigureSeekNumber(_loopStart,0,(decimal)Math.Max(0,duration),.001m,0,3);
+            ConfigureSeekNumber(_loopEnd,0,(decimal)Math.Max(0,duration),.001m,(decimal)Math.Min(5,Math.Max(0,duration)),3);
+            _loopStart.Width=_loopEnd.Width=85;editing.Controls.Add(_loopStart);editing.Controls.Add(_loopEnd);
+            AddButton(editing,"Use view",()=>{_loopStart.Value=(decimal)_timeline.ViewStart;_loopEnd.Value=(decimal)Math.Min(_timeline.Duration,_timeline.ViewStart+(_timeline.ViewLength>0?_timeline.ViewLength:_timeline.Duration));});
+            _loopButton=AddButton(editing,"Loop preview",()=>BeginPreview(true));
+            _tips.SetToolTip(_overview,"Whole-song overview. Click to show a 10-second detail window without seeking.");
+            _tips.SetToolTip(_loopButton,"Audition the range repeatedly with 0.5 s lead-in. Valid edits preview without saving. Loop boundaries pause/seek/resume MusicBee and are not gapless. Stop restores the saved map.");
+            detail.Controls.Add(_overview,0,0);detail.Controls.Add(_timeline,0,1);detail.Controls.Add(editing,0,2);
+            layout.Controls.Add(help, 0, 0); layout.Controls.Add(detail, 0, 1);
             layout.Controls.Add(transport, 0, 2); layout.Controls.Add(_tabs, 0, 3);
             layout.Controls.Add(_enabled, 0, 4); layout.Controls.Add(_status, 0, 5); layout.Controls.Add(actions, 0, 6);
             Controls.Add(layout);
@@ -247,6 +274,27 @@ namespace MusicBeePlugin
                     args.Cancel = true;
             };
             _grid.DataError += (sender, args) => { args.ThrowException = false; };
+            FormClosed += (sender,args)=>RestorePreview();
+        }
+
+        private void MoveAccent(int row,double seconds){
+            if(row<0||row>=_accentGrid.Rows.Count)return;
+            _accentGrid.EndEdit();_accentGrid.Rows[row].Cells[0].Value=seconds.ToString("0.000",CultureInfo.CurrentCulture);
+            _timeline.Focus();
+        }
+        private void RestorePreview(){if(_previewApplied){_previewApplied=false;_previewMap?.Invoke(null);}}
+        private bool ApplyPreview(){
+            try{var map=ReadMap();_previewMap?.Invoke(map);_previewApplied=_previewMap!=null;_previewDirty=false;return true;}
+            catch(Exception ex){_previewDirty=false;_status.Text="Preview not updated: "+ex.Message;return false;}
+        }
+        private void BeginPreview(bool loop){
+            if(_preview.Active){_preview.Stop();return;}
+            if(_playbackBusy() || !_position().HasValue)return;
+            if(loop && _loopEnd.Value<=_loopStart.Value){_status.Text="Loop end must be after its start.";return;}
+            if(!ApplyPreview())return;
+            if(loop)_preview.StartLoop((double)_loopStart.Value,(double)_loopEnd.Value,_timeline.Duration);
+            else _preview.Start((double)_seekTime.Value,_timeline.Duration);
+            if(!_preview.Active)RestorePreview();
         }
 
         private sealed class RowMenuRenderer : ToolStripProfessionalRenderer
@@ -475,7 +523,7 @@ namespace MusicBeePlugin
 
         private void MarkDirty()
         {
-            _dirty = true; _status.Text = "Unsaved edits — Save applies them while keeping this window open.";
+            _dirty = true; _previewDirty=true; _status.Text = "Unsaved edits - preview auditions them; Save commits them.";
             RefreshMarkers();
         }
 
@@ -513,12 +561,19 @@ namespace MusicBeePlugin
                 {
                     var durationNow = _duration();
                     if (durationNow > 0 && Math.Abs(durationNow - _timeline.Duration) > .001)
-                    { _timeline.Duration = durationNow; _seekTime.Maximum = (decimal)durationNow; RefreshMarkers(); }
+                    { _timeline.Duration = durationNow; _seekTime.Maximum = (decimal)durationNow;_loopStart.Maximum=_loopEnd.Maximum=(decimal)durationNow; RefreshMarkers(); }
                 }
                 _preview.Tick(_position());
+                if(_preview.Active && _previewDirty)ApplyPreview();
+                if(!_preview.Active)RestorePreview();
                 if (_closeAfterPreview && !_preview.Active) { _closeAfterPreview = false; Close(); return; }
                 var transportReady = available && !_preview.Active;
-                _timeline.Enabled = _back.Enabled = _forward.Enabled = _seekRow.Enabled = _seekExact.Enabled = _seekTime.Enabled = _seekStep.Enabled = transportReady && _timeline.Duration > 0;
+                _back.Enabled = _forward.Enabled = _seekRow.Enabled = _seekExact.Enabled = _seekTime.Enabled = _seekStep.Enabled = transportReady && _timeline.Duration > 0;
+                _timeline.Enabled=_overview.Enabled=available && _timeline.Duration>0;
+                _loopButton.Enabled=available;_loopButton.Text=_preview.Active?"Stop preview":"Loop preview";
+                _loopStart.Enabled=_loopEnd.Enabled=!_preview.Active;
+                _timeline.LoopStart=(double)_loopStart.Value;_timeline.LoopEnd=(double)_loopEnd.Value;
+                _overview.Duration=_timeline.Duration;_overview.LoopStart=_timeline.ViewStart;_overview.LoopEnd=_timeline.ViewStart+(_timeline.ViewLength>0?_timeline.ViewLength:_timeline.Duration);_overview.Invalidate();
                 _play.Enabled = available && !_preview.Active; _add.Enabled = available && !_preview.Active;
                 _previewButton.Enabled = available && (_preview.Active || _timeline.Duration > 0);
                 _previewButton.Text = _preview.Active ? "Stop preview" : "Preview 2 s";
@@ -561,7 +616,7 @@ namespace MusicBeePlugin
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _preview.Cancel(); _rowMenu.Dispose(); _timer.Dispose(); _tips.Dispose(); _editorFont.Dispose(); }
+            if (disposing) { _preview.Cancel();RestorePreview(); _rowMenu.Dispose(); _timer.Dispose(); _tips.Dispose(); _editorFont.Dispose(); }
             base.Dispose(disposing);
         }
 
