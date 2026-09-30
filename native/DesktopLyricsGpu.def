@@ -4,3 +4,5 @@ EXPORTS
  DL_Resize
  DL_Upload
  DL_Draw
+ DL_Text
+ DL_Lyrics

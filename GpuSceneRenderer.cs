@@ -21,6 +21,70 @@ namespace MusicBeePlugin
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int ResizeFn(IntPtr renderer, uint w, uint h);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int UploadFn(IntPtr renderer, IntPtr pixels, uint stride);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int DrawFn(IntPtr renderer, ref Scene scene, IntPtr diagnosticOutput);
+        [StructLayout(LayoutKind.Sequential)] private struct Rect
+        {
+            public float Left, Top, Right, Bottom;
+            public Rect(RectangleF r) { Left=r.Left; Top=r.Top; Right=r.Right; Bottom=r.Bottom; }
+        }
+        [StructLayout(LayoutKind.Sequential)] private struct TextCommand
+        {
+            public int Slot;
+            public Rect Destination, Clip;
+            public float Opacity;
+            public int Nearest;
+        }
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int TextFn(IntPtr renderer, int slot, uint width, uint height, IntPtr pixels, uint stride);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int LyricsFn(IntPtr renderer, ref Rect panel, [In] TextCommand[] commands, int count);
+        private TextFn _text;
+        private LyricsFn _lyrics;
+        private readonly Bitmap[] _textImages = new Bitmap[24]; // borrowed raster references, not owned
+        private readonly long[] _textUsed = new long[24];
+        private readonly int[] _textBytes = new int[24];
+        private readonly TextCommand[] _commands = new TextCommand[8];
+        private long _capture;
+        private int _commandCount, _textureBytes;
+        private Rect _panel;
+        internal RenderProfile Profile;
+        internal void BeginLyrics() { _capture++; _commandCount=0; _panel=new Rect(); }
+        internal void SetPanel(RectangleF panel) { _panel=new Rect(panel); }
+        internal void CommitLyrics() { Marshal.ThrowExceptionForHR(_lyrics(_renderer,ref _panel,_commands,_commandCount)); }
+        private int OldestUnused()
+        {
+            int chosen=-1;
+            for(int i=0;i<24;i++) if(_textUsed[i]!=_capture && (chosen<0 || _textUsed[i]<_textUsed[chosen])) chosen=i;
+            if(chosen<0) throw new InvalidOperationException("Lyric texture cache is full.");
+            return chosen;
+        }
+        private void Evict(int slot)
+        {
+            Marshal.ThrowExceptionForHR(_text(_renderer,slot,0,0,IntPtr.Zero,0));
+            _textureBytes-=_textBytes[slot];_textBytes[slot]=0;_textImages[slot]=null;_textUsed[slot]=0;
+        }
+        internal void AddText(Bitmap image, RectangleF destination, RectangleF clip, float opacity, bool nearest)
+        {
+            if(clip.Width<=0 || clip.Height<=0 || opacity<=0) return;
+            if(_commandCount==_commands.Length) throw new InvalidOperationException("Too many lyric layers.");
+            int slot=Array.IndexOf(_textImages,image);
+            if(slot<0) {
+                int bytes=checked(image.Width*image.Height*4);
+                if(bytes>24*1024*1024) throw new InvalidOperationException("Lyric texture exceeds budget.");
+                // Eviction cannot remove any texture referenced in this frame.
+                while(_textureBytes+bytes>24*1024*1024) {
+                    int oldest=-1;
+                    for(int i=0;i<24;i++) if(_textBytes[i]>0 && _textUsed[i]!=_capture && (oldest<0 || _textUsed[i]<_textUsed[oldest])) oldest=i;
+                    if(oldest<0) throw new InvalidOperationException("Active lyric textures exceed budget.");
+                    Evict(oldest);
+                }
+                slot=OldestUnused();Evict(slot);
+                var stamp=Profile?.Stamp ?? 0;
+                var bits=image.LockBits(new Rectangle(Point.Empty,image.Size),ImageLockMode.ReadOnly,PixelFormat.Format32bppPArgb);
+                try { Marshal.ThrowExceptionForHR(_text(_renderer,slot,(uint)image.Width,(uint)image.Height,bits.Scan0,(uint)bits.Stride)); }
+                finally { image.UnlockBits(bits);Profile?.End(RenderMetric.LyricTextureUpload,stamp); }
+                _textImages[slot]=image;_textBytes[slot]=bytes;_textureBytes+=bytes;
+            }
+            _textUsed[slot]=_capture;
+            _commands[_commandCount++]=new TextCommand {Slot=slot,Destination=new Rect(destination),Clip=new Rect(clip),Opacity=opacity,Nearest=nearest?1:0};
+        }
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern IntPtr LoadLibraryEx(string path, IntPtr file, uint flags);
         [DllImport("kernel32.dll", CharSet = CharSet.Ansi, ExactSpelling = true)] private static extern IntPtr GetProcAddress(IntPtr module, string name);
         [DllImport("kernel32.dll")] private static extern bool FreeLibrary(IntPtr module);
@@ -49,6 +113,9 @@ namespace MusicBeePlugin
                 if (_library == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
                 _destroy = Export<DestroyFn>("DL_Destroy"); _resize = Export<ResizeFn>("DL_Resize");
                 _upload = Export<UploadFn>("DL_Upload"); _draw = Export<DrawFn>("DL_Draw");
+                // Resolve the entire ABI before creating resources. An older
+                // helper safely selects GDI instead of reading a mismatched ABI.
+                _text = Export<TextFn>("DL_Text"); _lyrics = Export<LyricsFn>("DL_Lyrics");
                 Marshal.ThrowExceptionForHR(Export<CreateFn>("DL_Create")(hwnd, (uint)size.Width, (uint)size.Height, diagnosticReadback ? 1 : 0, out _renderer));
                 Resize(size);
             }
@@ -77,11 +144,13 @@ namespace MusicBeePlugin
             colors[2] = (uint)palette.BarTop.ToArgb(); colors[3] = (uint)palette.BarBottom.ToArgb();
             colors[4] = (uint)palette.Border.ToArgb(); colors[5] = (uint)palette.Accent.ToArgb();
             _scene.Bars = bars; _scene.Spectrum = spectrum ? 1 : 0;
+            if(Profile?.Stamp > 0) Profile.Add(RenderMetric.LyricTextureMiB,_textureBytes/1048576d);
             Marshal.ThrowExceptionForHR(_draw(_renderer, ref _scene, diagnosticOutput));
         }
         public void Dispose()
         {
             Foreground?.Dispose(); Foreground = null;
+            Array.Clear(_textImages,0,_textImages.Length);
             if (_renderer != IntPtr.Zero) { _destroy(_renderer); _renderer = IntPtr.Zero; }
             if (_library != IntPtr.Zero) { FreeLibrary(_library); _library = IntPtr.Zero; }
         }

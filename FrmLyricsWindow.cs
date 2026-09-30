@@ -23,6 +23,19 @@ namespace MusicBeePlugin
         private readonly PlaybackTimingTrace _playbackTrace;
         private RenderProfile _renderProfile;
         private GpuSceneRenderer _gpu;
+        private GpuSceneRenderer _gpuLyrics;
+        private void RasterGpuForeground(GpuSceneRenderer renderer)
+        {
+            renderer.Profile=_renderProfile;
+            renderer.BeginLyrics();
+            _gpuLyrics=renderer;
+            try {
+                using(var graphics=Graphics.FromImage(renderer.Foreground))
+                    DrawScene(new PaintEventArgs(graphics,ClientRectangle),true);
+                renderer.CommitLyrics();
+            }
+            finally { _gpuLyrics=null; }
+        }
         private bool _gpuDisabled, _gpuFailed, _foregroundDirty = true, _animationInvalidating;
         private string _gpuFailure;
         private double _foregroundAutoBpm;
@@ -91,8 +104,7 @@ namespace MusicBeePlugin
                 if (redraw)
                 {
                     var stamp = _renderProfile?.Stamp ?? 0;
-                    using (var graphics = Graphics.FromImage(_gpu.Foreground))
-                        DrawScene(new PaintEventArgs(graphics, ClientRectangle), true);
+                    RasterGpuForeground(_gpu);
                     _renderProfile?.End(RenderMetric.ForegroundRaster, stamp);
                     stamp = _renderProfile?.Stamp ?? 0;
                     _gpu.Upload();
@@ -101,6 +113,7 @@ namespace MusicBeePlugin
                     _foregroundNotice = HasQueueNotice; _foregroundPaletteMoving = _paletteStarted != 0;
                 }
                 var submitted = _renderProfile?.Stamp ?? 0;
+                _gpu.Profile=_renderProfile;
                 _gpu.Draw(_palette, _bars, _settings.ShowVisualizer);
                 _renderProfile?.End(RenderMetric.GpuSubmit, submitted);
                 _renderProfile?.FrameActivity(!string.IsNullOrWhiteSpace(_line1), !string.IsNullOrWhiteSpace(_line2),
@@ -2228,6 +2241,14 @@ namespace MusicBeePlugin
 
         private void DrawLyricPanel(Graphics g, int left, int width, RectangleF bounds)
         {
+            if(_gpuLyrics!=null) {
+                using(var transform=g.Transform) {
+                    var offset=transform.Elements;
+                    _gpuLyrics.SetPanel(new RectangleF(left+offset[4],(int)Math.Floor(bounds.Top-9)+offset[5],
+                        width,Math.Max(29,(int)Math.Ceiling(bounds.Height+18))));
+                }
+                return;
+            }
             var transparent = _settings.TransparentCanvas;
             using (var path = RoundedRectangle(new Rectangle(left,
                        (int)Math.Floor(bounds.Top - 9), width,
@@ -3101,6 +3122,20 @@ namespace MusicBeePlugin
                     surface.TranslateTransform(-1, -2); outline.LineJoin = LineJoin.Round;
                     surface.DrawPath(outline, geometry.Path); surface.FillPath(foreground, geometry.Path);
                 }
+            }
+            if(_gpuLyrics!=null) {
+                var image=geometry.Raster;
+                float x=area.Left+(area.Width-geometry.Bounds.Width*scale)/2-padding*scale;
+                float y=area.Top+(area.Height-geometry.Bounds.Height*scale)/2-padding*scale;
+                bool nearest=Math.Abs(scale-1)<.00001f;
+                if(nearest) {x=(float)Math.Round(x);y=(float)Math.Round(y);}
+                var clip=RectangleF.Intersect(area,g.ClipBounds);
+                using(var transform=g.Transform) {
+                    var offset=transform.Elements;
+                    clip.Offset(offset[4],offset[5]);
+                    _gpuLyrics.AddText(image,new RectangleF(x+offset[4],y+offset[5],image.Width*scale,image.Height*scale),clip,alpha/255f,nearest);
+                }
+                return;
             }
             var state = g.Save();
             try

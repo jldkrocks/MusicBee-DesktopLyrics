@@ -11,6 +11,7 @@ struct Scene {
     float bars[48];
     int spectrum;
 };
+struct TextCommand { int slot; D2D1_RECT_F destination, clip; float opacity; int nearest; };
 struct Renderer {
     ComPtr<ID2D1Factory> factory;
     ComPtr<ID2D1HwndRenderTarget> target;
@@ -20,6 +21,12 @@ struct Renderer {
     UINT colors[6] = {};
     UINT width = 0, height = 0;
     bool brushes = false;
+    ComPtr<ID2D1Bitmap> text[24];
+    UINT textBytes[24] = {};
+    TextCommand commands[8] = {};
+    int commandCount = 0;
+    D2D1_RECT_F panel = {};
+    ComPtr<ID2D1SolidColorBrush> panelBrush;
 };
 static D2D1_COLOR_F Color(UINT argb, float alpha = 1) {
     return D2D1::ColorF((argb >> 16 & 255) / 255.f, (argb >> 8 & 255) / 255.f, (argb & 255) / 255.f, alpha);
@@ -93,9 +100,33 @@ extern "C" HRESULT __cdecl DL_Upload(Renderer* r, const void* pixels, UINT strid
         D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_PREMULTIPLIED),96,96),&r->foreground);
     return r->foreground->CopyFromMemory(nullptr,pixels,stride);
 }
+extern "C" HRESULT __cdecl DL_Text(Renderer* r, int slot, UINT width, UINT height, const void* pixels, UINT stride) noexcept {
+    if(!r || slot<0 || slot>=24) return E_INVALIDARG;
+    r->text[slot].Reset();r->textBytes[slot]=0;
+    if(!pixels) return S_OK; // Explicit bounded-cache eviction.
+    if(!width || !height || width>8192 || height>8192 || stride<width*4) return E_INVALIDARG;
+    UINT bytes=width*height*4,total=bytes;
+    for(auto b:r->textBytes) total+=b;
+    if(total>24*1024*1024) return E_OUTOFMEMORY;
+    HRESULT hr=r->target->CreateBitmap(D2D1::SizeU(width,height),pixels,stride,
+        D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_PREMULTIPLIED),96,96),&r->text[slot]);
+    if(SUCCEEDED(hr))r->textBytes[slot]=bytes;
+    return hr;
+}
+extern "C" HRESULT __cdecl DL_Lyrics(Renderer* r, const D2D1_RECT_F* panel, const TextCommand* commands, int count) noexcept {
+    if(!r || !panel || count<0 || count>8 || (count && !commands))return E_INVALIDARG;
+    for(int i=0;i<count;i++) if(commands[i].slot<0 || commands[i].slot>=24 || !r->text[commands[i].slot])return E_INVALIDARG;
+    r->panel=*panel;r->commandCount=count;
+    if(count)memcpy(r->commands,commands,sizeof(TextCommand)*count);
+    return S_OK;
+}
 extern "C" HRESULT __cdecl DL_Draw(Renderer* r, const Scene* s, HDC diagnosticOutput) noexcept {
     if(!r || !s) return E_INVALIDARG;
     HRESULT hr=Brushes(*r,*s); if(FAILED(hr)) return hr;
+    if(!r->panelBrush) {
+        hr=r->target->CreateSolidColorBrush(D2D1::ColorF(0.f,0.f,0.f,0.f),&r->panelBrush);
+        if(FAILED(hr))return hr;
+    }
     r->target->BeginDraw();
     auto bounds=D2D1::RectF(0,0,(float)r->width,(float)r->height);
     r->target->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
@@ -112,6 +143,22 @@ extern "C" HRESULT __cdecl DL_Draw(Renderer* r, const Scene* s, HDC diagnosticOu
                 std::round(23+i*spacing)+std::round(barWidth),floor),r->spectrum.Get());
         }
     }
+    if(r->panel.right>r->panel.left && r->panel.bottom>r->panel.top) {
+        r->target->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        auto card=D2D1::RoundedRect(r->panel,14,14);
+        r->panelBrush->SetColor(D2D1::ColorF(10/255.f,13/255.f,27/255.f,128/255.f));
+        r->target->FillRoundedRectangle(card,r->panelBrush.Get());
+        r->panelBrush->SetColor(Color(s->colors[4],56/255.f));
+        r->target->DrawRoundedRectangle(card,r->panelBrush.Get(),1);
+    }
+    for(int i=0;i<r->commandCount;i++) {
+        const auto& c=r->commands[i];
+        r->target->PushAxisAlignedClip(c.clip,D2D1_ANTIALIAS_MODE_ALIASED);
+        r->target->DrawBitmap(r->text[c.slot].Get(),c.destination,c.opacity,
+            c.nearest?D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR:D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        r->target->PopAxisAlignedClip();
+    }
+    // UI remains above the lyric layer, preserving queue/menu overlap order.
     if(r->foreground) r->target->DrawBitmap(r->foreground.Get(),bounds,1,D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
     // Test-only readback for pixel comparisons. Production always passes null
     // and does not create a GDI-compatible target or transfer pixels to the CPU.

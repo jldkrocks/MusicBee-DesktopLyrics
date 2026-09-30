@@ -13,7 +13,8 @@ namespace MusicBeePlugin
         FrameInterval, PaintDispatch, Scene, Clear, Background, Spectrum, Artwork,
         Lyrics, Queue, Controls, TickInterval, Tick, Dancers, DancerRaster,
         DancerUpload, MainUiLatency, CpuOneCorePercent, CpuMachinePercent,
-        WorkingSetMiB, PrivateMiB, FrameWork, ForegroundRaster, ForegroundUpload, GpuSubmit
+        WorkingSetMiB, PrivateMiB, FrameWork, ForegroundRaster, ForegroundUpload, GpuSubmit,
+        LyricTextureUpload, LyricTextureMiB
     }
 
     internal sealed class RenderProfile : IDisposable

@@ -50,12 +50,14 @@ class GpuCompositionChecks
             else {
                 PixelCompare(assembly,form);
                 var gpu=Get(form,"_gpu");var bitmap=(Bitmap)gpu.GetType().GetProperty("Foreground",Flags).GetValue(gpu);
-                using(var first=(Bitmap)bitmap.Clone()) {
+                {
+                    var generation=(long)Get(gpu,"_capture");
                     Set(form,"_line1","Changed but not invalidated, cache must remain");
                     Check((bool)Call(form,"TryDrawGpu"),"Cached frame failed");
-                    Check(EqualPixels(first,bitmap),"Static foreground should be reused");
+                    Check((long)Get(gpu,"_capture")==generation,"Static foreground and lyric commands should be reused");
                     form.Invalidate();Call(form,"TryDrawGpu");
-                    Check(!EqualPixels(first,bitmap),"Invalidated lyrics must refresh");
+                    Check((long)Get(gpu,"_capture")>generation,"Invalidated lyrics must refresh");
+                    PixelCompare(assembly,form);
                 }
                 // Exercise resize/release repeatedly, including returning to 4K.
                 for(int i=0;i<12;i++) {
@@ -96,7 +98,7 @@ class GpuCompositionChecks
         {
             using(var g=Graphics.FromImage(expected))Call(form,"OnPaint",new PaintEventArgs(g,form.ClientRectangle));
             var foreground=(Bitmap)renderer.GetType().GetProperty("Foreground",Flags).GetValue(renderer);
-            using(var g=Graphics.FromImage(foreground))Call(form,"DrawScene",new PaintEventArgs(g,form.ClientRectangle),true);
+            Call(form,"RasterGpuForeground",renderer);
             Call(renderer,"Upload");
             using(var g=Graphics.FromImage(actual)) {
                 var dc=g.GetHdc();

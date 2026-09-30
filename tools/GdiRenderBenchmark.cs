@@ -154,7 +154,7 @@ class GdiRenderBenchmark
             new object[] { form.Handle, output.Size, true }, null))
         {
             var foreground = (Bitmap)type.GetProperty("Foreground", Fields).GetValue(renderer);
-            using (var g = Graphics.FromImage(foreground)) Call(form, "DrawScene", new PaintEventArgs(g, form.ClientRectangle), true);
+            Call(form, "RasterGpuForeground", renderer);
             Call(renderer, "Upload");
             using (var g = Graphics.FromImage(output)) {
                 var dc = g.GetHdc();
