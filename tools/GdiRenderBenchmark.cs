@@ -9,6 +9,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using MusicBeePlugin;
 
@@ -37,6 +38,9 @@ class GdiRenderBenchmark
         bool gpuMode = args.Length > 1 && args[1] == "gpu";
         bool paced = args.Length > 2 && args[2] == "paced";
         bool freshLyrics = args.Length > 3 && args[3] == "fresh";
+        int messageFps = args.Length > 2 && args[2] == "message120" ? 120 :
+            args.Length > 2 && args[2] == "message60" ? 60 : 0;
+        bool legacyTimer = args.Length > 2 && args[2] == "messageLegacy";
         var assembly = typeof(Plugin).Assembly;
         var formType = assembly.GetType("MusicBeePlugin.FrmLyricsWindow");
         var profileType = assembly.GetType("MusicBeePlugin.RenderProfile");
@@ -89,6 +93,8 @@ class GdiRenderBenchmark
                     { "process_bits", IntPtr.Size * 8 }, { "logical_processors", Environment.ProcessorCount },
                     { "paced_60_workload", paced },
                     { "fresh_lyrics_every_2s", freshLyrics },
+                    { "frame_target_fps", messageFps }, { "legacy_timer", legacyTimer },
+                    { "cadence_note", "Synthetic hidden-window submissions, not physical presentation or MusicBee responsiveness" },
                     { "remote_session", SystemInformation.TerminalServerSession }
                 };
                 var profile = Activator.CreateInstance(profileType, Fields, null, new object[] { metadata, null, null, 30d, 2d, true }, null);
@@ -101,8 +107,7 @@ class GdiRenderBenchmark
                 using (var bitmap = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb))
                 using (var g = Graphics.FromImage(bitmap))
                 {
-                    while (watch.Elapsed.TotalSeconds < 11.9)
-                    {
+                    Action render = () => {
                         if (paced) {
                             while (watch.Elapsed.TotalSeconds < nextFrame) {
                                 if (nextFrame - watch.Elapsed.TotalSeconds > .002) System.Threading.Thread.Sleep(1);
@@ -128,6 +133,7 @@ class GdiRenderBenchmark
                         if (t % 2 < .3) Set(form, "_transitionStarted", Stopwatch.GetTimestamp() - (long)(t % 2 * Stopwatch.Frequency));
                         Set(form, "_paletteStarted", t % 8 < 1 ? Stopwatch.GetTimestamp() : 0L);
                         long started = (long)profileType.GetProperty("Stamp", Fields).GetValue(profile);
+                        if (messageFps != 0 || legacyTimer) Call(profile, "BeginPaint");
                         if (gpuMode) {
                             if (!(bool)Call(form, "TryDrawGpu")) throw new Exception("GPU failed: " + Get(form, "_gpuFailure"));
                         } else {
@@ -141,7 +147,26 @@ class GdiRenderBenchmark
                         Call(right, "Present", new Rectangle(-18000, -20000, width, height), pose, impact, (float)Math.Sin(t) * .02f, impact);
                         Call(profile, "End", Enum.Parse(metricType, "Dancers"), dancers);
                         Call(profile, "End", Enum.Parse(metricType, "FrameWork"), started);
+                    };
+                    if (messageFps != 0 || legacyTimer)
+                    {
+                        using(var pump = new FramePump(render, (late, skipped) => {
+                            if ((long)profileType.GetProperty("Stamp", Fields).GetValue(profile) != 0) {
+                                Call(profile,"Add",Enum.Parse(metricType,"FrameWakeLateness"),late);
+                                Call(profile,"Add",Enum.Parse(metricType,"SkippedRenderDeadlines"),(double)skipped);
+                            }
+                        }))
+                        using(var end = new System.Windows.Forms.Timer { Interval = 100 })
+                        using(var legacy = new System.Windows.Forms.Timer { Interval = 16 })
+                        using(var context = new ApplicationContext())
+                        {
+                            end.Tick += (s,e) => { if(watch.Elapsed.TotalSeconds >= 11.9) context.ExitThread(); };
+                            if(legacyTimer) { legacy.Tick += (s,e) => render(); legacy.Start(); }
+                            else pump.Start(messageFps);
+                            end.Start(); Application.Run(context);
+                        }
                     }
+                    else while (watch.Elapsed.TotalSeconds < 11.9) render();
                     json = (string)Call(profile, "Finish", "offscreen benchmark completed; presentation unavailable");
                     if (gpuMode) SaveGpuSnapshot(assembly, form, bitmap);
                     bitmap.Save(Path.Combine(output, (gpuMode ? "gpu" : "gdi") + "-fixture-" + size.Width + ".png"), ImageFormat.Png);
@@ -153,6 +178,38 @@ class GdiRenderBenchmark
             }
             settings.Font.Dispose();
         }
+    }
+
+    // Same scheduler as the plugin, on a real STA message loop. The workload
+    // still draws to hidden HWNDs: cadence is NOT a scan-out/FPS measurement.
+    sealed class FramePump : NativeWindow, IDisposable
+    {
+        const int Frame = 0x8000 + 0x4D1;
+        [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd,int message,IntPtr wParam,IntPtr lParam);
+        readonly Action _render;
+        readonly Action<double,long> _sample;
+        RenderFramePacer _pacer;
+        internal FramePump(Action render,Action<double,long> sample)
+        {
+            _render=render; _sample=sample;
+            CreateHandle(new CreateParams { Parent=new IntPtr(-3) });
+        }
+        internal void Start(int fps)
+        {
+            string failure; var hwnd=Handle;
+            _pacer=RenderFramePacer.TryCreate(token=>PostMessage(hwnd,Frame,new IntPtr(token),IntPtr.Zero),out failure);
+            if(_pacer==null)throw new Exception("Native pacing unavailable: "+failure);
+            _pacer.Start(fps);
+        }
+        protected override void WndProc(ref Message m)
+        {
+            if(m.Msg!=Frame) { base.WndProc(ref m); return; }
+            int token=m.WParam.ToInt32();double late;long skipped;
+            if(_pacer.Failure!=null)throw new Exception(_pacer.Failure);
+            try { if(_pacer.BeginFrame(token,out late,out skipped)) { _sample(late,skipped); _render(); } }
+            finally { _pacer.EndFrame(token); }
+        }
+        public void Dispose() { _pacer?.Dispose(); DestroyHandle(); }
     }
 
     static void SaveGpuSnapshot(Assembly assembly, Form form, Bitmap output)

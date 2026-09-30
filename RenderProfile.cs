@@ -14,7 +14,7 @@ namespace MusicBeePlugin
         Lyrics, Queue, Controls, TickInterval, Tick, Dancers, DancerRaster,
         DancerUpload, MainUiLatency, CpuOneCorePercent, CpuMachinePercent,
         WorkingSetMiB, PrivateMiB, FrameWork, ForegroundRaster, ForegroundUpload, GpuSubmit,
-        LyricTextureUpload, LyricTextureMiB
+        LyricTextureUpload, LyricTextureMiB, FrameWakeLateness, SkippedRenderDeadlines
     }
 
     internal sealed class RenderProfile : IDisposable
@@ -154,6 +154,8 @@ namespace MusicBeePlugin
                 count, dropped, average = count == 0 ? 0 : values.Average(),
                 p50 = percentile(.50), p95 = percentile(.95), p99 = percentile(.99),
                 maximum = count == 0 ? 0 : values[count - 1],
+                sum = values.Sum(), over_10 = values.Count(v => v > 10),
+                over_16_667 = values.Count(v => v > 1000d / 60),
                 over_20 = values.Count(v => v > 20), over_33_333 = values.Count(v => v > 1000d / 30),
                 over_50 = values.Count(v => v > 50)
             };
@@ -177,7 +179,7 @@ namespace MusicBeePlugin
                         preview = _previewFrames, gpu = _gpuFrames, foreground_redrawn = _foregroundFrames },
                     measured_seconds = Math.Max(0, (Math.Min(_end, Stopwatch.GetTimestamp()) - _start) / (double)Stopwatch.Frequency),
                     pending_main_ui_ms = _pending == 0 ? 0 : (Stopwatch.GetTimestamp() - _pendingAt) * 1000d / Stopwatch.Frequency,
-                    notes = "Times are milliseconds except CPU percent and memory MiB. Scene/layers are nested; do not sum all metrics. PaintDispatch includes WinForms buffer copy, not display scan-out. FrameInterval is WM_PAINT cadence, not proven presentation. CPU covers the entire host process. Missing metrics are unavailable, not zero cost.",
+                    notes = "Times are milliseconds except CPU percent, memory MiB and SkippedRenderDeadlines (counts, summed across frames). Scene/layers/FrameWork are nested; do not sum all metrics. PaintDispatch includes WinForms buffer copy, not display scan-out. FrameInterval is WM_PAINT cadence, not proven presentation. FrameWakeLateness is UI callback time minus requested deadline. CPU covers the entire host process. Missing metrics are unavailable, not zero cost.",
                     metrics
                 }, Formatting.Indented);
                 for (int i = 0; i < _samples.Length; i++) _samples[i] = null;

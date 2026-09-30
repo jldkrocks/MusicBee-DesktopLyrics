@@ -71,10 +71,10 @@ namespace MusicBeePlugin
 
         protected override void OnHandleDestroyed(EventArgs e)
         {
+            _framePacer?.Dispose(); _framePacer = null;
             ReleaseGpu();
             base.OnHandleDestroyed(e);
         }
-
         // Called only from WM_PAINT, on the existing window thread. The native
         // target presents directly; WinForms never copies a full CPU backbuffer.
         private bool TryDrawGpu()
@@ -126,6 +126,7 @@ namespace MusicBeePlugin
                 // loop, no change to song state, and no driver reset attempt.
                 _gpuFailure = ex.GetType().Name + " 0x" + ex.HResult.ToString("X8");
                 _gpuFailed = true; ReleaseGpu();
+                ConfigureFramePacing();
                 return false;
             }
         }
@@ -148,6 +149,12 @@ namespace MusicBeePlugin
         private readonly float[] _levels = new float[BarCount];
         private readonly float[] _targets = new float[BarCount];
         private readonly System.Windows.Forms.Timer _animationTimer;
+        private RenderFramePacer _framePacer;
+        private int _renderTargetFps = 120;
+        private string _framePacerFailure;
+        private const int FrameMessage = 0x8000 + 0x4D1;
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool PostMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
         private SettingsObj _settings;
         private string _line1 = "", _line2, _nextLine;
         private string _previousLine1, _previousLine2, _previousNextLine;
@@ -317,7 +324,7 @@ namespace MusicBeePlugin
             {
                 if (_animationDisposed) return;
                 if (Visible && _loaded) StartAnimation();
-                else _animationTimer.Stop();
+                else StopAnimation();
                 UpdatePartyDancers();
             };
             LocationChanged += (sender, args) => { SaveBounds(); UpdatePartyDancers(); };
@@ -325,7 +332,7 @@ namespace MusicBeePlugin
             {
                 _renderProfile?.Finish("window resized; repeat capture at a fixed size");
                 TopMost = WindowState != FormWindowState.Minimized;
-                if (WindowState == FormWindowState.Minimized) _animationTimer.Stop();
+                if (WindowState == FormWindowState.Minimized) StopAnimation();
                 else if (_loaded && Visible) StartAnimation();
                 SaveBounds(); UpdatePartyDancers();
             };
@@ -392,9 +399,64 @@ namespace MusicBeePlugin
             _lastFrameTimestamp = 0;
             _lastPaintRequest = 0;
             _lastSpectrumSample = 0;
-            // The 16 ms timer requests roughly 60 frames per second. Slow
-            // paints drop frames instead of building up a queue of old frames.
-            _animationTimer.Start();
+            ConfigureFramePacing();
+        }
+
+        private void StopAnimation()
+        {
+            _animationTimer?.Stop(); _framePacer?.Stop();
+        }
+
+        private void ConfigureFramePacing()
+        {
+            if (!_loaded || _animationDisposed || !Visible || WindowState == FormWindowState.Minimized)
+            { StopAnimation(); return; }
+            if (GpuEligible && _framePacerFailure == null)
+            {
+                if (_framePacer == null && IsHandleCreated)
+                {
+                    var window = Handle; // Never touch Control.Handle from the worker.
+                    _framePacer = RenderFramePacer.TryCreate(token =>
+                        PostMessage(window, FrameMessage, new IntPtr(token), IntPtr.Zero), out _framePacerFailure);
+                }
+                if (_framePacer != null && _framePacer.Failure == null)
+                {
+                    _animationTimer.Stop(); _framePacer.Start(_renderTargetFps); return;
+                }
+            }
+            _framePacer?.Stop();
+            _animationTimer.Start(); // Original inexpensive/unsupported/GDI fallback.
+        }
+
+        private void OnFrameMessage(int token)
+        {
+            var pacer = _framePacer;
+            if (pacer == null) return;
+            if (pacer.Failure != null)
+            {
+                _framePacerFailure = pacer.Failure;
+                ConfigureFramePacing(); return;
+            }
+            double late; long skipped;
+            var profile = _renderProfile;
+            long stamp = profile?.Stamp ?? 0;
+            try
+            {
+                if (!pacer.BeginFrame(token, out late, out skipped)) return;
+                if (stamp != 0)
+                {
+                    profile.Add(RenderMetric.FrameWakeLateness, late);
+                    profile.Add(RenderMetric.SkippedRenderDeadlines, skipped);
+                }
+                // Re-check remote/transparent mode on the UI thread. Switching
+                // to fallback must also lower the presentation request rate.
+                if (!GpuEligible) ConfigureFramePacing();
+                AnimationClockTick(this, EventArgs.Empty);
+                // Flush this invalidation before acknowledging the wakeup.
+                // Posted messages cannot starve WM_PAINT or queue old frames.
+                Update();
+            }
+            finally { profile?.End(RenderMetric.FrameWork, stamp); pacer.EndFrame(token); }
         }
 
         private void AnimationClockTick(object sender, EventArgs args)
@@ -428,7 +490,7 @@ namespace MusicBeePlugin
                 RefreshPlayState();
                 _lastPlayStateCheck = now;
             }
-            if (_settings.PartyMode && (_lastPartyUpdate == 0 ||
+            if (_settings.PartyMode && ((_framePacer != null && !_animationTimer.Enabled) || _lastPartyUpdate == 0 ||
                 (now - _lastPartyUpdate) * 1000.0 / Stopwatch.Frequency >= 15))
             {
                 var stamp = _renderProfile?.Stamp ?? 0;
@@ -504,13 +566,33 @@ namespace MusicBeePlugin
                 value => _settings.ShowTranslation = value);
             menu.Items.Add(new ToolStripSeparator());
             var gpuToggle = menu.Items.Add("GPU rendering", null, (sender, args) => {
-                _gpuDisabled = !_gpuDisabled; ReleaseGpu(); Invalidate();
+                _renderProfile?.Finish("renderer changed; repeat capture");
+                _gpuDisabled = !_gpuDisabled; ReleaseGpu(); ConfigureFramePacing(); Invalidate();
             }) as ToolStripMenuItem;
             gpuToggle.ToolTipText = "GPU background, spectrum and lyric composition. Switch off to compare with GDI. Applies to this window only. Transparent canvas and remote desktop use GDI automatically.";
             menu.Opening += (sender, args) => {
                 gpuToggle.Checked = !_gpuDisabled;
                 gpuToggle.Text = _gpuFailed ? "GPU unavailable: using GDI (" + _gpuFailure + ")" : "GPU rendering";
             };
+            var frameRate = new ToolStripMenuItem("Animation frame rate");
+            frameRate.DropDown.BackColor = menu.BackColor;
+            frameRate.DropDown.ForeColor = menu.ForeColor;
+            frameRate.DropDown.Renderer = menu.Renderer;
+            foreach (var target in new[] { 60, 120 })
+            {
+                int fps = target;
+                var item = new ToolStripMenuItem(fps + " FPS target");
+                item.ToolTipText = "Applies to this window only. Higher targets use more CPU/GPU. Actual smoothness depends on drawing cost and display refresh. GDI and unsupported systems use the original timer.";
+                item.Click += (sender, args) => {
+                    _renderProfile?.Finish("frame target changed; repeat capture");
+                    _renderTargetFps = fps; ConfigureFramePacing();
+                };
+                menu.Opening += (sender, args) => item.Checked = _renderTargetFps == fps;
+                frameRate.DropDownItems.Add(item);
+            }
+            menu.Opening += (sender, args) => frameRate.Text = _animationTimer != null && _animationTimer.Enabled
+                ? "Animation frame rate (compatibility timer)" : "Animation frame rate";
+            menu.Items.Add(frameRate);
             menu.Items.Add("Add English meaning from Genius…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenEnglishImporter)));
             var timingAction = menu.Items.Add("Edit lyric timing…", null, (sender, args) =>
@@ -577,6 +659,9 @@ namespace MusicBeePlugin
                 { "artwork_loaded", _albumArtwork != null }, { "queue", _settings.ShowSongQueue },
                 { "queue_entries", _queueTracks.Count }, { "dancers", _settings.PartyMode },
                 { "playing_at_start", _playState == Plugin.PlayState.Playing },
+                { "render_target_fps", _renderTargetFps },
+                { "frame_pacer", _animationTimer.Enabled ? "WinForms compatibility timer" : "high-resolution waitable timer" },
+                { "frame_pacer_failure", _framePacerFailure },
                 { "screen", Screen.FromControl(this).DeviceName }
             };
             using (var g = CreateGraphics()) {
@@ -1638,6 +1723,7 @@ namespace MusicBeePlugin
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            if (_loaded && Visible && !_animationDisposed) StartAnimation();
             // Match the native title bar to the dark lyrics surface while
             // retaining Windows' normal drag, close and resize controls.
             try
@@ -2835,6 +2921,8 @@ namespace MusicBeePlugin
 
         protected override void WndProc(ref Message message)
         {
+            if (message.Msg == FrameMessage)
+            { OnFrameMessage(message.WParam.ToInt32()); message.Result = IntPtr.Zero; return; }
             var profile = message.Msg == 0x000F ? _renderProfile : null;
             var stamp = profile?.BeginPaint() ?? 0;
             try {
@@ -3285,6 +3373,7 @@ namespace MusicBeePlugin
             {
                 ReleaseGpu();
                 _animationDisposed = true;
+                _framePacer?.Dispose(); _framePacer = null;
                 _renderProfile?.Dispose();
                 CancelPartyLookup();
                 Interlocked.Increment(ref _artworkRequestId);

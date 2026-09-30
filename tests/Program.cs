@@ -24,6 +24,7 @@ namespace MusicBeePlugin
             SeekClockChecks.Run();
             SeekSettlingChecks.Run();
             RenderProfileChecks.Run();
+            RenderFramePacerChecks.Run();
             BpmLookupChecks.Run();
             TempoMapChecks.Run();
             RhythmChecks.Run();

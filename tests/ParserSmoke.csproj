@@ -62,6 +62,8 @@
     <Compile Include="SeekSettlingChecks.cs" />
     <Compile Include="..\RenderProfile.cs" />
     <Compile Include="RenderProfileChecks.cs" />
+    <Compile Include="..\RenderFramePacer.cs" />
+    <Compile Include="RenderFramePacerChecks.cs" />
     <Compile Include="BpmLookupChecks.cs" />
     <Compile Include="TempoMapChecks.cs" />
     <Compile Include="RhythmChecks.cs" />

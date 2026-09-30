@@ -96,9 +96,45 @@ class GpuCompositionChecks
             Check(!(bool)Call(form,"TryDrawGpu") && Get(form,"_gpu")==null,"Transparent canvas must use GDI");
             settings.TransparentCanvas=false;Set(form,"_gpuDisabled",true);
             Check(!(bool)Call(form,"TryDrawGpu"),"Comparison toggle must use GDI");
+            PacingLifecycle(form,settings);
         }
         settings.Font.Dispose();
         Console.WriteLine("GPU checks complete, process bits "+(IntPtr.Size*8));
+    }
+
+    static void Pump(int milliseconds)
+    {
+        var clock=Stopwatch.StartNew();
+        while(clock.ElapsedMilliseconds<milliseconds) { Application.DoEvents(); System.Threading.Thread.Sleep(1); }
+    }
+    static void PacingLifecycle(Form form,SettingsObj settings)
+    {
+        settings.PartyMode=false;
+        form.WindowState=FormWindowState.Normal;form.ClientSize=new Size(420,190);
+        form.StartPosition=FormStartPosition.Manual;form.Location=new Point(-24000,-24000);
+        form.ShowInTaskbar=false;form.TopMost=false;
+        Set(form,"_gpuDisabled",false);Set(form,"_gpuFailed",false);
+        form.Show();Pump(180);
+        var timer=(System.Windows.Forms.Timer)Get(form,"_animationTimer");
+        var pacer=Get(form,"_framePacer");
+        if(pacer!=null && !(bool)Get(form,"_gpuFailed")) {
+            Check(!timer.Enabled,"GPU pacing must replace rather than duplicate the old timer");
+            form.Hide();Pump(40);
+            Check(!timer.Enabled && !(bool)Get(pacer,"_active"),"Hidden window must stop frame requests");
+            form.Show();Pump(50);
+            Check((bool)Get(pacer,"_active"),"Showing the window must resume frame requests");
+            Set(form,"_renderTargetFps",60);Call(form,"ConfigureFramePacing");Pump(40);
+            Check((int)Get(pacer,"_fps")==60,"Target change must update presentation scheduling");
+            Call(form,"RecreateHandle");Pump(60);
+            Check(!ReferenceEquals(pacer,Get(form,"_framePacer")),"Recreated HWND must have a new destination/pacer");
+            pacer=Get(form,"_framePacer");
+            Set(pacer,"_failure","injected timer failure");Call(form,"OnFrameMessage",0);
+            Check(timer.Enabled,"Worker failure must recover with compatibility timer");
+        }
+        Set(form,"_gpuDisabled",true);Call(form,"ConfigureFramePacing");
+        Check(timer.Enabled,"GDI rendering must retain compatibility timer");
+        form.Hide();Check(!timer.Enabled,"Hiding must also stop the compatibility timer");
+        Console.WriteLine("Window pacing lifecycle, target selection, HWND replacement and timer/GDI fallback passed.");
     }
     static bool EqualPixels(Bitmap a,Bitmap b) {
         for(int y=0;y<a.Height;y+=3)for(int x=0;x<a.Width;x+=3)if(a.GetPixel(x,y)!=b.GetPixel(x,y))return false;

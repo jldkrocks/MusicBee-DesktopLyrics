@@ -1,6 +1,6 @@
 # GPU rendering checkpoint
 
-Current status: version1.15.54 adds GPU movement/fading/clipping of existing GDI lyric textures and the lyric card to the background/spectrum composition stage. See `RENDERING.md` for the current backend, retained GDI foreground, fallback, packaging, measurements and acceptance gates. The older probe notes below describe the original feasibility stage, not the current plugin's full feature set. DirectWrite, GPU dancers and frame-scheduler work are still deferred pending live54 feedback.
+Current status: version1.15.55 adds bounded high-resolution presentation wakeups and60/120 FPS targets after live54 captures confirmed a roughly40 FPS timer limit. Version54's GPU lyric composition improved MusicBee responsiveness. See `RENDERING.md` for the current backend, pacing, fallback, packaging, measurements and acceptance gates. The older probe notes below describe the original feasibility stage, not the current plugin's full feature set. DirectWrite, GPU dancers and additional effects remain deferred; live120 Hz TV validation is still required.
 
 The plugin still uses GDI+. Keep that renderer until the complete replacement passes visual and interaction checks. Do not claim that the isolated probe enables GPU rendering in MusicBee.
 
