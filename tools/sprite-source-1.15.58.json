@@ -34,10 +34,6 @@
       37.67624674112882
     ]
   },
-  "assets_unchanged": {
-    "Ram": "f5200c9001035605af9cf68d1f5eeba14fe9abed830b12ee6bdd5d69641a781b",
-    "Rem": "8b96ce6522678b3a1dd921040f6a3e2a18e6b8d792e7a4374e347f05b142912e"
-  },
   "alignment_checks": {
     "Rem": [
       {
@@ -164,5 +160,13 @@
       }
     ]
   },
-  "note": "Approved GIF-derived 360x706 cells, 12 frames, same four key indices. No AI assets shipped. Fixed per-character registration; connectivity background removal and exterior matte cleanup. Full extraction scripts and original/candidate comparisons remain in ../dancer-source-review."
+  "note": "Approved GIF-derived 360x706 cells, 12 frames, same four key indices. No AI assets shipped. Fixed per-character registration; connectivity background removal and exterior matte cleanup. Full extraction scripts and original/candidate comparisons remain in ../dancer-source-review.",
+  "original_sprite_sha256": {
+    "Ram": "f5200c9001035605af9cf68d1f5eeba14fe9abed830b12ee6bdd5d69641a781b",
+    "Rem": "8b96ce6522678b3a1dd921040f6a3e2a18e6b8d792e7a4374e347f05b142912e"
+  },
+  "replacement_sprite_sha256": {
+    "Rem": "325f0bfb91342c1e004104be66e08f8aafd564e1ab2de554136faa7c081aeaf1",
+    "Ram": "2daf5dbc4ea3cdd422821d4d3ee5e49180bbc0cddf0cc35924eb20b955631c21"
+  }
 }

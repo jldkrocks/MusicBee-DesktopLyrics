@@ -1,6 +1,6 @@
 # GPU rendering checkpoint
 
-Current checkpoint: version1.15.57 moves maximized dancer composition to the existing Direct2D target, pending hardware/performance and TV validation. Version1.15.56 retained the artwork/queue/control overlay during GPU lyric motion and the user accepted its live results. Version55's 60/120 FPS pacer measured about116 live draws/s; the user reports an NVIDIA global116FPS cap. The cap is a plausible explanation, not an independently verified cause. See `RENDERING.md` for measurements and gates. The older probe notes below are historical.
+Current checkpoint: version1.15.58 installs approved higher-detail GIF-derived dancer sprites. Version57 GPU dancer live captures have been reviewed, showing improved4K frame tails. New artwork awaits TV visual feedback. A separate AI upscale sample is preview-only. The reported NVIDIA116FPS cap is unchanged; see RENDERING.md for measurements and limitations.
 
 User-authorized existing-feature sequence, developed as separate working checkpoints with TV feedback before expanding:
 1. Lyric/foreground separation: completed and user-validated in56. Upcoming-text preparation remains a possible follow-up if new-glyph stalls justify it.
