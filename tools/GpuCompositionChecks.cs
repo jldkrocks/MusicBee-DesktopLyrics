@@ -49,6 +49,7 @@ class GpuCompositionChecks
                 Check(args.Length==0 || args[0]!="require-hardware","Local hardware test did not run");
             }
             else {
+                OutlineChecks(assembly,form);
                 PixelCompare(assembly,form);
                 foreach(var size in new[]{new Size(814,272),new Size(3840,2160)}) {
                     form.WindowState=size.Width>1000?FormWindowState.Maximized:FormWindowState.Normal;
@@ -406,9 +407,55 @@ class GpuCompositionChecks
             }
             Console.WriteLine("RGB mean absolute error (0-255): "+(error/count).ToString("F3"));
             var output=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"gpu-check-images");Directory.CreateDirectory(output);
-            var label=expected.Width+"-"+(progress.HasValue?progress.Value.ToString("F2",System.Globalization.CultureInfo.InvariantCulture):"still");
+            var label=((bool)Get(form,"_gpuOutlineText")?"outline-":"")+expected.Width+"-"+(progress.HasValue?progress.Value.ToString("F2",System.Globalization.CultureInfo.InvariantCulture):"still");
             expected.Save(Path.Combine(output,"gdi-"+label+".png"),ImageFormat.Png);actual.Save(Path.Combine(output,"gpu-"+label+".png"),ImageFormat.Png);
             Check(error/count<3,"GPU appearance differs materially from GDI; inspect pixel comparison");
         }
+    }
+    static void OutlineChecks(Assembly assembly,Form form) {
+        var rendererType=assembly.GetType("MusicBeePlugin.GpuSceneRenderer");
+        using(var renderer=(IDisposable)Activator.CreateInstance(rendererType,Flags,null,new object[]{form.Handle,form.ClientSize,true},null))
+        using(var path=new System.Drawing.Drawing2D.GraphicsPath()) {
+            path.AddRectangle(new RectangleF(0,0,100,100));
+            Func<float,int,Bitmap> draw=(alpha,gradient)=> {
+                Call(renderer,"BeginLyrics");
+                Call(renderer,"AddOutline",path,path.GetBounds(),new RectangleF(0,0,960,540),100f,100f,1f,3f,alpha,
+                    Color.Red,Color.Blue,Color.Black,gradient);
+                Call(renderer,"CommitLyrics");
+                var image=new Bitmap(960,540);
+                using(var g=Graphics.FromImage(image)){var dc=g.GetHdc();try{Call(renderer,"Draw",Get(form,"_palette"),Get(form,"_bars"),false,dc);}finally{g.ReleaseHdc(dc);}}
+                return image;
+            };
+            using(var full=draw(1,0))using(var faded=draw(.4f,0))using(var bg=draw(0,0)) {
+                // Includes pixels where shadow, border and fill overlap. A brush-
+                // opacity implementation incorrectly darkens these intersections.
+                for(int y=99;y<203;y++)for(int x=99;x<203;x++){
+                    var a=full.GetPixel(x,y);var b=bg.GetPixel(x,y);var c=faded.GetPixel(x,y);
+                    Check(Math.Abs(c.R-(a.R*.4+b.R*.6))<4 && Math.Abs(c.G-(a.G*.4+b.G*.6))<4 && Math.Abs(c.B-(a.B*.4+b.B*.6))<4,
+                        "Outline opacity must composite the whole glyph group");
+                }
+            }
+            using(var doubleColor=draw(1,1))using(var triple=draw(1,2)) {
+                Check(doubleColor.GetPixel(150,110).R>doubleColor.GetPixel(150,190).R,"Double gradient direction changed");
+                Check(triple.GetPixel(150,150).B>triple.GetPixel(150,110).B && triple.GetPixel(150,190).R>triple.GetPixel(150,150).R,"Triple gradient lost middle colour");
+            }
+            for(int i=0;i<40;i++)using(var p=new System.Drawing.Drawing2D.GraphicsPath()) {
+                p.AddRectangle(new RectangleF(0,0,30+i,30));Call(renderer,"BeginLyrics");
+                Call(renderer,"AddOutline",p,p.GetBounds(),new RectangleF(0,0,960,540),0f,0f,.63f,2f,1f,Color.White,Color.White,Color.Black,0);
+                Call(renderer,"CommitLyrics");
+            }
+            Check(((Array)Get(renderer,"_paths")).Cast<object>().Count(x=>x!=null)<=24 && (int)Get(renderer,"_pointCount")<=262144,"Outline cache grew past budget");
+            Call(renderer,"BeginLyrics");Call(renderer,"CommitLyrics");Check((int)Get(renderer,"_outlineCount")==0,"Old outline commands survived reset");
+        }
+        Set(form,"_gpuOutlineText",true);
+        foreach(var size in new[]{new Size(814,272),new Size(3840,2160)}) {
+            form.WindowState=size.Width>1000?FormWindowState.Maximized:FormWindowState.Normal;form.ClientSize=size;
+            Set(form,"_previousLine1","Café a\u0301 flowing text");Set(form,"_previousNextLine",Get(form,"_line1"));
+            PixelCompare(assembly,form,.25);PixelCompare(assembly,form,.65);
+        }
+        Call(form,"ReleaseGpu");Set(form,"_gpuOutlineText",false);
+        form.WindowState=FormWindowState.Normal;form.ClientSize=new Size(960,540);Set(form,"_transitionStarted",0L);
+        Check((bool)Call(form,"TryDrawGpu"),"Bitmap rendering could not resume after outlines");
+        Console.WriteLine("Outline group opacity, gradients, cache bounds, transitions and bitmap switch passed.");
     }
 }

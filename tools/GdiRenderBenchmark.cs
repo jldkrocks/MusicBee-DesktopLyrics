@@ -63,6 +63,7 @@ class GdiRenderBenchmark
             using (var left = (Form)Activator.CreateInstance(dancerType, new object[] { "MusicBeePlugin.PartyRem.png" }))
             using (var right = (Form)Activator.CreateInstance(dancerType, new object[] { "MusicBeePlugin.PartyRam.png" }))
             {
+                Set(form,"_gpuOutlineText",args.Length>4 && args[4]=="outlines");
                 // Materialize the HWND before starting diagnostics: handle
                 // creation can raise SizeChanged and end an active capture.
                 var handle = form.Handle;
@@ -93,6 +94,7 @@ class GdiRenderBenchmark
                     { "process_bits", IntPtr.Size * 8 }, { "logical_processors", Environment.ProcessorCount },
                     { "paced_60_workload", paced },
                     { "fresh_lyrics_every_2s", freshLyrics },
+                    { "lyric_outlines", args.Length>4 && args[4]=="outlines" },
                     { "invalidate_at_lyric_change", true },
                     { "frame_target_fps", messageFps }, { "legacy_timer", legacyTimer },
                     { "cadence_note", "Synthetic hidden-window submissions, not physical presentation or MusicBee responsiveness" },

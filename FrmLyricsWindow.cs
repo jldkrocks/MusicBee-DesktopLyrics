@@ -71,6 +71,7 @@ namespace MusicBeePlugin
         private void RasterGpuForeground(GpuSceneRenderer renderer, long? diagnosticTimestamp = null)
         {
             renderer.Profile=_renderProfile;
+            renderer.UseOutlines=_gpuOutlineText;
             renderer.BeginLyrics();
             _gpuLyrics=renderer;
             try {
@@ -81,6 +82,7 @@ namespace MusicBeePlugin
             finally { _gpuLyrics=null; }
         }
         private bool _gpuDisabled, _gpuFailed, _foregroundDirty = true, _animationInvalidating;
+        private bool _gpuOutlineText; // Comparison option, deliberately not a saved song setting.
         private string _gpuFailure;
         private double _foregroundAutoBpm;
         private bool _foregroundNoSignal;
@@ -626,6 +628,11 @@ namespace MusicBeePlugin
             AddToggle(menu, "Show English / translation", () => _settings.ShowTranslation,
                 value => _settings.ShowTranslation = value);
             menu.Items.Add(new ToolStripSeparator());
+            var outlineToggle = (ToolStripMenuItem)menu.Items.Add("Sharper lyric outlines (experimental)", null, (sender, args) => {
+                _renderProfile?.Finish("text renderer changed; repeat capture"); _gpuOutlineText=!_gpuOutlineText; ReleaseGpu(); Invalidate();
+            });
+            outlineToggle.ToolTipText="Compare vector edges with the existing lyric images. Layout and timing are unchanged. Applies to this window only.";
+            menu.Opening += (sender,args) => { outlineToggle.Checked=_gpuOutlineText; outlineToggle.Enabled=!_gpuDisabled; };
             var gpuToggle = menu.Items.Add("GPU rendering", null, (sender, args) => {
                 _renderProfile?.Finish("renderer changed; repeat capture");
                 _gpuDisabled = !_gpuDisabled; ReleaseGpu(); ConfigureFramePacing(); Invalidate();
@@ -721,6 +728,7 @@ namespace MusicBeePlugin
                 { "queue_entries", _queueTracks.Count }, { "dancers", _settings.PartyMode },
                 { "playing_at_start", _playState == Plugin.PlayState.Playing },
                 { "render_target_fps", _renderTargetFps },
+                { "lyric_outlines", _gpuOutlineText },
                 { "frame_pacer", _animationTimer.Enabled ? "WinForms compatibility timer" : "high-resolution waitable timer" },
                 { "frame_pacer_failure", _framePacerFailure },
                 { "screen", Screen.FromControl(this).DeviceName }
@@ -3263,6 +3271,18 @@ namespace MusicBeePlugin
 
         private void DrawCachedLine(Graphics g, TextGeometry geometry, RectangleF area, float scale, int alpha)
         {
+            if(_gpuLyrics!=null && _gpuLyrics.UseOutlines) {
+                float x=area.Left+(area.Width-geometry.Bounds.Width*scale)/2;
+                float y=area.Top+(area.Height-geometry.Bounds.Height*scale)/2;
+                if(Math.Abs(scale-1)<.00001f){x=(float)Math.Round(x);y=(float)Math.Round(y);}
+                var clip=RectangleF.Intersect(area,g.ClipBounds);
+                using(var transform=g.Transform){var offset=transform.Elements;clip.Offset(offset[4],offset[5]);
+                    _gpuLyrics.AddOutline(geometry.Path,geometry.Bounds,clip,x+offset[4],y+offset[5],scale,
+                        Math.Max(1.5f,Math.Min(3f,geometry.FittedPoints/20f)),alpha/255f,
+                        _settings.Color1,_settings.Color2,_settings.BorderColor,geometry.Bounds.Height<2?0:_settings.GradientType);
+                }
+                return;
+            }
             const int padding = 6;
             if (geometry.Raster == null)
             {

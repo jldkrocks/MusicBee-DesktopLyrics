@@ -8,3 +8,5 @@ EXPORTS
  DL_Lyrics
  DL_DancerTexture
  DL_Dancers
+ DL_Outline
+ DL_OutlineLyrics

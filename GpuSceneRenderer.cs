@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Runtime.InteropServices;
 
@@ -37,6 +38,50 @@ namespace MusicBeePlugin
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int LyricsFn(IntPtr renderer, ref Rect panel, [In] TextCommand[] commands, int count);
         private TextFn _text;
         private LyricsFn _lyrics;
+        [StructLayout(LayoutKind.Sequential)] private struct OutlineCommand {
+            public int Slot; public Rect Clip;
+            public float X,Y,Scale,Stroke,Opacity;
+            public uint Color1,Color2,Border;public int Gradient;
+        }
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int OutlineFn(IntPtr renderer,int slot,
+            [In] PointF[] points,[In] byte[] types,int count,int fill,ref Rect bounds);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int OutlineLyricsFn(IntPtr renderer,[In] OutlineCommand[] commands,int count);
+        private OutlineFn _outline;
+        private OutlineLyricsFn _outlineLyrics;
+        internal bool UseOutlines;
+        private readonly GraphicsPath[] _paths=new GraphicsPath[24]; // borrowed identities only
+        private readonly long[] _pathUsed=new long[24];
+        private readonly int[] _pathPoints=new int[24];
+        private readonly OutlineCommand[] _outlineCommands=new OutlineCommand[8];
+        private int _outlineCount,_pointCount;
+        private void EvictOutline(int slot) {
+            var empty=new Rect();Marshal.ThrowExceptionForHR(_outline(_renderer,slot,null,null,0,0,ref empty));
+            _pointCount-=_pathPoints[slot];_pathPoints[slot]=0;_paths[slot]=null;_pathUsed[slot]=0;
+        }
+        private int OldestOutline() {
+            int slot=-1;for(int i=0;i<24;i++)if(_pathUsed[i]!=_capture && (slot<0||_pathUsed[i]<_pathUsed[slot]))slot=i;
+            if(slot<0)throw new InvalidOperationException("Active outline cache exceeds budget.");return slot;
+        }
+        internal void AddOutline(GraphicsPath path,RectangleF bounds,RectangleF clip,float x,float y,float scale,
+            float stroke,float opacity,Color color1,Color color2,Color border,int gradient) {
+            if(clip.Width<=0||clip.Height<=0||opacity<=0)return;
+            if(_outlineCount+_commandCount>=8)throw new InvalidOperationException("Too many lyric layers.");
+            int slot=Array.IndexOf(_paths,path);
+            if(slot<0){
+                int count=path.PointCount;if(count>65536)throw new InvalidOperationException("Lyric outline exceeds budget.");
+                var stamp=Profile?.Stamp??0;
+                while(_pointCount+count>262144){
+                    int oldest=-1;for(int i=0;i<24;i++)if(_pathPoints[i]>0&&_pathUsed[i]!=_capture&&(oldest<0||_pathUsed[i]<_pathUsed[oldest]))oldest=i;
+                    if(oldest<0)throw new InvalidOperationException("Active outlines exceed budget.");EvictOutline(oldest);
+                }
+                slot=OldestOutline();EvictOutline(slot);var rect=new Rect(bounds);
+                Marshal.ThrowExceptionForHR(_outline(_renderer,slot,path.PathPoints,path.PathTypes,count,(int)path.FillMode,ref rect));
+                _paths[slot]=path;_pathPoints[slot]=count;_pointCount+=count;Profile?.End(RenderMetric.LyricOutlineUpload,stamp);
+            }
+            _pathUsed[slot]=_capture;
+            _outlineCommands[_outlineCount++]=new OutlineCommand {Slot=slot,Clip=new Rect(clip),X=x,Y=y,Scale=scale,
+                Stroke=stroke,Opacity=opacity,Color1=(uint)color1.ToArgb(),Color2=(uint)color2.ToArgb(),Border=(uint)border.ToArgb(),Gradient=gradient};
+        }
         [StructLayout(LayoutKind.Sequential)] private struct DancerCommand
         {
             public int Slot;
@@ -122,9 +167,12 @@ namespace MusicBeePlugin
         private int _commandCount, _textureBytes;
         private Rect _panel;
         internal RenderProfile Profile;
-        internal void BeginLyrics() { _capture++; _commandCount=0; _panel=new Rect(); }
+        internal void BeginLyrics() { _capture++; _commandCount=0; _outlineCount=0; _panel=new Rect(); }
         internal void SetPanel(RectangleF panel) { _panel=new Rect(panel); }
-        internal void CommitLyrics() { Marshal.ThrowExceptionForHR(_lyrics(_renderer,ref _panel,_commands,_commandCount)); }
+        internal void CommitLyrics() {
+            Marshal.ThrowExceptionForHR(_lyrics(_renderer,ref _panel,_commands,_commandCount));
+            Marshal.ThrowExceptionForHR(_outlineLyrics(_renderer,_outlineCommands,_outlineCount));
+        }
         private int OldestUnused()
         {
             int chosen=-1;
@@ -140,7 +188,7 @@ namespace MusicBeePlugin
         internal void AddText(Bitmap image, RectangleF destination, RectangleF clip, float opacity, bool nearest)
         {
             if(clip.Width<=0 || clip.Height<=0 || opacity<=0) return;
-            if(_commandCount==_commands.Length) throw new InvalidOperationException("Too many lyric layers.");
+            if(_commandCount+_outlineCount==_commands.Length) throw new InvalidOperationException("Too many lyric layers.");
             int slot=Array.IndexOf(_textImages,image);
             if(slot<0) {
                 int bytes=checked(image.Width*image.Height*4);
@@ -193,6 +241,7 @@ namespace MusicBeePlugin
                 // Resolve the entire ABI before creating resources. An older
                 // helper safely selects GDI instead of reading a mismatched ABI.
                 _text = Export<TextFn>("DL_Text"); _lyrics = Export<LyricsFn>("DL_Lyrics");
+                _outline = Export<OutlineFn>("DL_Outline"); _outlineLyrics=Export<OutlineLyricsFn>("DL_OutlineLyrics");
                 _dancerTexture = Export<DancerTextureFn>("DL_DancerTexture"); _dancers = Export<DancersFn>("DL_Dancers");
                 Marshal.ThrowExceptionForHR(Export<CreateFn>("DL_Create")(hwnd, (uint)size.Width, (uint)size.Height, diagnosticReadback ? 1 : 0, out _renderer));
                 Resize(size);
@@ -224,12 +273,14 @@ namespace MusicBeePlugin
             _scene.Bars = bars; _scene.Spectrum = spectrum ? 1 : 0;
             if(Profile?.Stamp > 0) Profile.Add(RenderMetric.LyricTextureMiB,_textureBytes/1048576d);
             if(Profile?.Stamp > 0) Profile.Add(RenderMetric.DancerTextureMiB,_dancerBytes/1048576d);
+            if(Profile?.Stamp > 0) Profile.Add(RenderMetric.LyricOutlinePoints,_pointCount);
             Marshal.ThrowExceptionForHR(_draw(_renderer, ref _scene, diagnosticOutput));
         }
         public void Dispose()
         {
             Foreground?.Dispose(); Foreground = null;
             Array.Clear(_textImages,0,_textImages.Length);
+            Array.Clear(_paths,0,_paths.Length);
             _dancerPreparation?.Dispose(); _dancerPreparation = null;
             if (_renderer != IntPtr.Zero) { _destroy(_renderer); _renderer = IntPtr.Zero; }
             if (_library != IntPtr.Zero) { FreeLibrary(_library); _library = IntPtr.Zero; }

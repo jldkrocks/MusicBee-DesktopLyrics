@@ -13,6 +13,14 @@ struct Scene {
 };
 struct TextCommand { int slot; D2D1_RECT_F destination, clip; float opacity; int nearest; };
 struct DancerCommand { int slot; D2D1_RECT_F destination, clip; };
+struct OutlineCommand { int slot; D2D1_RECT_F clip; float x,y,scale,stroke,opacity; UINT color1,color2,border; int gradient; };
+struct Outline {
+    ComPtr<ID2D1PathGeometry> path;
+    ComPtr<ID2D1LinearGradientBrush> gradient;
+    D2D1_RECT_F bounds = {};
+    UINT points=0, color1=0, color2=0;
+    int gradientMode=-1;
+};
 struct Renderer {
     ComPtr<ID2D1Factory> factory;
     ComPtr<ID2D1HwndRenderTarget> target;
@@ -32,9 +40,67 @@ struct Renderer {
     UINT dancerBytes[8] = {};
     DancerCommand dancerCommands[2] = {};
     int dancerCount = 0;
+    Outline outlines[24];
+    OutlineCommand outlineCommands[8] = {};
+    int outlineCount=0;
+    ComPtr<ID2D1SolidColorBrush> ink;
+    ComPtr<ID2D1StrokeStyle> roundStroke;
+    ComPtr<ID2D1Layer> textLayer;
 };
 static D2D1_COLOR_F Color(UINT argb, float alpha = 1) {
     return D2D1::ColorF((argb >> 16 & 255) / 255.f, (argb >> 8 & 255) / 255.f, (argb & 255) / 255.f, alpha);
+}
+extern "C" HRESULT __cdecl DL_Outline(Renderer* r,int slot,const D2D1_POINT_2F* points,
+    const unsigned char* types,int count,int fill,const D2D1_RECT_F* bounds) noexcept {
+    if(!r || slot<0 || slot>=24 || count<0 || count>65536)return E_INVALIDARG;
+    auto& o=r->outlines[slot];
+    if(!count){o=Outline();return S_OK;}
+    if(!points || !types || !bounds || fill<0 || fill>1)return E_INVALIDARG;
+    UINT total=count;for(int i=0;i<24;i++)if(i!=slot)total+=r->outlines[i].points;
+    if(total>262144)return E_OUTOFMEMORY;
+    if(!std::isfinite(bounds->left)||!std::isfinite(bounds->top)||!std::isfinite(bounds->right)||
+       !std::isfinite(bounds->bottom)||bounds->right<bounds->left||bounds->bottom<bounds->top)return E_INVALIDARG;
+    ComPtr<ID2D1PathGeometry> path;HRESULT hr=r->factory->CreatePathGeometry(&path);if(FAILED(hr))return hr;
+    ComPtr<ID2D1GeometrySink> sink;hr=path->Open(&sink);if(FAILED(hr))return hr;
+    sink->SetFillMode(fill?D2D1_FILL_MODE_WINDING:D2D1_FILL_MODE_ALTERNATE);
+    for(int i=0;i<count;i++)if(!std::isfinite(points[i].x)||!std::isfinite(points[i].y))return E_INVALIDARG;
+    bool open=false;
+    for(int i=0;i<count;i++){
+        int kind=types[i]&7;
+        if(kind==0){if(open)sink->EndFigure(D2D1_FIGURE_END_OPEN);sink->BeginFigure(points[i],D2D1_FIGURE_BEGIN_FILLED);open=true;}
+        else if(kind==1 && open)sink->AddLine(points[i]);
+        else if(kind==3 && open && i+2<count && (types[i+1]&7)==3 && (types[i+2]&7)==3 && !(types[i]&128) && !(types[i+1]&128)){
+            sink->AddBezier(D2D1::BezierSegment(points[i],points[i+1],points[i+2]));i+=2;
+        }else return E_INVALIDARG;
+        if(types[i]&128){sink->EndFigure(D2D1_FIGURE_END_CLOSED);open=false;}
+    }
+    if(open)sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    hr=sink->Close();if(FAILED(hr))return hr;
+    o=Outline();o.path=path;o.bounds=*bounds;o.points=count;return S_OK;
+}
+extern "C" HRESULT __cdecl DL_OutlineLyrics(Renderer* r,const OutlineCommand* commands,int count) noexcept {
+    if(!r || count<0 || count>8 || (count&&!commands))return E_INVALIDARG;
+    if(count && !r->ink){HRESULT hr=r->target->CreateSolidColorBrush(D2D1::ColorF(0,0,0),&r->ink);if(FAILED(hr))return hr;}
+    if(count && !r->roundStroke){auto p=D2D1::StrokeStyleProperties();p.lineJoin=D2D1_LINE_JOIN_ROUND;
+        HRESULT hr=r->factory->CreateStrokeStyle(p,nullptr,0,&r->roundStroke);if(FAILED(hr))return hr;}
+    if(count && !r->textLayer){HRESULT hr=r->target->CreateLayer(nullptr,&r->textLayer);if(FAILED(hr))return hr;}
+    for(int i=0;i<count;i++){
+        const auto& c=commands[i];
+        if(c.slot<0||c.slot>=24||!r->outlines[c.slot].path||!std::isfinite(c.x)||!std::isfinite(c.y)||
+           !std::isfinite(c.scale)||c.scale<=0||c.scale>8||!std::isfinite(c.opacity)||c.opacity<0||c.opacity>1||
+           !std::isfinite(c.stroke)||c.stroke<0||c.stroke>10||c.gradient<0||c.gradient>2)return E_INVALIDARG;
+        auto& o=r->outlines[c.slot];
+        if(c.gradient && (!o.gradient || o.color1!=c.color1 || o.color2!=c.color2 || o.gradientMode!=c.gradient)){
+            D2D1_GRADIENT_STOP stops[3]={{0,Color(c.color1)},{c.gradient==2?.5f:1.f,Color(c.color2)},{1,Color(c.color1)}};
+            ComPtr<ID2D1GradientStopCollection> collection;
+            HRESULT hr=r->target->CreateGradientStopCollection(stops,c.gradient==2?3:2,D2D1_GAMMA_2_2,D2D1_EXTEND_MODE_CLAMP,&collection);
+            if(FAILED(hr))return hr;
+            o.gradient.Reset();hr=r->target->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(
+                D2D1::Point2F(0,o.bounds.top),D2D1::Point2F(0,o.bounds.bottom)),collection.Get(),&o.gradient);
+            if(FAILED(hr))return hr;o.color1=c.color1;o.color2=c.color2;o.gradientMode=c.gradient;
+        }
+    }
+    r->outlineCount=count;if(count)memcpy(r->outlineCommands,commands,sizeof(OutlineCommand)*count);return S_OK;
 }
 static UINT Mix(UINT a, UINT b, float t) {
     UINT result = 0xff000000;
@@ -161,6 +227,27 @@ extern "C" HRESULT __cdecl DL_Draw(Renderer* r, const Scene* s, HDC diagnosticOu
         r->target->PushAxisAlignedClip(c.clip,D2D1_ANTIALIAS_MODE_ALIASED);
         r->target->DrawBitmap(r->text[c.slot].Get(),c.destination,c.opacity,
             c.nearest?D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR:D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        r->target->PopAxisAlignedClip();
+    }
+    r->target->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    for(int i=0;i<r->outlineCount;i++) {
+        const auto& c=r->outlineCommands[i];const auto& o=r->outlines[c.slot];
+        auto transform=D2D1::Matrix3x2F::Translation(-o.bounds.left,-o.bounds.top)*
+            D2D1::Matrix3x2F::Scale(c.scale,c.scale)*D2D1::Matrix3x2F::Translation(c.x,c.y);
+        r->target->PushAxisAlignedClip(c.clip,D2D1_ANTIALIAS_MODE_ALIASED);
+        // Opacity applies to the whole shadow/outline/fill group, like the old
+        // premultiplied bitmap. Per-brush opacity would change overlapping edges.
+        if(c.opacity<1)r->target->PushLayer(D2D1::LayerParameters(c.clip,nullptr,D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1::Matrix3x2F::Identity(),c.opacity),r->textLayer.Get());
+        r->target->SetTransform(transform*D2D1::Matrix3x2F::Translation(c.scale,2*c.scale));
+        r->ink->SetColor(D2D1::ColorF(0,0,0,170/255.f));r->target->FillGeometry(o.path.Get(),r->ink.Get());
+        r->target->SetTransform(transform);
+        r->ink->SetColor(Color(c.border,((c.border>>24)&255)/255.f));
+        r->target->DrawGeometry(o.path.Get(),r->ink.Get(),c.stroke,r->roundStroke.Get());
+        r->ink->SetColor(Color(c.color1));
+        r->target->FillGeometry(o.path.Get(),c.gradient?static_cast<ID2D1Brush*>(o.gradient.Get()):r->ink.Get());
+        r->target->SetTransform(D2D1::Matrix3x2F::Identity());
+        if(c.opacity<1)r->target->PopLayer();
         r->target->PopAxisAlignedClip();
     }
     // UI remains above the lyric layer, preserving queue/menu overlap order.
