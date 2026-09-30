@@ -14,6 +14,7 @@ namespace MusicBeePlugin
         private long _lastTimestamp;
         private int _lastRawPosition;
         private double _positionMs;
+        private bool _resumeBlend, _resumeSawAdvance;
         private readonly Queue<Sample> _samples = new Queue<Sample>();
         private struct Sample
         {
@@ -23,7 +24,7 @@ namespace MusicBeePlugin
 
         internal void Reset()
         {
-            _initialized = _playing = _anchored = false;
+            _initialized = _playing = _anchored = _resumeBlend = false;
             _lastTimestamp = 0;
             _lastRawPosition = 0;
             _positionMs = 0;
@@ -40,7 +41,7 @@ namespace MusicBeePlugin
         }
 
         internal int PositionAt(int rawPositionMs, long timestamp,
-            long frequency, bool playing)
+            long frequency, bool playing, bool smoothResume = false)
         {
             if (frequency <= 0) throw new ArgumentOutOfRangeException(nameof(frequency));
             rawPositionMs = Math.Max(0, rawPositionMs);
@@ -54,9 +55,11 @@ namespace MusicBeePlugin
             }
             else if (!playing || !_playing)
             {
-                // Pausing, resuming, or seeking while paused starts from the
-                // player's actual position instead of an old elapsed clock.
-                _positionMs = rawPositionMs;
+                // Paused seeks use the actual position. Optional resume easing
+                // starts from the settled paused display, before a buffered step.
+                _resumeBlend = smoothResume && playing && !_playing;
+                _resumeSawAdvance = rawPositionMs > _lastRawPosition;
+                _positionMs = _resumeBlend ? _positionMs : rawPositionMs;
                 _playing = playing;
                 _anchored = false;
                 _samples.Clear();
@@ -65,11 +68,21 @@ namespace MusicBeePlugin
             {
                 var elapsedMs = (timestamp - _lastTimestamp) * 1000d / frequency;
                 var predicted = _positionMs + elapsedMs;
-                if (rawPositionMs < _lastRawPosition - 100 ||
+                if (_resumeBlend && rawPositionMs >= _lastRawPosition - 100 && Math.Abs(rawPositionMs - predicted) < 1000)
+                {
+                    // A resume often publishes a buffered position in one large step.
+                    // Ease that display-only correction; never seek or change saved phase.
+                    if (rawPositionMs > _lastRawPosition) _resumeSawAdvance = true;
+                    var difference = rawPositionMs - predicted;
+                    _positionMs = predicted + Math.Max(-elapsedMs * .2, Math.Min(elapsedMs * .2, difference));
+                    if (_resumeSawAdvance && Math.Abs(difference) < 25) { _resumeBlend = false; _anchored = false; }
+                }
+                else if (rawPositionMs < _lastRawPosition - 100 ||
                     rawPositionMs > predicted + 250 ||
                     predicted - rawPositionMs > 750)
                 {
                     // A real seek or stalled player must replace the estimate.
+                    _resumeBlend = false;
                     _positionMs = rawPositionMs;
                     _anchored = false;
                     _samples.Clear();

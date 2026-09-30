@@ -19,6 +19,7 @@ namespace MusicBeePlugin
             AsyncPlaybackChecks.Run();
             RampShortcutChecks.Run();
             PreviewChecks.Run();
+            AccentMotionChecks.Run();
             BpmLookupChecks.Run();
             TempoMapChecks.Run();
             RhythmChecks.Run();

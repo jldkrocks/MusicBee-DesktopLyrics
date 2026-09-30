@@ -32,19 +32,25 @@ internal static class PreviewChecks
         broken.Start(2, 10); Check(!broken.Active, "Seek failure must stop preview.");
         var map = new PartyTempoMap { TrackUrl = "test" }; map.Sections.Add(new PartyTempoSection {Bpm=100});
         map.Sections.Add(new PartyTempoSection {StartSeconds=10, Bpm=90});
-        double duration = 0; double? position = 0; bool playing = false; int lastSeek = -1;
-        using (var editor = new FrmPartyTempoMap(map, "Preview", () => position, t=>lastSeek=t, m=>{}, 0, ()=>{}, ()=>playing, ()=>duration))
+        double duration = 0; double? position = 0; bool playing = false; bool busy = false; bool displayPlaying = false; int lastSeek = -1;
+        using (var editor = new FrmPartyTempoMap(map, "Preview", () => position, t=>lastSeek=t, m=>{}, 0, ()=>{}, ()=>playing, ()=>duration, null, ()=>busy, ()=>displayPlaying))
         {
             duration = 30; Call(editor,"PollPlayback");
             Check(((PartyTimeline)Field(editor,"_timeline")).Duration == 30, "Unknown duration must recover.");
             var grid = (DataGridView)Field(editor,"_grid");
             Call(editor,"SeekDoubleClickedRow",grid,new DataGridViewCellEventArgs(0,1)); Check(lastSeek == 10000, "Double-click numeric row seeks.");
             Call(editor,"SeekDoubleClickedRow",grid,new DataGridViewCellEventArgs(3,0)); Check(lastSeek == 10000, "Combo double-click must not seek.");
-            playing = true; Thread.Sleep(110); var shown = (double?)Call(editor,"EditingPosition");
+            playing = displayPlaying = true; Thread.Sleep(110); var shown = (double?)Call(editor,"EditingPosition");
             Check(shown > 10.07 && shown < 10.9, "Playing seek cursor must advance instead of freezing for a second.");
             position = shown; Call(editor,"EditingPosition"); Check(Field(editor,"_pendingSeek") == null, "Acknowledged seek must release optimistic cursor.");
-            playing = false; Call(editor,"SeekTo",12.345d); Call(editor,"SeekRelative",.01d); Call(editor,"SeekRelative",.01d);
+            playing = displayPlaying = false; Call(editor,"SeekTo",12.345d); Call(editor,"SeekRelative",.01d); Call(editor,"SeekRelative",.01d);
             Check(lastSeek == 12365, "Paused precision steps must accumulate despite stale snapshot.");
+            Call(editor,"PollPlayback"); var play=(Button)Field(editor,"_play"); var originalWidth=play.Width;
+            busy=true; displayPlaying=true; Call(editor,"PollPlayback");
+            Check(play.Text=="Pause" && play.Width==originalWidth && play.Enabled && ((Button)Field(editor,"_back")).Enabled,"Pending commands must not flicker/resize/grey out controls.");
+            Call(editor,"SeekTo",20d); Check(lastSeek==12365,"Stable enabled controls must still reject competing seeks.");
+            busy=false; displayPlaying=false; Call(editor,"PollPlayback");
+            Check(play.Text=="Play" && play.Width==originalWidth,"Play label must keep stable layout.");
         }
         Console.WriteLine("Preview command ordering, early stop, track changes, failures, precise seeking and duration recovery passed.");
     }

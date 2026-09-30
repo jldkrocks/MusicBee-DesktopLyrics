@@ -79,8 +79,9 @@ internal static class RestAccentChecks
             editor.Opacity = 0; editor.Show(); Application.DoEvents();
             ((Button)Field(editor, "_add")).PerformClick();
             if (cues.Rows.Count != 2 || grid.Rows.Count != 2) throw new Exception("Add must target the selected tab");
+            cues.Rows[1].Cells[4].Value = "Alternate sides";
             Call(editor, "SaveMap");
-            if (saved == null || saved.Version != 5 || saved.Accents.Count != 2 || editor.IsDisposed) throw new Exception("Save must preserve both tabs and keep editor open");
+            if (saved == null || saved.Version != 6 || saved.Accents.Count != 2 || saved.Accents[1].Motion != PartyAccentMotion.Alternate || editor.IsDisposed) throw new Exception("Save must preserve both tabs and keep editor open");
             Near(saved.Accents[1].TimeSeconds, 5.25, "Capture cue at playhead");
             var timeline = (PartyTimeline)Field(editor, "_timeline");
             if (timeline.Accents.Count != 2 || timeline.Markers[1].Style != PartyDanceStyle.Rest) throw new Exception("Timeline markers missing");

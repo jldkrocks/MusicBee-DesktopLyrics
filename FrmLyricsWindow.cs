@@ -853,7 +853,7 @@ namespace MusicBeePlugin
                 {
                     if (!editingCurrentSong()) { complete(false); return; }
                     RequestPlayback(playing, complete, track);
-                }, () => _playCommandPending)) editor.ShowDialog(this);
+                }, () => _playCommandPending, () => _playState == Plugin.PlayState.Playing)) editor.ShowDialog(this);
         }
 
         private void OpenPartyTempoEditor()
@@ -1155,7 +1155,7 @@ namespace MusicBeePlugin
         {
             var rawPosition = Math.Max(0, _playback.Latest.Position);
             return _partyClock.PositionAt(rawPosition, timestamp,
-                Stopwatch.Frequency, _playState == Plugin.PlayState.Playing);
+                Stopwatch.Frequency, _playState == Plugin.PlayState.Playing, true);
         }
 
         private void RefreshPartyLayout()

@@ -20,6 +20,8 @@ namespace MusicBeePlugin
         private readonly Action<PartyTempoMap> _save;
         private readonly Action _togglePlayback;
         private readonly Func<bool> _playing;
+        private readonly Func<bool> _displayPlaying;
+        private readonly PartyPlaybackClock _cursorClock = new PartyPlaybackClock();
         private readonly Func<double> _duration;
         private readonly Func<bool> _playbackBusy;
         private readonly PartyPreviewSession _preview;
@@ -35,6 +37,7 @@ namespace MusicBeePlugin
         private readonly System.Diagnostics.Stopwatch _seekAge = new System.Diagnostics.Stopwatch();
         private double? _pendingSeek;
         private bool _dirty, _trackWasAvailable = true;
+        private static readonly string[] AccentMotions = { "Bop (original)", "Rebound", "Left hit", "Right hit", "Alternate sides" };
         private static readonly string[] Styles = { "Normal", "Side to side", "Hold pose", "Rest (keep counting)" };
 
         private static readonly string[] Speeds = { "Half (0.5x)", "Normal (1x)", "Double (2x)" };
@@ -44,10 +47,11 @@ namespace MusicBeePlugin
         internal FrmPartyTempoMap(PartyTempoMap map, string title, Func<double?> position,
             Action<int> seek, Action<PartyTempoMap> save, double duration,
             Action togglePlayback, Func<bool> playing, Func<double> durationProvider = null,
-            Action<bool, Action<bool>> setPlaying = null, Func<bool> playbackBusy = null)
+            Action<bool, Action<bool>> setPlaying = null, Func<bool> playbackBusy = null, Func<bool> displayPlaying = null)
         {
             _source = map; _position = position; _seek = seek; _save = save;
-            _togglePlayback = togglePlayback; _playing = playing;
+            _togglePlayback = togglePlayback; _playing = playing; _displayPlaying = displayPlaying ?? playing;
+            DoubleBuffered = true;
             _duration = durationProvider ?? (() => duration); _playbackBusy = playbackBusy ?? (() => false);
             _preview = new PartyPreviewSession(setPlaying ?? ((wanted, complete) => { if (_playing() != wanted) _togglePlayback(); complete(true); }),
                 seconds => SeekCore(seconds, true), () => !IsDisposed && _position().HasValue,
@@ -130,7 +134,8 @@ namespace MusicBeePlugin
             ConfigureSeekNumber(_seekStep, 0.01m, 5, 0.01m, 0.1m, 2);
             transport.Controls.Add(_seekStep);
             _back = AddButton(transport, "- step", () => SeekRelative(-(double)_seekStep.Value));
-            _play = AddButton(transport, "Play / pause", () => { try { _togglePlayback(); PollPlayback(); } catch (Exception ex) { _status.Text = ex.Message; } });
+            _play = AddButton(transport, "Play / pause", () => { try { if (_playbackBusy()) return; _togglePlayback(); PollPlayback(); } catch (Exception ex) { _status.Text = ex.Message; } });
+            _play.AutoSize = false; _play.Width = 90;
             _forward = AddButton(transport, "+ step", () => SeekRelative((double)_seekStep.Value));
             transport.Controls.Add(new Label { Text = "Seek to (s)", AutoSize = true, Margin = new Padding(15, 9, 3, 0) });
             ConfigureSeekNumber(_seekTime, 0, (decimal)Math.Max(0, duration), 0.001m,
@@ -138,7 +143,7 @@ namespace MusicBeePlugin
             _seekTime.Width = 105;
             transport.Controls.Add(_seekTime);
             _seekExact = AddButton(transport, "Seek", () => SeekTo((double)_seekTime.Value));
-            _previewButton = AddButton(transport, "Preview 2 s", () => _preview.Start((double)_seekTime.Value, _timeline.Duration));
+            _previewButton = AddButton(transport, "Preview 2 s", () => { if (!_playbackBusy() || _preview.Active) _preview.Start((double)_seekTime.Value, _timeline.Duration); });
             _tips.SetToolTip(_previewButton, "Hear 0.5 s before and 1.5 s after the Seek to time. Playback then pauses and returns to that exact time. Click again to stop early. Preview uses saved changes; Save first to audition edits.");
             _seekTime.KeyDown += (sender, args) =>
             {
@@ -155,7 +160,7 @@ namespace MusicBeePlugin
                 if (!now.HasValue) { _status.Text = "Play the original song to capture its position."; return; }
                 if (_tabs.SelectedIndex == 1)
                 {
-                    _accentGrid.Rows.Add(Math.Round(now.Value, 3).ToString(CultureInfo.CurrentCulture), 1.7.ToString(CultureInfo.CurrentCulture), 0.1.ToString(CultureInfo.CurrentCulture), "0");
+                    _accentGrid.Rows.Add(Math.Round(now.Value, 3).ToString(CultureInfo.CurrentCulture), 1.7.ToString(CultureInfo.CurrentCulture), 0.1.ToString(CultureInfo.CurrentCulture), "0", AccentMotions[0]);
                     _accentGrid.CurrentCell = _accentGrid.Rows[_accentGrid.Rows.Count - 1].Cells[0];
                     MarkDirty(); return;
                 }
@@ -257,14 +262,18 @@ namespace MusicBeePlugin
             _accentGrid.Columns.Add("strength", "Strength");
             _accentGrid.Columns.Add("prepare", "Lead-in (s)");
             _accentGrid.Columns.Add("hold", "Hold after hit (s)");
+            _accentGrid.Columns.Add(new DataGridViewComboBoxColumn { Name = "motion", HeaderText = "Motion", DataSource = AccentMotions, FillWeight = 155 });
+            _accentGrid.Columns[4].ToolTipText = "Bop preserves the original squash. Rebound adds a deeper landing and recovery bounce. Left/Right hit selects the blue dancer's raised-hand side on the hit; the pink dancer mirrors it. Alternate sides switches left/right on each Alternate cue in song order, including across rests; seeking gives the same result. During Rest/Hold the side landing stays until the next directional cue or section. These motions never reset the beat. Save applies.";
+            _accentGrid.CellClick += OpenComboOnClick;
+            _accentGrid.CurrentCellDirtyStateChanged += (sender, args) => { if (_accentGrid.IsCurrentCellDirty && _accentGrid.CurrentCell is DataGridViewComboBoxCell) _accentGrid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
             _accentGrid.Columns[0].ToolTipText = "Double-click a row to seek. Exact song time of the deepest downward bop. Not when you click Save. Cues do not change BPM, rhythm or beat alignment. They can also add a hit during Rest or Hold.";
             _accentGrid.Columns[1].ToolTipText = "Bop strength: 0.5 = light, 1 = regular, 1.7 = strong (default), 2.5 = maximum. An accent emphasizes the current pose without forcing another side landing.";
-            _accentGrid.Columns[2].ToolTipText = "Seconds to crouch into the hit, 0-1. Default 0.1. Zero gives an immediate hit. The deepest dip occurs at Hit time, followed by a 0.22 s recovery.";
+            _accentGrid.Columns[2].ToolTipText = "Seconds to crouch into the hit, 0-1. Default 0.1. Zero gives an immediate hit. The deepest dip occurs at Hit time, followed by a 0.22 s recovery for Bop or a 0.42 s rebound for the other motions.";
             _accentGrid.Columns[3].ToolTipText = "Optional 0-5 seconds to keep the landing pose and dip after the hit. Zero recovers immediately. The beat keeps counting, then the normal pose sequence resumes. For a longer silent passage use Rest in Sections.";
             foreach (DataGridViewColumn c in _accentGrid.Columns) c.SortMode = DataGridViewColumnSortMode.NotSortable;
             foreach (var cue in map.Accents)
                 _accentGrid.Rows.Add(cue.TimeSeconds.ToString("0.#########", CultureInfo.CurrentCulture), cue.Strength.ToString(CultureInfo.CurrentCulture),
-                    cue.PrepareSeconds.ToString(CultureInfo.CurrentCulture), cue.HoldSeconds.ToString(CultureInfo.CurrentCulture));
+                    cue.PrepareSeconds.ToString(CultureInfo.CurrentCulture), cue.HoldSeconds.ToString(CultureInfo.CurrentCulture), AccentMotions[(int)cue.Motion]);
             _accentGrid.CellToolTipTextNeeded += (sender, args) => { if (args.ColumnIndex >= 0) args.ToolTipText = _accentGrid.Columns[args.ColumnIndex].ToolTipText; };
             _accentGrid.CellValueChanged += (sender, args) => MarkDirty();
             _accentGrid.SelectionChanged += (sender, args) => RefreshMarkers();
@@ -283,12 +292,13 @@ namespace MusicBeePlugin
         private void OpenComboOnClick(object sender, DataGridViewCellEventArgs args)
         {
             if (args.RowIndex < 0 || args.ColumnIndex < 0 ||
-                !(_grid[args.ColumnIndex, args.RowIndex] is DataGridViewComboBoxCell)) return;
-            var cell = _grid[args.ColumnIndex, args.RowIndex];
+                !(((DataGridView)sender)[args.ColumnIndex, args.RowIndex] is DataGridViewComboBoxCell)) return;
+            var grid = (DataGridView)sender;
+            var cell = grid[args.ColumnIndex, args.RowIndex];
             BeginInvoke(new Action(() =>
             {
-                if (IsDisposed || _grid.IsDisposed || _grid.CurrentCell != cell || cell.ReadOnly) return;
-                if (_grid.BeginEdit(true) && _grid.EditingControl is ComboBox combo && !combo.DroppedDown)
+                if (IsDisposed || grid.IsDisposed || grid.CurrentCell != cell || cell.ReadOnly) return;
+                if (grid.BeginEdit(true) && grid.EditingControl is ComboBox combo && !combo.DroppedDown)
                     combo.DroppedDown = true;
             }));
         }
@@ -306,7 +316,7 @@ namespace MusicBeePlugin
         private double? EditingPosition()
         {
             var reported = _position();
-            if (!reported.HasValue) { _pendingSeek = null; return null; }
+            if (!reported.HasValue) { _pendingSeek = null; _cursorClock.Reset(); return null; }
             if (_pendingSeek.HasValue && _seekAge.ElapsedMilliseconds < 1000)
             {
                 var expected = _pendingSeek.Value + (_playing() ? _seekAge.Elapsed.TotalSeconds : 0);
@@ -316,7 +326,8 @@ namespace MusicBeePlugin
                 else return Math.Min(_timeline.Duration, expected);
             }
             _pendingSeek = null;
-            return reported;
+            return _cursorClock.PositionAt((int)Math.Round(reported.Value * 1000),
+                System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency, _displayPlaying(), true) / 1000d;
         }
 
         private static PartyDanceStyle StyleAt(DataGridViewRow row)
@@ -410,14 +421,15 @@ namespace MusicBeePlugin
                     if (durationNow > 0 && Math.Abs(durationNow - _timeline.Duration) > .001)
                     { _timeline.Duration = durationNow; _seekTime.Maximum = (decimal)durationNow; RefreshMarkers(); }
                 }
-                _preview.Tick(position);
+                _preview.Tick(_position());
                 if (_closeAfterPreview && !_preview.Active) { _closeAfterPreview = false; Close(); return; }
-                var transportReady = available && !_playbackBusy() && !_preview.Active;
+                var transportReady = available && !_preview.Active;
                 _timeline.Enabled = _back.Enabled = _forward.Enabled = _seekRow.Enabled = _seekExact.Enabled = _seekTime.Enabled = _seekStep.Enabled = transportReady && _timeline.Duration > 0;
-                _play.Enabled = transportReady; _add.Enabled = available && !_preview.Active;
-                _previewButton.Enabled = available && (_preview.Active || (!_playbackBusy() && _timeline.Duration > 0));
+                _play.Enabled = available && !_preview.Active; _add.Enabled = available && !_preview.Active;
+                _previewButton.Enabled = available && (_preview.Active || _timeline.Duration > 0);
                 _previewButton.Text = _preview.Active ? "Stop preview" : "Preview 2 s";
-                _play.Text = _playbackBusy() ? "Working..." : available && _playing() ? "Pause" : "Play";
+                var playText = available && _displayPlaying() ? "Pause" : "Play";
+                if (_play.Text != playText) _play.Text = playText;
                 if (available && !_timeline.Scrubbing) _timeline.Position = position.Value;
                 if (available && !_trackWasAvailable) _status.Text = _dirty ? "Original song ready — unsaved edits." : "Original song ready.";
                 _trackWasAvailable = available;
@@ -446,7 +458,7 @@ namespace MusicBeePlugin
                 var milliseconds = checked((int)Math.Round(clamped * 1000));
                 _seek(milliseconds);
                 clamped = milliseconds / 1000d;
-                _pendingSeek = clamped; _seekAge.Restart();
+                _pendingSeek = clamped; _seekAge.Restart(); _cursorClock.Reset();
                 _seekTime.Value = Math.Max(_seekTime.Minimum, Math.Min(_seekTime.Maximum, (decimal)clamped));
                 _timeline.Position = clamped; _timeline.Invalidate();
             }
@@ -509,7 +521,7 @@ namespace MusicBeePlugin
             {
                 _grid.EndEdit(); _accentGrid.EndEdit();
                 NormalizeLastPoint();
-                var map = new PartyTempoMap { Version = 5, TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
+                var map = new PartyTempoMap { Version = 6, TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
                 foreach (DataGridViewRow row in _grid.Rows)
                     map.Sections.Add(new PartyTempoSection { StartSeconds = Number(row, 0),
                         Bpm = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? Number(row, 9) : Number(row, 1),
@@ -522,7 +534,8 @@ namespace MusicBeePlugin
                         SwingPercent = Number(row, 7), Speed = SpeedAt(row) });
                 foreach (DataGridViewRow row in _accentGrid.Rows)
                     map.Accents.Add(new PartyAccentCue { TimeSeconds = Number(row, 0), Strength = Number(row, 1),
-                        PrepareSeconds = Number(row, 2), HoldSeconds = Number(row, 3) });
+                        PrepareSeconds = Number(row, 2), HoldSeconds = Number(row, 3),
+                        Motion = (PartyAccentMotion)Math.Max(0, Array.IndexOf(AccentMotions, Convert.ToString(row.Cells[4].Value))) });
                 map.Accents = map.Accents.OrderBy(c => c.TimeSeconds).ToList();
                 map.Sections = map.Sections.OrderBy(s => s.StartSeconds).ToList();
                 map.Validate();

@@ -22,8 +22,11 @@ namespace MusicBeePlugin
         public bool CountIn;
     }
 
+    internal enum PartyAccentMotion { Bop, Rebound, Left, Right, Alternate }
+
     internal sealed class PartyAccentCue
     {
+        public PartyAccentMotion Motion;
         public double TimeSeconds;
         public double Strength = 1.7;
         public double PrepareSeconds = 0.1;
@@ -42,7 +45,7 @@ namespace MusicBeePlugin
 
         internal void Validate()
         {
-            if ((Version != 1 && Version != 2 && Version != 3 && Version != 4 && Version != 5) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
+            if ((Version != 1 && Version != 2 && Version != 3 && Version != 4 && Version != 5 && Version != 6) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
                 Sections.Count == 0 || Sections.Count > 500 || !Finite(InitialBeat))
                 throw new ArgumentException("The map needs a song and 1-500 sections.");
             if (Accents == null || Accents.Count > 1000)
@@ -50,7 +53,7 @@ namespace MusicBeePlugin
             double lastCue = -1;
             foreach (var cue in Accents)
             {
-                if (cue == null || !Finite(cue.TimeSeconds) || cue.TimeSeconds < 0 || cue.TimeSeconds > 604800 ||
+                if (cue == null || !Enum.IsDefined(typeof(PartyAccentMotion), cue.Motion) || !Finite(cue.TimeSeconds) || cue.TimeSeconds < 0 || cue.TimeSeconds > 604800 ||
                     cue.TimeSeconds <= lastCue || !Finite(cue.Strength) || cue.Strength < 0.5 || cue.Strength > 2.5 ||
                     !Finite(cue.PrepareSeconds) || cue.PrepareSeconds < 0 || cue.PrepareSeconds > 1 ||
                     !Finite(cue.HoldSeconds) || cue.HoldSeconds < 0 || cue.HoldSeconds > 5)
@@ -103,23 +106,54 @@ namespace MusicBeePlugin
             var pose = CoreAt(seconds);
             PartyAccentCue strongest = null;
             double weight = 0, amount = 0;
+            int alternateIndex = 0, chosenSide = 0;
+            var heldStart = -1d;
+            if (pose.Held)
+                foreach (var section in Sections)
+                {
+                    if (section.StartSeconds > seconds) break;
+                    if (section.Style != PartyDanceStyle.Rest && section.Style != PartyDanceStyle.Hold) heldStart = -1;
+                    else if (heldStart < 0) heldStart = section.StartSeconds;
+                }
             foreach (var cue in Accents)
             {
+                var side = cue.Motion == PartyAccentMotion.Left ? -1 : cue.Motion == PartyAccentMotion.Right ? 1 :
+                    cue.Motion == PartyAccentMotion.Alternate ? ((alternateIndex++ % 2 == 0) ? -1 : 1) : 0;
+                if (pose.Held && side != 0 && cue.TimeSeconds >= heldStart && cue.TimeSeconds <= seconds)
+                    pose.Frame = side < 0 ? 6 : 0;
                 var relative = seconds - cue.TimeSeconds;
-                if (relative < -cue.PrepareSeconds || relative >= cue.HoldSeconds + PartyAccentCue.ReleaseSeconds) continue;
+                if (relative < -cue.PrepareSeconds || relative >= cue.HoldSeconds + (cue.Motion == PartyAccentMotion.Bop ? PartyAccentCue.ReleaseSeconds : .42)) continue;
+                var release = cue.Motion == PartyAccentMotion.Bop ? PartyAccentCue.ReleaseSeconds : .42;
                 var envelope = relative < 0 ? SmoothStep(1 + relative / cue.PrepareSeconds) :
-                    relative <= cue.HoldSeconds ? 1 : 1 - SmoothStep((relative - cue.HoldSeconds) / PartyAccentCue.ReleaseSeconds);
+                    relative <= cue.HoldSeconds ? 1 : 1 - SmoothStep((relative - cue.HoldSeconds) / release);
                 if (envelope * cue.Strength <= amount) continue;
-                strongest = cue; weight = envelope; amount = envelope * cue.Strength;
+                strongest = cue; weight = envelope; amount = envelope * cue.Strength; chosenSide = side;
             }
             if (strongest != null)
             {
                 pose.Impact = (float)(pose.Impact * (1 - weight) + amount);
                 pose.Anticipation *= (float)(1 - weight);
                 pose.Sway *= (float)(1 - weight);
+                if (strongest.Motion != PartyAccentMotion.Bop)
+                {
+                    var relative = seconds - strongest.TimeSeconds;
+                    var recovery = relative - strongest.HoldSeconds;
+                    // Deep landing, then a smaller second crouch for a visible rebound.
+                    // Keep the feet planted: stretching above the source bitmap would clip.
+                    var hit = relative <= strongest.HoldSeconds ? weight : 1 - SmoothStep(recovery / .15);
+                    var rebound = recovery <= .15 ? 0 : Math.Sin(Math.PI * Math.Min(1, (recovery - .15) / .27));
+                    pose.Impact = (float)(pose.Impact * (1 - weight) + strongest.Strength * (1.35 * hit + .32 * rebound));
+                    if (chosenSide != 0 && relative >= 0)
+                        pose.Frame = chosenSide < 0 ? 6 : 0;
+                    else if (relative >= 0 && !pose.Held)
+                        pose.Frame = CoreAt(strongest.TimeSeconds).Frame;
+                    // Use the side drawing itself for lateral emphasis, without translating
+                    // outside the existing dancer surface or changing its screen position.
+                    pose.Anticipation *= (float)(1 - weight);
+                }
                 // A cue never modifies beat integration. Only an explicit post-hit
                 // hold pins the drawing; release returns to the running timeline.
-                if (strongest.HoldSeconds > 0 && seconds >= strongest.TimeSeconds &&
+                if (!pose.Held && strongest.Motion == PartyAccentMotion.Bop && strongest.HoldSeconds > 0 && seconds >= strongest.TimeSeconds &&
                     seconds < strongest.TimeSeconds + strongest.HoldSeconds)
                     pose.Frame = CoreAt(strongest.TimeSeconds).Frame;
             }
