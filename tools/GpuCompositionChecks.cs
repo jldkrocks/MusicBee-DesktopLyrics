@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
@@ -49,6 +50,19 @@ class GpuCompositionChecks
             }
             else {
                 PixelCompare(assembly,form);
+                foreach(var size in new[]{new Size(814,272),new Size(3840,2160)}) {
+                    form.WindowState=size.Width>1000?FormWindowState.Maximized:FormWindowState.Normal;
+                    form.ClientSize=size;
+                    Set(form,"_previousLine1","An earlier lyric makes room for the next line");
+                    Set(form,"_previousNextLine",Get(form,"_line1"));
+                    Set(form,"_previousLine2",null);
+                    PixelCompare(assembly,form,.25);
+                    Set(form,"_previousLine2","The previous translation fades away");
+                    PixelCompare(assembly,form,.65);
+                }
+                Set(form,"_transitionStarted",0L);
+                form.WindowState=FormWindowState.Normal;form.ClientSize=new Size(960,540);
+                Call(form,"TryDrawGpu");
                 var gpu=Get(form,"_gpu");var bitmap=(Bitmap)gpu.GetType().GetProperty("Foreground",Flags).GetValue(gpu);
                 {
                     var generation=(long)Get(gpu,"_capture");
@@ -73,6 +87,7 @@ class GpuCompositionChecks
                 Check(!(bool)Call(form,"TryDrawGpu"),"Device-loss HRESULT must fall back");
                 Check(Get(form,"_gpu")==null && (bool)Get(form,"_gpuFailed"),"Failed resources must release and latch");
                 Check(!(bool)Call(form,"TryDrawGpu"),"Failure must not retry every frame");
+                TextureBudget(assembly,form);
                 Console.WriteLine("Hardware composition, pixels, cache, repeated resize and injected device-loss fallback passed.");
             }
             using(var fallback=new Bitmap(form.ClientSize.Width,form.ClientSize.Height))
@@ -89,16 +104,46 @@ class GpuCompositionChecks
         for(int y=0;y<a.Height;y+=3)for(int x=0;x<a.Width;x+=3)if(a.GetPixel(x,y)!=b.GetPixel(x,y))return false;
         return true;
     }
-    static void PixelCompare(Assembly assembly,Form form)
+    static void TextureBudget(Assembly assembly,Form form)
+    {
+        using(var renderer=(IDisposable)Activator.CreateInstance(assembly.GetType("MusicBeePlugin.GpuSceneRenderer"),Flags,null,
+            new object[]{form.Handle,form.ClientSize,false},null)) {
+            for(int frame=0;frame<40;frame++) {
+                Call(renderer,"BeginLyrics");
+                // Distinct 4 MiB rasters force byte-budget eviction before the
+                // 24-slot cap. Disposing these borrowed rasters is safe after upload.
+                using(var bitmap=new Bitmap(1024,1024,PixelFormat.Format32bppPArgb))
+                    Call(renderer,"AddText",bitmap,new RectangleF(0,0,100,100),new RectangleF(0,0,100,100),1f,true);
+                Call(renderer,"CommitLyrics");
+                Check((int)Get(renderer,"_textureBytes")<=24*1024*1024,"Text cache exceeded 24 MiB");
+            }
+            Check(((Bitmap[])Get(renderer,"_textImages")).Count(b=>b!=null)<=6,"Byte-budget eviction failed");
+        }
+        Console.WriteLine("Lyric texture cache remained bounded through repeated uploads/evictions.");
+    }
+    static void PixelCompare(Assembly assembly,Form form,double? progress=null)
     {
         using(var expected=new Bitmap(form.ClientSize.Width,form.ClientSize.Height))
         using(var actual=new Bitmap(expected.Width,expected.Height))
         using(var renderer=(IDisposable)Activator.CreateInstance(assembly.GetType("MusicBeePlugin.GpuSceneRenderer"),Flags,null,
             new object[]{form.Handle,form.ClientSize,true},null))
         {
-            using(var g=Graphics.FromImage(expected))Call(form,"OnPaint",new PaintEventArgs(g,form.ClientRectangle));
+            long instant=Stopwatch.GetTimestamp();
+            var previous=new[]{Get(form,"_previousLine1"),Get(form,"_previousLine2"),Get(form,"_previousNextLine")};
+            Action reset=()=> {
+                Set(form,"_previousLine1",previous[0]);Set(form,"_previousLine2",previous[1]);Set(form,"_previousNextLine",previous[2]);
+                Set(form,"_transitionStarted",progress.HasValue?instant-(long)(progress.Value*.3*Stopwatch.Frequency):0L);
+            };
+            // Warm GDI caches before fixing the comparison phase. Its initial
+            // full-4K backdrop allocation can outlast an entire transition.
+            for(int warm=0;warm<2;warm++) {
+                reset();using(var g=Graphics.FromImage(expected))Call(form,"DrawScene",new PaintEventArgs(g,form.ClientRectangle),false,instant);
+            }
+            reset();
+            using(var g=Graphics.FromImage(expected))Call(form,"DrawScene",new PaintEventArgs(g,form.ClientRectangle),false,instant);
             var foreground=(Bitmap)renderer.GetType().GetProperty("Foreground",Flags).GetValue(renderer);
-            Call(form,"RasterGpuForeground",renderer);
+            reset();
+            Call(form,"RasterGpuForeground",renderer,instant);
             Call(renderer,"Upload");
             using(var g=Graphics.FromImage(actual)) {
                 var dc=g.GetHdc();
@@ -106,13 +151,15 @@ class GpuCompositionChecks
                 finally{g.ReleaseHdc(dc);}
             }
             double error=0;int count=0;
-            for(int y=0;y<actual.Height;y++)for(int x=0;x<actual.Width;x++) {
+            int step=actual.Width>1000?2:1;
+            for(int y=0;y<actual.Height;y+=step)for(int x=0;x<actual.Width;x+=step) {
                 var a=actual.GetPixel(x,y);var b=expected.GetPixel(x,y);
                 error+=Math.Abs(a.R-b.R)+Math.Abs(a.G-b.G)+Math.Abs(a.B-b.B);count+=3;
             }
             Console.WriteLine("RGB mean absolute error (0-255): "+(error/count).ToString("F3"));
             var output=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"gpu-check-images");Directory.CreateDirectory(output);
-            expected.Save(Path.Combine(output,"gdi.png"),ImageFormat.Png);actual.Save(Path.Combine(output,"gpu.png"),ImageFormat.Png);
+            var label=expected.Width+"-"+(progress.HasValue?progress.Value.ToString("F2",System.Globalization.CultureInfo.InvariantCulture):"still");
+            expected.Save(Path.Combine(output,"gdi-"+label+".png"),ImageFormat.Png);actual.Save(Path.Combine(output,"gpu-"+label+".png"),ImageFormat.Png);
             Check(error/count<3,"GPU appearance differs materially from GDI; inspect pixel comparison");
         }
     }

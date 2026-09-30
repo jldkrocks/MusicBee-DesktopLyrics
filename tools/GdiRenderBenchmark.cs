@@ -36,6 +36,7 @@ class GdiRenderBenchmark
         Directory.CreateDirectory(output);
         bool gpuMode = args.Length > 1 && args[1] == "gpu";
         bool paced = args.Length > 2 && args[2] == "paced";
+        bool freshLyrics = args.Length > 3 && args[3] == "fresh";
         var assembly = typeof(Plugin).Assembly;
         var formType = assembly.GetType("MusicBeePlugin.FrmLyricsWindow");
         var profileType = assembly.GetType("MusicBeePlugin.RenderProfile");
@@ -87,6 +88,7 @@ class GdiRenderBenchmark
                     { "run", run }, { "workload", "all layers; lyric transition every 2 s, uncached palette path 1 s every 8 s; two hidden layered dancer uploads" },
                     { "process_bits", IntPtr.Size * 8 }, { "logical_processors", Environment.ProcessorCount },
                     { "paced_60_workload", paced },
+                    { "fresh_lyrics_every_2s", freshLyrics },
                     { "remote_session", SystemInformation.TerminalServerSession }
                 };
                 var profile = Activator.CreateInstance(profileType, Fields, null, new object[] { metadata, null, null, 30d, 2d, true }, null);
@@ -109,6 +111,12 @@ class GdiRenderBenchmark
                             nextFrame = watch.Elapsed.TotalSeconds + 1d / 60;
                         }
                         double t = watch.Elapsed.TotalSeconds;
+                        if(freshLyrics) {
+                            int verse=(int)(t/2);
+                            Set(form,"_line1","Current lyrics stay readable while the music and dancers move " + verse);
+                            Set(form,"_line2","A translated line with enough words to exercise a large lyric card " + verse);
+                            Set(form,"_nextLine","Current lyrics stay readable while the music and dancers move " + (verse+1));
+                        }
                         if (t % 2 < .3) {
                             Set(form, "_previousLine1", "An earlier lyric fades smoothly away");
                             Set(form, "_previousLine2", "The previous translation fades away");
@@ -154,7 +162,7 @@ class GdiRenderBenchmark
             new object[] { form.Handle, output.Size, true }, null))
         {
             var foreground = (Bitmap)type.GetProperty("Foreground", Fields).GetValue(renderer);
-            Call(form, "RasterGpuForeground", renderer);
+            Call(form, "RasterGpuForeground", renderer, null);
             Call(renderer, "Upload");
             using (var g = Graphics.FromImage(output)) {
                 var dc = g.GetHdc();

@@ -24,14 +24,14 @@ namespace MusicBeePlugin
         private RenderProfile _renderProfile;
         private GpuSceneRenderer _gpu;
         private GpuSceneRenderer _gpuLyrics;
-        private void RasterGpuForeground(GpuSceneRenderer renderer)
+        private void RasterGpuForeground(GpuSceneRenderer renderer, long? diagnosticTimestamp = null)
         {
             renderer.Profile=_renderProfile;
             renderer.BeginLyrics();
             _gpuLyrics=renderer;
             try {
                 using(var graphics=Graphics.FromImage(renderer.Foreground))
-                    DrawScene(new PaintEventArgs(graphics,ClientRectangle),true);
+                    DrawScene(new PaintEventArgs(graphics,ClientRectangle),true,diagnosticTimestamp);
                 renderer.CommitLyrics();
             }
             finally { _gpuLyrics=null; }
@@ -503,13 +503,13 @@ namespace MusicBeePlugin
             AddToggle(menu, "Show English / translation", () => _settings.ShowTranslation,
                 value => _settings.ShowTranslation = value);
             menu.Items.Add(new ToolStripSeparator());
-            var gpuToggle = menu.Items.Add("GPU background and spectrum", null, (sender, args) => {
+            var gpuToggle = menu.Items.Add("GPU rendering", null, (sender, args) => {
                 _gpuDisabled = !_gpuDisabled; ReleaseGpu(); Invalidate();
             }) as ToolStripMenuItem;
-            gpuToggle.ToolTipText = "Switch off to compare with GDI. Applies to this window only. Transparent canvas and remote desktop use GDI automatically.";
+            gpuToggle.ToolTipText = "GPU background, spectrum and lyric composition. Switch off to compare with GDI. Applies to this window only. Transparent canvas and remote desktop use GDI automatically.";
             menu.Opening += (sender, args) => {
                 gpuToggle.Checked = !_gpuDisabled;
-                gpuToggle.Text = _gpuFailed ? "GPU unavailable: using GDI (" + _gpuFailure + ")" : "GPU background and spectrum";
+                gpuToggle.Text = _gpuFailed ? "GPU unavailable: using GDI (" + _gpuFailure + ")" : "GPU rendering";
             };
             menu.Items.Add("Add English meaning from Genius…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenEnglishImporter)));
@@ -1988,7 +1988,7 @@ namespace MusicBeePlugin
             finally { profile?.End(RenderMetric.Scene, stamp); }
         }
 
-        private void DrawScene(PaintEventArgs e, bool foregroundOnly = false)
+        private void DrawScene(PaintEventArgs e, bool foregroundOnly = false, long? diagnosticTimestamp = null)
         {
             var stamp = _renderProfile?.Stamp ?? 0;
             var g = e.Graphics;
@@ -2055,7 +2055,9 @@ namespace MusicBeePlugin
             var progress = 1f;
             if (_transitionStarted != 0)
             {
-                progress = Math.Min(1f, (float)((Stopwatch.GetTimestamp() - _transitionStarted) *
+                // Tests can render both backends at the same instant; normal
+                // playback retains the existing monotonic timestamp exactly.
+                progress = Math.Min(1f, (float)(((diagnosticTimestamp ?? Stopwatch.GetTimestamp()) - _transitionStarted) *
                     1000.0 / Stopwatch.Frequency / TransitionMs));
                 if (progress >= 1f)
                 {
