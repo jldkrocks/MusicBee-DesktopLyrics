@@ -13,7 +13,7 @@ namespace MusicBeePlugin
         FrameInterval, PaintDispatch, Scene, Clear, Background, Spectrum, Artwork,
         Lyrics, Queue, Controls, TickInterval, Tick, Dancers, DancerRaster,
         DancerUpload, MainUiLatency, CpuOneCorePercent, CpuMachinePercent,
-        WorkingSetMiB, PrivateMiB, FrameWork
+        WorkingSetMiB, PrivateMiB, FrameWork, ForegroundRaster, ForegroundUpload, GpuSubmit
     }
 
     internal sealed class RenderProfile : IDisposable
@@ -36,8 +36,18 @@ namespace MusicBeePlugin
         }
         internal const int SampleLimit = 16384;
         private readonly object _gate = new object();
-        private readonly List<double>[] _samples = new List<double>[21];
-        private readonly int[] _dropped = new int[21];
+        private readonly List<double>[] _samples = new List<double>[Enum.GetValues(typeof(RenderMetric)).Length];
+        private readonly int[] _dropped = new int[Enum.GetValues(typeof(RenderMetric)).Length];
+        private long _frames, _lyricFrames, _englishFrames, _previewFrames, _gpuFrames, _foregroundFrames;
+        internal void FrameActivity(bool lyrics, bool english, bool preview, bool gpu, bool foreground)
+        {
+            if (Stamp == 0) return;
+            lock (_gate) {
+                if (_finished) return;
+                _frames++; if (lyrics) _lyricFrames++; if (english) _englishFrames++;
+                if (preview) _previewFrames++; if (gpu) _gpuFrames++; if (foreground) _foregroundFrames++;
+            }
+        }
         private readonly Dictionary<string, object> _metadata;
         private readonly long _start, _end;
         private readonly Action<Action> _postMain;
@@ -162,6 +172,8 @@ namespace MusicBeePlugin
                 json = JsonConvert.SerializeObject(new {
                     version = typeof(RenderProfile).Assembly.GetName().Version.ToString(),
                     utc = DateTime.UtcNow, reason, metadata = _metadata,
+                    activity = new { frames = _frames, lyrics = _lyricFrames, english = _englishFrames,
+                        preview = _previewFrames, gpu = _gpuFrames, foreground_redrawn = _foregroundFrames },
                     measured_seconds = Math.Max(0, (Math.Min(_end, Stopwatch.GetTimestamp()) - _start) / (double)Stopwatch.Frequency),
                     pending_main_ui_ms = _pending == 0 ? 0 : (Stopwatch.GetTimestamp() - _pendingAt) * 1000d / Stopwatch.Frequency,
                     notes = "Times are milliseconds except CPU percent and memory MiB. Scene/layers are nested; do not sum all metrics. PaintDispatch includes WinForms buffer copy, not display scan-out. FrameInterval is WM_PAINT cadence, not proven presentation. CPU covers the entire host process. Missing metrics are unavailable, not zero cost.",

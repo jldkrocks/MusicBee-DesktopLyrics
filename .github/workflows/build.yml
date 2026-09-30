@@ -18,6 +18,12 @@ jobs:
         run: msbuild DesktopLyrics.sln /t:Restore /p:Configuration=Release '/p:Platform=Any CPU'
       - name: Build plugin
         run: msbuild DesktopLyrics.sln /p:Configuration=Release '/p:Platform=Any CPU'
+      - name: Build native composition helpers
+        run: |
+          msbuild native/DesktopLyricsGpu.vcxproj /p:Configuration=Release /p:Platform=Win32
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          msbuild native/DesktopLyricsGpu.vcxproj /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check lyrics, timing edits, queue and artwork palette
         run: |
           msbuild tests/ParserSmoke.csproj /t:Restore /p:Configuration=Release
@@ -33,6 +39,7 @@ jobs:
           name: DesktopLyrics-1.15.52.0
           path: |
             bin/Release/mb_DesktopLyrics.dll
+            bin/Release/DesktopLyricsGpu.*.dll
             pkg/*.zip
             tools/bin/Release/GpuRenderProbe.exe
             tools/bin/Release/GdiRenderBenchmark.exe

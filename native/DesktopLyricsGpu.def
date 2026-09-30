@@ -1,0 +1,6 @@
+EXPORTS
+ DL_Create
+ DL_Destroy
+ DL_Resize
+ DL_Upload
+ DL_Draw

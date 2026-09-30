@@ -22,6 +22,94 @@ namespace MusicBeePlugin
         private readonly PlaybackSnapshotReader _playback;
         private readonly PlaybackTimingTrace _playbackTrace;
         private RenderProfile _renderProfile;
+        private GpuSceneRenderer _gpu;
+        private bool _gpuDisabled, _gpuFailed, _foregroundDirty = true, _animationInvalidating;
+        private string _gpuFailure;
+        private double _foregroundAutoBpm;
+        private bool _foregroundNoSignal;
+        private bool _foregroundNotice, _foregroundPaletteMoving;
+
+        [StructLayout(LayoutKind.Sequential)] private struct PaintState
+        {
+            public IntPtr Dc;
+            public int Erase;
+            public RectangleEdges Rect;
+            public int Restore, Update;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] Reserved;
+        }
+        [StructLayout(LayoutKind.Sequential)] private struct RectangleEdges { public int Left, Top, Right, Bottom; }
+        [DllImport("user32.dll")] private static extern IntPtr BeginPaint(IntPtr hwnd, out PaintState paint);
+        [DllImport("user32.dll")] private static extern bool EndPaint(IntPtr hwnd, ref PaintState paint);
+
+        private bool GpuEligible => !_gpuDisabled && !_gpuFailed && _settings != null &&
+            !_settings.TransparentCanvas && !SystemInformation.TerminalServerSession &&
+            ClientSize.Width > 0 && ClientSize.Height > 0;
+
+        protected override void OnInvalidated(InvalidateEventArgs e)
+        {
+            if (!_animationInvalidating) _foregroundDirty = true;
+            base.OnInvalidated(e);
+        }
+
+        private void ReleaseGpu()
+        {
+            _gpu?.Dispose(); _gpu = null; _foregroundDirty = true;
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            ReleaseGpu();
+            base.OnHandleDestroyed(e);
+        }
+
+        // Called only from WM_PAINT, on the existing window thread. The native
+        // target presents directly; WinForms never copies a full CPU backbuffer.
+        private bool TryDrawGpu()
+        {
+            if (!GpuEligible) { ReleaseGpu(); return false; }
+            try
+            {
+                if (_gpu == null)
+                {
+                    _gpu = new GpuSceneRenderer(Handle, ClientSize);
+                    _foregroundDirty = true;
+                    _backgroundCache?.Dispose(); _backgroundCache = null;
+                    _spectrumCache?.Dispose(); _spectrumCache = null;
+                }
+                if (_gpu.Resize(ClientSize)) _foregroundDirty = true;
+                var autoBpm = Math.Round(_partyBeat.Bpm, 1);
+                var noSignal = _partySpectrumMisses >= 30;
+                var redraw = _foregroundDirty || _transitionStarted != 0 || _paletteStarted != 0 ||
+                    HasQueueNotice || _foregroundNotice || _foregroundPaletteMoving ||
+                    _foregroundAutoBpm != autoBpm || _foregroundNoSignal != noSignal;
+                if (redraw)
+                {
+                    var stamp = _renderProfile?.Stamp ?? 0;
+                    using (var graphics = Graphics.FromImage(_gpu.Foreground))
+                        DrawScene(new PaintEventArgs(graphics, ClientRectangle), true);
+                    _renderProfile?.End(RenderMetric.ForegroundRaster, stamp);
+                    stamp = _renderProfile?.Stamp ?? 0;
+                    _gpu.Upload();
+                    _renderProfile?.End(RenderMetric.ForegroundUpload, stamp);
+                    _foregroundDirty = false; _foregroundAutoBpm = autoBpm; _foregroundNoSignal = noSignal;
+                    _foregroundNotice = HasQueueNotice; _foregroundPaletteMoving = _paletteStarted != 0;
+                }
+                var submitted = _renderProfile?.Stamp ?? 0;
+                _gpu.Draw(_palette, _bars, _settings.ShowVisualizer);
+                _renderProfile?.End(RenderMetric.GpuSubmit, submitted);
+                _renderProfile?.FrameActivity(!string.IsNullOrWhiteSpace(_line1), !string.IsNullOrWhiteSpace(_line2),
+                    !string.IsNullOrWhiteSpace(_nextLine), true, redraw);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // One failure latches GDI for this window. No per-frame retry
+                // loop, no change to song state, and no driver reset attempt.
+                _gpuFailure = ex.GetType().Name + " 0x" + ex.HResult.ToString("X8");
+                _gpuFailed = true; ReleaseGpu();
+                return false;
+            }
+        }
         private string _renderProfileStatus = "Capture rendering performance (33 s)";
         private readonly Action<Action> _dispatchPlayerCommand;
         private bool _playCommandPending;
@@ -347,7 +435,9 @@ namespace MusicBeePlugin
                 (now - _lastPaintRequest) * 1000.0 / Stopwatch.Frequency < 40)
                 return;
             _lastPaintRequest = now;
-            Invalidate();
+            _animationInvalidating = true;
+            try { Invalidate(); }
+            finally { _animationInvalidating = false; }
             if (_movingOrResizing) Update();
         }
 
@@ -394,6 +484,14 @@ namespace MusicBeePlugin
             AddToggle(menu, "Show English / translation", () => _settings.ShowTranslation,
                 value => _settings.ShowTranslation = value);
             menu.Items.Add(new ToolStripSeparator());
+            var gpuToggle = menu.Items.Add("GPU background and spectrum", null, (sender, args) => {
+                _gpuDisabled = !_gpuDisabled; ReleaseGpu(); Invalidate();
+            }) as ToolStripMenuItem;
+            gpuToggle.ToolTipText = "Switch off to compare with GDI. Applies to this window only. Transparent canvas and remote desktop use GDI automatically.";
+            menu.Opening += (sender, args) => {
+                gpuToggle.Checked = !_gpuDisabled;
+                gpuToggle.Text = _gpuFailed ? "GPU unavailable: using GDI (" + _gpuFailure + ")" : "GPU background and spectrum";
+            };
             menu.Items.Add("Add English meaning from Genius…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenEnglishImporter)));
             var timingAction = menu.Items.Add("Edit lyric timing…", null, (sender, args) =>
@@ -450,8 +548,9 @@ namespace MusicBeePlugin
             var folder = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(
                 System.IO.Path.GetDirectoryName(_partyTempoStore.PlaybackTracePath)), "DesktopLyrics-Rendering");
             var mode = WindowState == FormWindowState.Maximized ? "maximized" : "restored";
+            var renderer = _gpu != null ? "gpu" : "gdi";
             var metadata = new Dictionary<string, object> {
-                { "renderer", "GDI+" }, { "mode", mode }, { "width", ClientSize.Width }, { "height", ClientSize.Height },
+                { "renderer", renderer }, { "gpu_failure", _gpuFailure }, { "mode", mode }, { "width", ClientSize.Width }, { "height", ClientSize.Height },
                 { "remote_session", SystemInformation.TerminalServerSession }, { "process_bits", IntPtr.Size * 8 },
                 { "logical_processors", Environment.ProcessorCount }, { "lyrics", !string.IsNullOrWhiteSpace(_line1) },
                 { "english", !string.IsNullOrWhiteSpace(_line2) }, { "preview", !string.IsNullOrWhiteSpace(_nextLine) },
@@ -470,7 +569,7 @@ namespace MusicBeePlugin
             _renderProfileStatus = "Recording rendering performance...";
             _renderProfile = new RenderProfile(metadata, _dispatchPlayerCommand, json => ThreadPool.QueueUserWorkItem(unused => {
                 var status = "Capture again (last report saved)";
-                try { RenderProfile.Save(System.IO.Path.Combine(folder, "gdi-" + mode + ".json"), json); }
+                try { RenderProfile.Save(System.IO.Path.Combine(folder, renderer + "-" + mode + ".json"), json); }
                 catch (Exception) { status = "Capture again (last report could not be saved)"; }
                 try { if (!IsDisposed) BeginInvoke(new Action(() => {
                     _renderProfile = null; _renderProfileStatus = status;
@@ -569,6 +668,7 @@ namespace MusicBeePlugin
                         _requestedPlayState = null;
                     else reported = _requestedPlayState.Value;
                 }
+                if (_playState != reported) _foregroundDirty = true;
                 _playState = reported;
                 if (_playState != Plugin.PlayState.Playing) ReleaseSpectrum();
             }
@@ -1861,17 +1961,21 @@ namespace MusicBeePlugin
         {
             var profile = _renderProfile;
             var stamp = profile?.Stamp ?? 0;
-            try { DrawScene(e); }
+            try {
+                DrawScene(e);
+                _renderProfile?.FrameActivity(!string.IsNullOrWhiteSpace(_line1), !string.IsNullOrWhiteSpace(_line2),
+                    !string.IsNullOrWhiteSpace(_nextLine), false, true);
+            }
             finally { profile?.End(RenderMetric.Scene, stamp); }
         }
 
-        private void DrawScene(PaintEventArgs e)
+        private void DrawScene(PaintEventArgs e, bool foregroundOnly = false)
         {
             var stamp = _renderProfile?.Stamp ?? 0;
             var g = e.Graphics;
             // Clear the entire double buffer before every frame. A sizing
             // operation can expose new pixels beyond the last WM_PAINT region.
-            g.Clear(_settings.TransparentCanvas ? ClearKey : BackColor);
+            g.Clear(foregroundOnly ? Color.Transparent : _settings.TransparentCanvas ? ClearKey : BackColor);
             _renderProfile?.End(RenderMetric.Clear, stamp);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
@@ -1880,10 +1984,10 @@ namespace MusicBeePlugin
             var bounds = new Rectangle(0, 0, client.Width - gutter * 2, client.Height);
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
             stamp = _renderProfile?.Stamp ?? 0;
-            DrawBackground(g, client);
+            if (!foregroundOnly) DrawBackground(g, client);
             _renderProfile?.End(RenderMetric.Background, stamp);
             stamp = _renderProfile?.Stamp ?? 0;
-            if (_settings.ShowVisualizer && !_settings.TransparentCanvas) DrawSpectrum(g, client);
+            if (!foregroundOnly && _settings.ShowVisualizer && !_settings.TransparentCanvas) DrawSpectrum(g, client);
             _renderProfile?.End(RenderMetric.Spectrum, stamp);
             var state = g.Save();
             if (gutter > 0) g.TranslateTransform(gutter, 0);
@@ -2702,7 +2806,22 @@ namespace MusicBeePlugin
         {
             var profile = message.Msg == 0x000F ? _renderProfile : null;
             var stamp = profile?.BeginPaint() ?? 0;
-            try { base.WndProc(ref message); }
+            try {
+                if (message.Msg == 0x000F && GpuEligible)
+                {
+                    PaintState paint;
+                    BeginPaint(Handle, out paint);
+                    bool drawn;
+                    try { drawn = TryDrawGpu(); }
+                    finally { EndPaint(Handle, ref paint); }
+                    if (drawn) { message.Result = IntPtr.Zero; return; }
+                    Invalidate(); // Re-establish update region for the normal GDI paint.
+                }
+                if (message.Msg == 0x0014 && _gpu != null && GpuEligible)
+                { message.Result = new IntPtr(1); return; } // no GDI background erase
+                if (_gpu != null && !GpuEligible) ReleaseGpu();
+                base.WndProc(ref message);
+            }
             finally { profile?.End(RenderMetric.PaintDispatch, stamp); }
             if (message.Msg == 0x84 && _settings != null &&
                 _settings.TransparentCanvas &&
@@ -3119,6 +3238,7 @@ namespace MusicBeePlugin
         {
             if (disposing)
             {
+                ReleaseGpu();
                 _animationDisposed = true;
                 _renderProfile?.Dispose();
                 CancelPartyLookup();

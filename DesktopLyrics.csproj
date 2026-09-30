@@ -113,6 +113,7 @@
     <Compile Include="PlaybackSnapshotReader.cs" />
     <Compile Include="PlaybackTimingTrace.cs" />
     <Compile Include="RenderProfile.cs" />
+    <Compile Include="GpuSceneRenderer.cs" />
     <Compile Include="PartyTempoMap.cs" />
     <Compile Include="PartyTimeline.cs" />
     <Compile Include="FrmPartyTempoMap.cs" />
