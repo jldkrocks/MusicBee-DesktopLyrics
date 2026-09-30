@@ -531,6 +531,8 @@ namespace MusicBeePlugin
         {
             if (_playCommandPending) { completed?.Invoke(false); return; }
             var before = _playState;
+            if (playing && before == Plugin.PlayState.Paused)
+                _partyClock.PrepareResume(Stopwatch.GetTimestamp());
             _requestedPlayState = playing ? Plugin.PlayState.Playing : Plugin.PlayState.Paused;
             _playStateRequestedAt = Stopwatch.GetTimestamp();
             _playState = _requestedPlayState.Value;
@@ -1159,7 +1161,7 @@ namespace MusicBeePlugin
         {
             var rawPosition = Math.Max(0, _playback.Latest.Position);
             return _partyClock.PositionAt(rawPosition, timestamp,
-                Stopwatch.Frequency, _playState == Plugin.PlayState.Playing, true);
+                Stopwatch.Frequency, _playState == Plugin.PlayState.Playing);
         }
 
         private void RefreshPartyLayout()

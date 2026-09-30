@@ -57,6 +57,7 @@
     <Compile Include="PreviewChecks.cs" />
     <Compile Include="AccentMotionChecks.cs" />
     <Compile Include="Editor47Checks.cs" />
+    <Compile Include="SeekClockChecks.cs" />
     <Compile Include="BpmLookupChecks.cs" />
     <Compile Include="TempoMapChecks.cs" />
     <Compile Include="RhythmChecks.cs" />

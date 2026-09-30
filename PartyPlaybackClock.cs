@@ -15,6 +15,8 @@ namespace MusicBeePlugin
         private int _lastRawPosition;
         private double _positionMs;
         private bool _resumeBlend, _resumeSawAdvance;
+        private bool _seekBeforeResume;
+        private long _resumeRequestedAt = long.MinValue;
         private readonly Queue<Sample> _samples = new Queue<Sample>();
         private struct Sample
         {
@@ -29,12 +31,19 @@ namespace MusicBeePlugin
             _lastRawPosition = 0;
             _positionMs = 0;
             _samples.Clear();
+            _seekBeforeResume = false;
+            _resumeRequestedAt = long.MinValue;
         }
+
+        // Only a known Play command may ease a resume. MusicBee's own seek
+        // can briefly report a non-playing state, which is not a normal resume.
+        internal void PrepareResume(long timestamp) { _resumeRequestedAt = timestamp; }
 
         internal void Seek(int positionMs, long timestamp, long frequency, bool playing)
         {
             Reset();
             PositionAt(positionMs, timestamp, frequency, playing);
+            _seekBeforeResume = !playing;
         }
 
         private void Observe(int position, long timestamp, long frequency)
@@ -50,6 +59,10 @@ namespace MusicBeePlugin
             long frequency, bool playing, bool smoothResume = false)
         {
             if (frequency <= 0) throw new ArgumentOutOfRangeException(nameof(frequency));
+            var requestedResume = _resumeRequestedAt != long.MinValue &&
+                timestamp >= _resumeRequestedAt &&
+                (timestamp - _resumeRequestedAt) * 1000d / frequency <= 750;
+            _resumeRequestedAt = long.MinValue;
             rawPositionMs = Math.Max(0, rawPositionMs);
             if (!_initialized || timestamp < _lastTimestamp)
             {
@@ -63,7 +76,10 @@ namespace MusicBeePlugin
             {
                 // Paused seeks use the actual position. Optional resume easing
                 // starts from the settled paused display, before a buffered step.
-                _resumeBlend = smoothResume && playing && !_playing;
+                if (Math.Abs(rawPositionMs - _lastRawPosition) > 100)
+                    _seekBeforeResume = true;
+                _resumeBlend = (smoothResume || requestedResume) && playing && !_playing && !_seekBeforeResume;
+                if (playing) _seekBeforeResume = false;
                 _resumeSawAdvance = rawPositionMs > _lastRawPosition;
                 _positionMs = _resumeBlend ? _positionMs : rawPositionMs;
                 _playing = playing;
