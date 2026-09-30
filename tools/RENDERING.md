@@ -73,4 +73,37 @@ At 4K the average costs are background 7.90-9.95 ms, spectrum 6.56-8.06 ms, lyri
 
 The unpaced benchmark consumes approximately98-101% of one logical core, about6.1-6.3% of this16-thread host. This is throughput-test saturation, not MusicBee's measured CPU load at60FPS. Average benchmark-process working set is65-78MiB restored and234-242MiB at4K, with a4K maximum near263MiB. These totals include the test bitmap and caches, not just the installed plugin.
 
-The current GDI workload does not fit the16.667ms budget at4K. The average drawing-throughput ceiling in this workload is roughly30-33frames/s before real presentation overhead, with much slower palette-transition outliers. No conclusion about actual MusicBee main-window sluggishness or display cadence is justified until the live capture and user feedback are available. Checkpoint1's live baseline remains pending; checkpoints2-4 have not begun.
+The current GDI workload does not fit the16.667ms budget at4K. The average drawing-throughput ceiling in this workload is roughly30-33frames/s before real presentation overhead, with much slower palette-transition outliers. No conclusion about actual MusicBee main-window sluggishness or display cadence is justified until the live capture and user feedback are available. Subsequent live captures are analysed below. Checkpoints2-4 have not begun.
+
+## Live 4K baseline, 2026-09-30, version 1.15.52
+
+The user requested discarding the first four trials with no visible lyrics and identified the following six as three small-window runs followed by three TV-maximized runs. The bounded storage retains three captures per mode. Those retained runs completed at13:24:06,13:24:47,13:25:36 UTC (restored) and13:26:19,13:26:58,13:27:45 UTC (maximized). Read-only copies are in ../render52-live outside the repository. Use these six only. All completed30 measured seconds, with no sample overflow. MusicBee is a32-bit process; both modes report120Hz,96DPI and a non-remote session. These are paint-dispatch measurements, not confirmed display scan-out.
+
+| Live metric, ranges across three captures | Restored814x272 | Maximized3840x2137 |
+| --- | --- | --- |
+| Mean paint cadence | 40.1-40.2 paints/s | 23.6-26.5 paints/s |
+| Frame interval mean | 24.88-24.91ms | 37.77-42.35ms |
+| Frame interval p95 | 32.99-33.07ms | 46.07-50.55ms |
+| Frame interval p99 | 35.51-36.29ms | 49.88-62.22ms |
+| Intervals over33.333ms | 3.3-3.8% | 82.8-98.3% |
+| PaintDispatch mean | 2.77-2.93ms | 35.90-40.48ms |
+| Scene mean | 2.22-2.37ms | 25.75-29.56ms |
+| PaintDispatch minus Scene means | 0.53-0.58ms | 10.00-10.92ms |
+| Background mean | 0.19-0.22ms | 6.38-8.32ms |
+| Spectrum mean | 0.34-0.38ms | 5.54-6.84ms |
+| Lyric-region work mean | 0.85-0.90ms | 11.22-11.68ms |
+| Dancers mean per update | 0.21ms | 1.56-1.69ms |
+| MusicBee UI callback p95 | 4.33-4.72ms | 14.64-18.49ms |
+| MusicBee UI callback p99 | 5.33-6.04ms | 23.06-29.42ms |
+| Whole-process mean CPU, one-core equivalent | 14.2-20.9% | 103.2-110.6% |
+| Whole-process average working set | 117-118MiB | 290-297MiB |
+
+User feedback: MusicBee scrolling was fine with the small window. Maximized on the4K TV, scrolling was very sluggish and album artwork did not load quickly enough to keep up. This is a failure of the host-responsiveness acceptance criterion even though the lightweight callback probe still passed its numerical thresholds. A queued callback is not a measurement of artwork decoding, thumbnail loading, scrolling paint throughput, or GPU/DWM contention. Do not override the user's observed failure using the callback numbers, and do not claim the mechanism of album-art slowness is established by these measurements alone.
+
+All six initial metadata snapshots say lyrics/English/preview were absent at capture start, despite the user's confirmation that these were the trials with lyrics visible. The current metadata is only captured once, before the three-second warmup, and does not record their state throughout the measured period. The measured lyric-region work is nonzero, but is not independently proof of which text was visible. Preserve this uncertainty, accept the user's observation, and add per-frame active-layer counts in the next rendering checkpoint so future matched comparisons can verify exposure without recording text. Do not silently discard these six or substitute earlier no-lyrics trials.
+
+The live data adds two important constraints. First, about10-11ms lies outside the instrumented scene but inside WinForms WM_PAINT handling, consistent with expensive double-buffer/paint overhead. That difference is not an isolated BitBlt measurement. A GPU implementation that draws the backdrop then copies the entire frame back into the existing GDI double buffer may retain this cost. The first stage should establish GPU presentation/composition, retain the existing GDI foreground as reusable textures, and avoid full-frame readback and unconditional full-frame uploads. Background+spectrum average11.9-15.2ms; the lyric layer remains a substantial11.2-11.7ms and is the next candidate after the first-stage comparison.
+
+Second, even the inexpensive restored paints average only40 paints/s, while timer intervals average25ms and p95 is about32.7ms. This suggests frame scheduling/message delivery is another limit. A16ms WinForms timer is a request, not a guarantee of60Hz presentation. GPU conversion alone cannot be assumed to fix it. Measure and improve render wake-up pacing separately, with one outstanding frame request and no changes to song-position/beat/lyric clocks. Do not change system-wide timer resolution as an unmeasured shortcut.
+
+Both modes miss the proposed60FPS numerical cadence/tail gates; only the small mode passed the user's perceived-responsiveness check. The live baseline is now available. User authorization for the staged GPU implementation remains in place. Checkpoint2 (the first GPU composition layer, diagnostics activity counts and safe fallback) is next; no GPU plugin renderer has been implemented yet. Keep32-bit native packaging in scope, preserve the verified1.15.52 GDI fallback and backup, and compare against these retained live runs as well as the synthetic baseline before expanding to other layers.
