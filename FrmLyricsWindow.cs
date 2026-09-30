@@ -1805,7 +1805,10 @@ namespace MusicBeePlugin
         {
             if(_artworkStarted==0)return;
             _artworkProgress=Math.Max(0,Math.Min(1,(float)((now-_artworkStarted)*1000d/Stopwatch.Frequency/550d)));
-            if(_artworkProgress>=1){_artworkStarted=0;_previousArtwork?.Dispose();_previousArtwork=null;}
+            if(_artworkProgress>=1){
+                _artworkStarted=0;_previousArtwork?.Dispose();_previousArtwork=null;
+                if(_albumArtwork==null)_foregroundDirty=true; // Return the static placeholder to the retained overlay.
+            }
         }
         private static void DrawArtworkImage(Graphics g,Bitmap image,Rectangle rect,float opacity)
         {
@@ -2469,7 +2472,7 @@ namespace MusicBeePlugin
         private void DrawAlbumArt(Graphics g, RectangleF area)
         {
             var rect = Rectangle.Round(area);
-            if(_gpuLyrics!=null) {
+            if(_gpuLyrics!=null && (_albumArtwork!=null || _previousArtwork!=null)) {
                 using(var transform=g.Transform){var offset=transform.Elements;var target=new RectangleF(rect.X+offset[4],rect.Y+offset[5],rect.Width,rect.Height);
                     _gpuLyrics.SetArtwork(target,_previousArtwork,_albumArtwork,_artworkProgress);}
                 return;
