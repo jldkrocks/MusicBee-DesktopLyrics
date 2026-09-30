@@ -20,7 +20,7 @@ internal static class RampShortcutChecks
             var grid = (DataGridView)Field(editor, "_grid");
             grid.CurrentCell = grid.Rows[1].Cells[0];
             Call(editor, "RampToRow"); Call(editor, "SaveMap");
-            if (saved == null || saved.Version != 6 || !saved.Sections[0].RampToNext) throw new Exception("Linked ramp must save.");
+            if (saved == null || saved.Version != 7 || !saved.Sections[0].RampToNext) throw new Exception("Linked ramp must save.");
             Near(saved.At(0).Bpm, 120); Near(saved.At(5).Bpm, 90); Near(saved.At(10).Bpm, 60);
             Near(saved.At(10).Beat, 15); Near(saved.At(20).Bpm, 90);
             var json = Newtonsoft.Json.JsonConvert.SerializeObject(saved);

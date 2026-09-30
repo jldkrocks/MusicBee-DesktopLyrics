@@ -41,7 +41,7 @@ internal static class TimelineChecks
                 throw new Exception("Save must apply without closing the editor.");
             var grid = (DataGridView)Field(editor, "_grid");
             if (Convert.ToString(grid.Rows[0].Cells[3].Value) != "Normal" || Convert.ToString(grid.Rows[0].Cells[8].Value) != "Half (0.5x)" ||
-                last.Sections[0].Style != PartyDanceStyle.Normal || last.Sections[0].Speed != 0.5 || last.Version != 6)
+                last.Sections[0].Style != PartyDanceStyle.Normal || last.Sections[0].Speed != 0.5 || last.Version != 7)
                 throw new Exception("Editor must preserve legacy Half speed as an independent speed choice.");
             if (!Convert.ToBoolean(grid.Rows[1].Cells[5].Value) || !last.Sections[1].CountIn)
                 throw new Exception("Editor must load and save the count-in checkbox.");

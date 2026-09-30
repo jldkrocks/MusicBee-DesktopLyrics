@@ -13,6 +13,7 @@ namespace MusicBeePlugin
         private readonly TabControl _tabs = new TabControl { Dock = DockStyle.Fill };
         private readonly ToolTip _tips = new ToolTip { InitialDelay = 350, AutoPopDelay = 20000, ShowAlways = true };
         private DataGridView ActiveGrid => _tabs.SelectedIndex == 1 ? _accentGrid : _grid;
+        private readonly ContextMenuStrip _rowMenu = new ContextMenuStrip();
         private readonly CheckBox _enabled = new CheckBox();
         private readonly PartyTempoMap _source;
         private readonly Func<double?> _position;
@@ -37,7 +38,8 @@ namespace MusicBeePlugin
         private readonly System.Diagnostics.Stopwatch _seekAge = new System.Diagnostics.Stopwatch();
         private double? _pendingSeek;
         private bool _dirty, _trackWasAvailable = true;
-        private static readonly string[] AccentMotions = { "Bop (original)", "Rebound", "Left hit", "Right hit", "Alternate sides" };
+        private static readonly string[] AccentMotions = { "Bop (original)", "Rebound" };
+        private static readonly string[] AccentPoses = { "Current pose", "Left hit", "Right hit", "Alternate sides" };
         private static readonly string[] Styles = { "Normal", "Side to side", "Hold pose", "Rest (keep counting)" };
 
         private static readonly string[] Speeds = { "Half (0.5x)", "Normal (1x)", "Double (2x)" };
@@ -160,7 +162,7 @@ namespace MusicBeePlugin
                 if (!now.HasValue) { _status.Text = "Play the original song to capture its position."; return; }
                 if (_tabs.SelectedIndex == 1)
                 {
-                    _accentGrid.Rows.Add(Math.Round(now.Value, 3).ToString(CultureInfo.CurrentCulture), 1.7.ToString(CultureInfo.CurrentCulture), 0.1.ToString(CultureInfo.CurrentCulture), "0", AccentMotions[0]);
+                    _accentGrid.Rows.Add(Math.Round(now.Value, 3).ToString(CultureInfo.CurrentCulture), 1.7.ToString(CultureInfo.CurrentCulture), 0.1.ToString(CultureInfo.CurrentCulture), "0", AccentMotions[0], AccentPoses[0]);
                     _accentGrid.CurrentCell = _accentGrid.Rows[_accentGrid.Rows.Count - 1].Cells[0];
                     MarkDirty(); return;
                 }
@@ -188,13 +190,14 @@ namespace MusicBeePlugin
             AddButton(actions, "Close", () => Close());
             _status.Text = "Diamonds select sections; gold circles select accents. Save applies both tabs and keeps this window open.";
             _status.ForeColor = Color.FromArgb(178, 192, 212);
-            help.Text = "BPM belongs to each point. Ramp to next connects points automatically. Hover over controls for help.";
+            help.Text = "BPM belongs to each point. Right-click a row to copy its time to the other tab. Hover for help.";
             _tips.SetToolTip(_seekStep, "Seconds moved by - step and + step. Pause for precise placement; 0.01 s is the smallest step.");
             _tips.SetToolTip(_seekTime, "Exact song position in seconds. Enter or Seek moves playback without changing your rows.");
             _tips.SetToolTip(_enabled, "Apply this song's saved sections and accent cues. Uncheck to use its ordinary BPM settings.");
             _tips.SetToolTip(_timeline, "Diamonds select sections; gold circles select accent cues. Both seek to their saved time. Drag the playhead to seek. Blue = Normal, purple = Side to side, grey = Hold, teal = Rest.");
             _tips.SetToolTip(_add, "Add a section or accent at the playhead, depending on the selected tab. Pause and fine-seek first for exact placement. Save applies the new row.");
             SetupAccentGrid(map);
+            SetupRowMenu();
             var sectionsTab = new TabPage("Sections") { BackColor = BackColor, Padding = new Padding(3) };
             var accentsTab = new TabPage("Accent cues") { BackColor = BackColor, Padding = new Padding(3) };
             sectionsTab.Controls.Add(_grid); accentsTab.Controls.Add(_accentGrid);
@@ -246,6 +249,95 @@ namespace MusicBeePlugin
             _grid.DataError += (sender, args) => { args.ThrowException = false; };
         }
 
+        private sealed class RowMenuRenderer : ToolStripProfessionalRenderer
+        {
+            protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+            {
+                using (var brush = new SolidBrush(e.Item.Selected ? Color.FromArgb(60, 87, 118) : Color.FromArgb(30, 35, 48)))
+                    e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.Item.Size));
+            }
+            protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+            {
+                e.TextColor = e.Item.Enabled ? Color.FromArgb(238, 241, 248) : Color.FromArgb(135, 148, 168);
+                base.OnRenderItemText(e);
+            }
+        }
+
+        private void SetupRowMenu()
+        {
+            _rowMenu.BackColor = Color.FromArgb(30, 35, 48); _rowMenu.ForeColor = ForeColor;
+            _rowMenu.Renderer = new RowMenuRenderer(); _rowMenu.ShowImageMargin = false;
+            var copy = new ToolStripMenuItem(); _rowMenu.Items.Add(copy);
+            _rowMenu.Opening += (sender, args) => {
+                var grid = _rowMenu.SourceControl as DataGridView;
+                args.Cancel = grid?.CurrentRow == null;
+                copy.Text = grid == _grid ? "Add accent at this time" : "Add section at this time";
+            };
+            copy.Click += (sender, args) => CopyTimeToOtherTab(_rowMenu.SourceControl as DataGridView);
+            foreach (var grid in new[] { _grid, _accentGrid })
+            {
+                grid.ContextMenuStrip = _rowMenu;
+                grid.MouseDown += (sender, args) => {
+                    if (args.Button != MouseButtons.Right) return;
+                    var hit = grid.HitTest(args.X, args.Y);
+                    if (hit.RowIndex >= 0) grid.CurrentCell = grid.Rows[hit.RowIndex].Cells[0];
+                    else grid.CurrentCell = null;
+                };
+            }
+        }
+
+        private void CopyTimeToOtherTab(DataGridView source)
+        {
+            if (source?.CurrentRow == null) return;
+            try
+            {
+                source.EndEdit();
+                var seconds = Number(source.CurrentRow, 0);
+                if (seconds < 0 || seconds > 604800) throw new ArgumentException("Use a time between 0 and 604800 seconds.");
+                var destination = source == _grid ? _accentGrid : _grid;
+                foreach (DataGridViewRow row in destination.Rows)
+                    if (Math.Abs(Number(row, 0) - seconds) < .0000001)
+                    {
+                        _tabs.SelectedIndex = destination == _grid ? 0 : 1;
+                        destination.CurrentCell = row.Cells[0];
+                        _status.Text = "A row already exists at this time; selected it without adding a duplicate.";
+                        return;
+                    }
+                if (destination == _accentGrid)
+                {
+                    var template = _accentGrid.CurrentRow;
+                    _accentGrid.Rows.Add(seconds.ToString("0.#########", CultureInfo.CurrentCulture),
+                        template?.Cells[1].Value ?? 1.7d, template?.Cells[2].Value ?? .1d, template?.Cells[3].Value ?? 0d,
+                        template?.Cells[4].Value ?? AccentMotions[0], template?.Cells[5].Value ?? AccentPoses[0]);
+                }
+                else
+                {
+                    var map = ReadMap();
+                    var section = map.Sections.Last(s => s.StartSeconds <= seconds);
+                    var bpm = map.At(seconds).Bpm;
+                    var preceding = _grid.Rows.Cast<DataGridViewRow>().Single(r => Number(r, 0) == section.StartSeconds);
+                    var remaining = section.StartSeconds + section.RampSeconds - seconds;
+                    AddRow(seconds, bpm, Math.Max(0, remaining), section.Style, false, false,
+                        section.Rhythm, section.SwingPercent, section.EffectiveSpeed, remaining > 0 ? (double?)section.Bpm : null);
+                    var added = _grid.Rows[_grid.Rows.Count - 1];
+                    if (section.RampToNext) added.Cells[10].Value = "Ramp to next";
+                    else if (remaining > 0)
+                    {
+                        // Split a legacy custom curve without changing its slope or endpoint.
+                        preceding.Cells[2].Value = (seconds - section.StartSeconds).ToString("0.#########", CultureInfo.CurrentCulture);
+                        preceding.Cells[9].Value = bpm.ToString("0.#########", CultureInfo.CurrentCulture);
+                        added.Cells[10].Value = "Custom (saved)";
+                    }
+                }
+                _tabs.SelectedIndex = destination == _grid ? 0 : 1;
+                destination.CurrentCell = destination.Rows[destination.Rows.Count - 1].Cells[0];
+                MarkDirty();
+                _status.Text = destination == _grid ? "Section added at the accent time, preserving the tempo curve. Edit its dance if needed, then Save." :
+                    "Accent added at the section time using the selected accent's settings. Save applies it. Playback has not moved.";
+            }
+            catch (Exception ex) { _status.Text = ex.Message; }
+        }
+
         private void SetupAccentGrid(PartyTempoMap map)
         {
             _accentGrid.Dock = DockStyle.Fill; _accentGrid.AllowUserToAddRows = false;
@@ -263,7 +355,9 @@ namespace MusicBeePlugin
             _accentGrid.Columns.Add("prepare", "Lead-in (s)");
             _accentGrid.Columns.Add("hold", "Hold after hit (s)");
             _accentGrid.Columns.Add(new DataGridViewComboBoxColumn { Name = "motion", HeaderText = "Motion", DataSource = AccentMotions, FillWeight = 155 });
-            _accentGrid.Columns[4].ToolTipText = "Bop preserves the original squash. Rebound adds a deeper landing and recovery bounce. Left/Right hit selects the blue dancer's raised-hand side on the hit; the pink dancer mirrors it. Alternate sides switches left/right on each Alternate cue in song order, including across rests; seeking gives the same result. During Rest/Hold the side landing stays until the next directional cue or section. These motions never reset the beat. Save applies.";
+            _accentGrid.Columns.Add(new DataGridViewComboBoxColumn { Name = "pose", HeaderText = "Pose", DataSource = AccentPoses, FillWeight = 155 });
+            _accentGrid.Columns[5].ToolTipText = "Independent of Motion: keep the current pose, choose a left/right hit, or alternate across cues using Alternate sides. Use Rebound + Alternate sides for stronger side hits. Left/right names the blue dancer's raised-hand side; pink mirrors it. Landings persist through a continuous rest. Seeking preserves the sequence.";
+            _accentGrid.Columns[4].ToolTipText = "Bop is the original dip. Rebound is a deeper landing and recovery bounce. Combine either with any Pose, including Alternate sides. Strength and lead-in are independent.";
             _accentGrid.CellClick += OpenComboOnClick;
             _accentGrid.CurrentCellDirtyStateChanged += (sender, args) => { if (_accentGrid.IsCurrentCellDirty && _accentGrid.CurrentCell is DataGridViewComboBoxCell) _accentGrid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
             _accentGrid.Columns[0].ToolTipText = "Double-click a row to seek. Exact song time of the deepest downward bop. Not when you click Save. Cues do not change BPM, rhythm or beat alignment. They can also add a hit during Rest or Hold.";
@@ -273,7 +367,7 @@ namespace MusicBeePlugin
             foreach (DataGridViewColumn c in _accentGrid.Columns) c.SortMode = DataGridViewColumnSortMode.NotSortable;
             foreach (var cue in map.Accents)
                 _accentGrid.Rows.Add(cue.TimeSeconds.ToString("0.#########", CultureInfo.CurrentCulture), cue.Strength.ToString(CultureInfo.CurrentCulture),
-                    cue.PrepareSeconds.ToString(CultureInfo.CurrentCulture), cue.HoldSeconds.ToString(CultureInfo.CurrentCulture), AccentMotions[(int)cue.Motion]);
+                    cue.PrepareSeconds.ToString(CultureInfo.CurrentCulture), cue.HoldSeconds.ToString(CultureInfo.CurrentCulture), AccentMotions[cue.Motion == PartyAccentMotion.Bop ? 0 : 1], AccentPoses[(int)cue.EffectivePose]);
             _accentGrid.CellToolTipTextNeeded += (sender, args) => { if (args.ColumnIndex >= 0) args.ToolTipText = _accentGrid.Columns[args.ColumnIndex].ToolTipText; };
             _accentGrid.CellValueChanged += (sender, args) => MarkDirty();
             _accentGrid.SelectionChanged += (sender, args) => RefreshMarkers();
@@ -467,7 +561,7 @@ namespace MusicBeePlugin
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _preview.Cancel(); _timer.Dispose(); _tips.Dispose(); _editorFont.Dispose(); }
+            if (disposing) { _preview.Cancel(); _rowMenu.Dispose(); _timer.Dispose(); _tips.Dispose(); _editorFont.Dispose(); }
             base.Dispose(disposing);
         }
 
@@ -515,30 +609,38 @@ namespace MusicBeePlugin
             catch (Exception ex) { _status.Text = ex.Message; }
         }
 
+        private PartyTempoMap ReadMap()
+        {
+            _grid.EndEdit(); _accentGrid.EndEdit();
+            NormalizeLastPoint();
+            var map = new PartyTempoMap { Version = 7, TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
+            foreach (DataGridViewRow row in _grid.Rows)
+                map.Sections.Add(new PartyTempoSection { StartSeconds = Number(row, 0),
+                    Bpm = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? Number(row, 9) : Number(row, 1),
+                    RampToNext = Convert.ToString(row.Cells[10].Value) == "Ramp to next",
+                    RampSeconds = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? Number(row, 2) : 0,
+                    RampStartBpm = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? (double?)Number(row, 1) : null, Style = StyleAt(row),
+                    AlignBeat = Convert.ToBoolean(row.Cells[4].Value ?? false),
+                    CountIn = Convert.ToBoolean(row.Cells[5].Value ?? false),
+                    Rhythm = (PartyRhythm)Array.IndexOf(Rhythms, Convert.ToString(row.Cells[6].Value)),
+                    SwingPercent = Number(row, 7), Speed = SpeedAt(row) });
+            foreach (DataGridViewRow row in _accentGrid.Rows)
+                map.Accents.Add(new PartyAccentCue { TimeSeconds = Number(row, 0), Strength = Number(row, 1),
+                    PrepareSeconds = Number(row, 2), HoldSeconds = Number(row, 3),
+                    Motion = (PartyAccentMotion)Math.Max(0, Array.IndexOf(AccentMotions, Convert.ToString(row.Cells[4].Value))),
+                    Pose = (PartyAccentPose)Math.Max(0, Array.IndexOf(AccentPoses, Convert.ToString(row.Cells[5].Value))) });
+            map.Accents = map.Accents.OrderBy(c => c.TimeSeconds).ToList();
+            map.Sections = map.Sections.OrderBy(s => s.StartSeconds).ToList();
+            map.Validate();
+            return map;
+        }
+
+
         private void SaveMap()
         {
             try
             {
-                _grid.EndEdit(); _accentGrid.EndEdit();
-                NormalizeLastPoint();
-                var map = new PartyTempoMap { Version = 6, TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
-                foreach (DataGridViewRow row in _grid.Rows)
-                    map.Sections.Add(new PartyTempoSection { StartSeconds = Number(row, 0),
-                        Bpm = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? Number(row, 9) : Number(row, 1),
-                        RampToNext = Convert.ToString(row.Cells[10].Value) == "Ramp to next",
-                        RampSeconds = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? Number(row, 2) : 0,
-                        RampStartBpm = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? (double?)Number(row, 1) : null, Style = StyleAt(row),
-                        AlignBeat = Convert.ToBoolean(row.Cells[4].Value ?? false),
-                        CountIn = Convert.ToBoolean(row.Cells[5].Value ?? false),
-                        Rhythm = (PartyRhythm)Array.IndexOf(Rhythms, Convert.ToString(row.Cells[6].Value)),
-                        SwingPercent = Number(row, 7), Speed = SpeedAt(row) });
-                foreach (DataGridViewRow row in _accentGrid.Rows)
-                    map.Accents.Add(new PartyAccentCue { TimeSeconds = Number(row, 0), Strength = Number(row, 1),
-                        PrepareSeconds = Number(row, 2), HoldSeconds = Number(row, 3),
-                        Motion = (PartyAccentMotion)Math.Max(0, Array.IndexOf(AccentMotions, Convert.ToString(row.Cells[4].Value))) });
-                map.Accents = map.Accents.OrderBy(c => c.TimeSeconds).ToList();
-                map.Sections = map.Sections.OrderBy(s => s.StartSeconds).ToList();
-                map.Validate();
+                var map = ReadMap();
                 _save(map); _dirty = false;
                 _status.Text = map.Enabled ? "Saved — map applied. Keep listening and editing; this window stays open." : "Saved — map disabled; original BPM timing restored.";
                 RefreshMarkers();

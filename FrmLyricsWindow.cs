@@ -830,7 +830,11 @@ namespace MusicBeePlugin
                     if (position < 0 || position > (_musicBee.NowPlaying_GetDuration?.Invoke() ?? int.MaxValue))
                         throw new ArgumentException("The selected start is outside this song.");
                     if (!_musicBee.Player_SetPosition(position)) throw new InvalidOperationException("MusicBee rejected the seek.");
-                    _partyClock.Reset(); _playback.Request(false);
+                    _playback.PublishSeek(track, position);
+                    _partyClock.Seek(position, Stopwatch.GetTimestamp(), Stopwatch.Frequency,
+                        _playState == Plugin.PlayState.Playing);
+                    _lastPartyUpdate = 0; UpdatePartyDancers();
+                    _playback.Request(false);
                 },
                 result =>
                 {

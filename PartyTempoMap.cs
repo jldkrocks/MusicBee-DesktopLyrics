@@ -24,9 +24,14 @@ namespace MusicBeePlugin
 
     internal enum PartyAccentMotion { Bop, Rebound, Left, Right, Alternate }
 
+    internal enum PartyAccentPose { Current, Left, Right, Alternate }
+
     internal sealed class PartyAccentCue
     {
         public PartyAccentMotion Motion;
+        public PartyAccentPose? Pose;
+        internal PartyAccentPose EffectivePose => Pose ?? (Motion == PartyAccentMotion.Left ? PartyAccentPose.Left :
+            Motion == PartyAccentMotion.Right ? PartyAccentPose.Right : Motion == PartyAccentMotion.Alternate ? PartyAccentPose.Alternate : PartyAccentPose.Current);
         public double TimeSeconds;
         public double Strength = 1.7;
         public double PrepareSeconds = 0.1;
@@ -45,7 +50,7 @@ namespace MusicBeePlugin
 
         internal void Validate()
         {
-            if ((Version != 1 && Version != 2 && Version != 3 && Version != 4 && Version != 5 && Version != 6) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
+            if ((Version != 1 && Version != 2 && Version != 3 && Version != 4 && Version != 5 && Version != 6 && Version != 7) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
                 Sections.Count == 0 || Sections.Count > 500 || !Finite(InitialBeat))
                 throw new ArgumentException("The map needs a song and 1-500 sections.");
             if (Accents == null || Accents.Count > 1000)
@@ -53,7 +58,7 @@ namespace MusicBeePlugin
             double lastCue = -1;
             foreach (var cue in Accents)
             {
-                if (cue == null || !Enum.IsDefined(typeof(PartyAccentMotion), cue.Motion) || !Finite(cue.TimeSeconds) || cue.TimeSeconds < 0 || cue.TimeSeconds > 604800 ||
+                if (cue == null || !Enum.IsDefined(typeof(PartyAccentMotion), cue.Motion) || (cue.Pose.HasValue && !Enum.IsDefined(typeof(PartyAccentPose), cue.Pose.Value)) || !Finite(cue.TimeSeconds) || cue.TimeSeconds < 0 || cue.TimeSeconds > 604800 ||
                     cue.TimeSeconds <= lastCue || !Finite(cue.Strength) || cue.Strength < 0.5 || cue.Strength > 2.5 ||
                     !Finite(cue.PrepareSeconds) || cue.PrepareSeconds < 0 || cue.PrepareSeconds > 1 ||
                     !Finite(cue.HoldSeconds) || cue.HoldSeconds < 0 || cue.HoldSeconds > 5)
@@ -117,8 +122,8 @@ namespace MusicBeePlugin
                 }
             foreach (var cue in Accents)
             {
-                var side = cue.Motion == PartyAccentMotion.Left ? -1 : cue.Motion == PartyAccentMotion.Right ? 1 :
-                    cue.Motion == PartyAccentMotion.Alternate ? ((alternateIndex++ % 2 == 0) ? -1 : 1) : 0;
+                var side = cue.EffectivePose == PartyAccentPose.Left ? -1 : cue.EffectivePose == PartyAccentPose.Right ? 1 :
+                    cue.EffectivePose == PartyAccentPose.Alternate ? ((alternateIndex++ % 2 == 0) ? -1 : 1) : 0;
                 if (pose.Held && side != 0 && cue.TimeSeconds >= heldStart && cue.TimeSeconds <= seconds)
                     pose.Frame = side < 0 ? 6 : 0;
                 var relative = seconds - cue.TimeSeconds;
@@ -143,21 +148,52 @@ namespace MusicBeePlugin
                     var hit = relative <= strongest.HoldSeconds ? weight : 1 - SmoothStep(recovery / .15);
                     var rebound = recovery <= .15 ? 0 : Math.Sin(Math.PI * Math.Min(1, (recovery - .15) / .27));
                     pose.Impact = (float)(pose.Impact * (1 - weight) + strongest.Strength * (1.35 * hit + .32 * rebound));
-                    if (chosenSide != 0 && relative >= 0)
-                        pose.Frame = chosenSide < 0 ? 6 : 0;
-                    else if (relative >= 0 && !pose.Held)
+                    if (chosenSide == 0 && relative >= 0 && !pose.Held)
                         pose.Frame = CoreAt(strongest.TimeSeconds).Frame;
                     // Use the side drawing itself for lateral emphasis, without translating
                     // outside the existing dancer surface or changing its screen position.
                     pose.Anticipation *= (float)(1 - weight);
                 }
+                if (chosenSide != 0)
+                {
+                    if (seconds >= strongest.TimeSeconds) pose.Frame = chosenSide < 0 ? 6 : 0;
+                    else if (!pose.Held)
+                        pose.Frame = CoreAt(Math.Max(0, strongest.TimeSeconds - strongest.PrepareSeconds)).Frame;
+                }
                 // A cue never modifies beat integration. Only an explicit post-hit
                 // hold pins the drawing; release returns to the running timeline.
-                if (strongest.Motion == PartyAccentMotion.Bop && strongest.HoldSeconds > 0 && seconds >= strongest.TimeSeconds &&
+                if (chosenSide == 0 && strongest.Motion == PartyAccentMotion.Bop && strongest.HoldSeconds > 0 && seconds >= strongest.TimeSeconds &&
                     seconds < strongest.TimeSeconds + strongest.HoldSeconds)
                     pose.Frame = CoreAt(strongest.TimeSeconds).Frame;
             }
+            if (strongest == null && !pose.Held) EaseRestExit(ref pose, seconds);
             return pose;
+        }
+
+        private void EaseRestExit(ref PartyMapPose pose, double seconds)
+        {
+            for (int i = 1; i < Sections.Count; i++)
+            {
+                var section = Sections[i];
+                if (section.StartSeconds > seconds) break;
+                if (seconds >= section.StartSeconds + .12 || section.AlignBeat ||
+                    section.Style == PartyDanceStyle.Rest || section.Style == PartyDanceStyle.Hold ||
+                    Sections[i - 1].Style != PartyDanceStyle.Rest) continue;
+                var restStart = Sections[i - 1].StartSeconds;
+                for (int j = i - 2; j >= 0 && (Sections[j].Style == PartyDanceStyle.Rest || Sections[j].Style == PartyDanceStyle.Hold); j--)
+                    restStart = Sections[j].StartSeconds;
+                if (!Accents.Exists(c => c.EffectivePose != PartyAccentPose.Current && c.TimeSeconds >= restStart && c.TimeSeconds < section.StartSeconds)) return;
+                // Suppress only a tiny intervening pose that returns to the held drawing.
+                // Integration is untouched, so the next full pose lands on the same beat.
+                var heldFrame = At(section.StartSeconds - .000001).Frame;
+                var boundaryFrame = CoreAt(section.StartSeconds).Frame;
+                var lookahead = i + 1 < Sections.Count ? Math.Min(section.StartSeconds + .12, Sections[i + 1].StartSeconds - .000001) : section.StartSeconds + .12;
+                if (lookahead <= section.StartSeconds) return;
+                var nextFrame = CoreAt(lookahead).Frame;
+                if (boundaryFrame != heldFrame && nextFrame == heldFrame && pose.Frame == boundaryFrame)
+                    pose.Frame = heldFrame;
+                return;
+            }
         }
 
         private PartyMapPose CoreAt(double seconds)

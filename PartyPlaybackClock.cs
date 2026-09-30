@@ -31,6 +31,12 @@ namespace MusicBeePlugin
             _samples.Clear();
         }
 
+        internal void Seek(int positionMs, long timestamp, long frequency, bool playing)
+        {
+            Reset();
+            PositionAt(positionMs, timestamp, frequency, playing);
+        }
+
         private void Observe(int position, long timestamp, long frequency)
         {
             while (_samples.Count > 0 &&

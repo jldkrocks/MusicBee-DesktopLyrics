@@ -20,6 +20,7 @@ namespace MusicBeePlugin
             RampShortcutChecks.Run();
             PreviewChecks.Run();
             AccentMotionChecks.Run();
+            Editor47Checks.Run();
             BpmLookupChecks.Run();
             TempoMapChecks.Run();
             RhythmChecks.Run();
