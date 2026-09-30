@@ -32,6 +32,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build isolated Direct2D feasibility probe
         run: msbuild tools/GpuRenderProbe.vcxproj /p:Configuration=Release /p:Platform=x64
+      - name: Build and run isolated lyric quality comparison
+        run: |
+          msbuild tools/TextQualityProbe.vcxproj /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          msbuild tools/TextQualityFixtures.csproj /p:Configuration=Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\tools\bin\Release\TextQualityFixtures.exe tools/text-quality
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\tools\bin\Release\TextQualityProbe.exe tools/text-quality
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build isolated GDI rendering benchmark
         run: msbuild tools/GdiRenderBenchmark.csproj /p:Configuration=Release
       - name: Check GPU composition or safe hardware fallback in both architectures
@@ -44,11 +54,13 @@ jobs:
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: DesktopLyrics-1.15.59.0
+          name: DesktopLyrics-1.15.60.0
           path: |
             bin/Release/mb_DesktopLyrics.dll
             bin/Release/DesktopLyricsGpu.*.dll
             pkg/*.zip
             tools/bin/Release/GpuRenderProbe.exe
             tools/bin/Release/GdiRenderBenchmark.exe
+            tools/bin/Release/TextQuality*.exe
+            tools/text-quality/*
           if-no-files-found: error

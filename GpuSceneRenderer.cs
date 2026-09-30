@@ -48,7 +48,7 @@ namespace MusicBeePlugin
         private DancersFn _dancers;
         private readonly DancerCommand[] _dancerCommands = new DancerCommand[2];
         private readonly Size[] _dancerSizes = new Size[8];
-        private readonly Bitmap[] _dancerSheets = new Bitmap[2]; // at most 48.48 MiB decoded
+        private DancerPosePreparer _dancerPreparation;
         private int _dancerBytes;
         private int _dancerCount;
         internal void BeginDancers() { _dancerCount = 0; }
@@ -60,39 +60,37 @@ namespace MusicBeePlugin
                 _dancerSizes[i]=Size.Empty;
             }
             _dancerBytes=0;
-            for (int i=0;i<2;i++) { _dancerSheets[i]?.Dispose(); _dancerSheets[i]=null; }
+            _dancerPreparation?.Dispose(); _dancerPreparation = null;
         }
-        internal void CommitDancers() { Marshal.ThrowExceptionForHR(_dancers(_renderer,_dancerCommands,_dancerCount)); }
+        internal void CommitDancers() { Marshal.ThrowExceptionForHR(_dancers(_renderer,_dancerCommands,_dancerCount == 2 ? 2 : 0)); }
         internal void AddDancer(int character, Rectangle bounds, int frame, float impact, float sway, float anticipation)
         {
             if (bounds.Width<=0 || bounds.Height<=0) return;
             if (character<0 || character>1 || frame<0 || frame>9 || frame%3!=0 || _dancerCount>=2)
                 throw new ArgumentOutOfRangeException("dancer");
             // Bound the complete four-pose cache before allocating any pixels.
-            int bytes=checked(bounds.Width*bounds.Height*4);
-            if (bytes>8*1024*1024) throw new InvalidOperationException("Dancer pose exceeds GPU budget.");
+            if ((long)bounds.Width*bounds.Height*4>8*1024*1024) throw new InvalidOperationException("Dancer pose exceeds GPU budget.");
             int slot=character*4+frame/3;
-            for (int i=character*4;i<character*4+4;i++) if (!_dancerSizes[i].IsEmpty && _dancerSizes[i]!=bounds.Size) {
-                Marshal.ThrowExceptionForHR(_dancerTexture(_renderer,i,0,0,IntPtr.Zero,0));
-                _dancerBytes-=_dancerSizes[i].Width*_dancerSizes[i].Height*4;_dancerSizes[i]=Size.Empty;
-            }
-            if (_dancerSizes[slot].IsEmpty) {
-                var stamp=Profile?.Stamp ?? 0;
-                // Preserve the existing bicubic enlargement. Only the changing
-                // transform moves to the GPU; dispose the staging raster at once.
-                if (_dancerSheets[character]==null) {
-                    using (var stream=typeof(GpuSceneRenderer).Assembly.GetManifestResourceStream(
-                        character==0?"MusicBeePlugin.PartyRem.png":"MusicBeePlugin.PartyRam.png"))
-                    using (var image=Image.FromStream(stream)) _dancerSheets[character]=new Bitmap(image);
-                }
-                using (var pose=PartyDancerWindow.CreatePose(_dancerSheets[character],bounds.Size,frame)) {
-                    var bits=pose.LockBits(new Rectangle(Point.Empty,pose.Size),ImageLockMode.ReadOnly,PixelFormat.Format32bppPArgb);
-                    try { Marshal.ThrowExceptionForHR(_dancerTexture(_renderer,slot,(uint)pose.Width,(uint)pose.Height,bits.Scan0,(uint)bits.Stride)); }
+            if (_dancerPreparation == null) _dancerPreparation = new DancerPosePreparer();
+            _dancerPreparation.Request(character, bounds.Size, frame);
+            // Upload prepared poses on this thread only. Existing textures remain
+            // usable during resize; no decode or bicubic raster runs on the UI thread.
+            for (int i = character * 4; i < character * 4 + 4; i++) {
+                using (var pose = _dancerPreparation.Take(i)) {
+                    if (pose == null) continue;
+                    var stamp = Profile?.Stamp ?? 0;
+                    var bits = pose.LockBits(new Rectangle(Point.Empty, pose.Size), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+                    try { Marshal.ThrowExceptionForHR(_dancerTexture(_renderer, i, (uint)pose.Width, (uint)pose.Height, bits.Scan0, (uint)bits.Stride)); }
                     finally { pose.UnlockBits(bits); }
+                    _dancerBytes -= _dancerSizes[i].Width * _dancerSizes[i].Height * 4;
+                    _dancerSizes[i] = pose.Size;
+                    _dancerBytes += pose.Width * pose.Height * 4;
+                    Profile?.End(RenderMetric.DancerTextureUpload, stamp);
                 }
-                _dancerSizes[slot]=bounds.Size;_dancerBytes+=bytes;
-                Profile?.End(RenderMetric.DancerTextureUpload,stamp);
             }
+            // A cold pose is omitted until ready, never substituted with another
+            // beat's pose. The next frame always uses the current animation state.
+            if (_dancerSizes[slot].IsEmpty) return;
             var destination=PartyDancerWindow.PoseDestination(bounds.Size,impact,sway,anticipation);
             // The cached pose is already the destination width. GDI's nearest
             // sampling rounds exact half-pixel translations toward the lower
@@ -218,7 +216,7 @@ namespace MusicBeePlugin
         {
             Foreground?.Dispose(); Foreground = null;
             Array.Clear(_textImages,0,_textImages.Length);
-            for (int i=0;i<2;i++) { _dancerSheets[i]?.Dispose(); _dancerSheets[i]=null; }
+            _dancerPreparation?.Dispose(); _dancerPreparation = null;
             if (_renderer != IntPtr.Zero) { _destroy(_renderer); _renderer = IntPtr.Zero; }
             if (_library != IntPtr.Zero) { FreeLibrary(_library); _library = IntPtr.Zero; }
         }

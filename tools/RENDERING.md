@@ -1,3 +1,17 @@
+## Checkpoint 1.15.60: bounded asynchronous sprite preparation and text investigation
+
+Scope: user-approved 59 artwork is unchanged. Maximized GPU sprites prepare on one serial background worker, replacing obsolete resize requests; no playback state is accessed. Cached textures continue to scale during resize. A cold pair appears only after its current poses are ready. Restored/GDI dancers retain their existing path in this checkpoint.
+
+Acceptance established before implementation: remove at least half of cold UI preparation stalls and 20% of uncached-pose UI preparation stalls; unchanged artwork/pose mapping, bounded cache, no warm frame cadence regression. Format-only experiments were rejected: PNG decode/copy ~64-70 ms per sheet plus ~29 ms bicubic per pose; raw Deflate storage was slower/larger. Premultiplication alone reduces per-pose scaling to ~22 ms but still blocks. Worker preparation therefore addresses UI stalls, not total time until first appearance.
+
+Initial three-run cold test: maximum UI pair preparation/upload 2.51-4.53 ms versus59 initial204 ms and uncached61-64 ms. First pair ready211-230 ms; all eight poses ready351-356 ms. Resize UI maximum0.81-0.89 ms; first new pair46-47 ms and all171-173 ms. This moves work rather than claiming decoding vanished. Standalone DancerPreparationBenchmark reproduces these measurements, separately from steady rendering benchmarks.
+
+The existing native eight-pose cache remains capped64 MiB nominal. Worker retains two premultiplied source sheets48.48 MiB, at most eight pending display poses64 MiB, one in-flight pose8 MiB; decoded PNG/conversion buffers are temporary. Pending poses are disposed immediately after upload and do not accumulate per size/song. Rapid resize keeps only latest dimensions; shutdown discards in-flight work without joining the UI thread. One shared serial scheduler prevents concurrent decoders across replacement owners. Preparation exceptions propagate into the existing GDI fallback. No new runtime dependencies/native ABI.
+
+TextQualityFixtures uses the production GDI layout, fitted size, line breaks and raster path. TextQualityProbe is a standalone DirectWrite outline/WIC experiment with the same strings, font, size, outline/shadow and ink-bound centering. It outputs small/4K Latin, English, CJK, combining-accent and Arabic samples at1x/1.12x. It deliberately does not replace production text rendering. Windows dwrite/d2d1/windowscodecs are built-in components; the executable is not part of the normal plugin ZIP. Its software PNG output is not a GPU throughput test. Decoration/colour-font support and production cache/device-loss behavior remain prerequisites for any eventual text port. Microsoft custom renderer reference: https://learn.microsoft.com/en-us/windows/win32/directwrite/how-to-implement-a-custom-text-renderer
+
+Validation and final comparative results will be recorded after CI and benchmark completion. Actual 4K TV feedback remains the final check.
+
 ## Checkpoint 8: approved upscaled sprites, 1.15.59
 
 Four reviewed 900x1765 source poses per character, packed in logical order 0/3/6/9. Both rendering paths use the same mapping. Pixel verification confirms every packed cell matches the approved preview exactly. No changes to animation state, clocks, tempo maps, song storage, display layout, native helpers or GPU cache limits.

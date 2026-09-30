@@ -196,6 +196,18 @@ class GpuCompositionChecks
         }
         Console.WriteLine("Lyric texture cache remained bounded through repeated uploads/evictions.");
     }
+    static void WaitDancers(object renderer,Rectangle[] bounds,int frame,float impact,float sway,float anticipation)
+    {
+        var watch=Stopwatch.StartNew();
+        while(true) {
+            Call(renderer,"BeginDancers");
+            for(int i=0;i<2;i++)Call(renderer,"AddDancer",i,bounds[i],frame,impact,sway,anticipation);
+            var sizes=(Size[])Get(renderer,"_dancerSizes");
+            if(sizes[frame/3]==bounds[0].Size && sizes[4+frame/3]==bounds[1].Size)return;
+            Check(watch.ElapsedMilliseconds<10000,"Asynchronous dancer preparation timed out");
+            System.Threading.Thread.Sleep(1);
+        }
+    }
     static void DancerChecks(Assembly assembly,Form form)
     {
         var dancerType=assembly.GetType("MusicBeePlugin.PartyDancerWindow");
@@ -225,8 +237,7 @@ class GpuCompositionChecks
                         g.DrawImageUnscaled((Bitmap)Get(pair.Dancer,"_surface"),bounds[pair.Index].Location);
                     }
                 }
-                Call(renderer,"BeginDancers");
-                for(int i=0;i<2;i++)Call(renderer,"AddDancer",i,bounds[i],frame,impact,sway,anticipation);
+                WaitDancers(renderer,bounds,frame,impact,sway,anticipation);
                 Call(renderer,"CommitDancers");
                 using(var g=Graphics.FromImage(actual)) {
                     var dc=g.GetHdc();try{Call(renderer,"Draw",Get(form,"_palette"),Get(form,"_bars"),true,dc);}finally{g.ReleaseHdc(dc);}
@@ -247,8 +258,21 @@ class GpuCompositionChecks
             }
             actual.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"gpu-check-images","dancers-gpu.png"));
             expected.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"gpu-check-images","dancers-gdi.png"));
+            // Rapid obsolete requests must converge to only the latest size.
+            for(int n=0;n<40;n++) {
+                Call(renderer,"BeginDancers");
+                for(int c=0;c<2;c++)Call(renderer,"AddDancer",c,new Rectangle(0,0,400+n,800+n),n%4*3,0f,0f,0f);
+            }
+            var latest=new[]{new Rectangle(0,0,500,980),new Rectangle(600,0,500,980)};
+            foreach(int frame in new[]{0,3,6,9})WaitDancers(renderer,latest,frame,0,0,0);
+            Check(((Size[])Get(renderer,"_dancerSizes")).All(s=>s==latest[0].Size),"Obsolete resize result replaced current poses");
+            var preparation=Get(renderer,"_dancerPreparation");
             Call(renderer,"ClearDancers");Check((int)Get(renderer,"_dancerBytes")==0,"Restore must release dancer cache");
-            Check(((Bitmap[])Get(renderer,"_dancerSheets")).All(b=>b==null),"Restore must release decoded sheets");
+            var release=Stopwatch.StartNew();
+            while((bool)Get(preparation,"_running") && release.ElapsedMilliseconds<5000)System.Threading.Thread.Sleep(1);
+            Check(((Bitmap[])Get(preparation,"_sources")).All(b=>b==null),"Restore must release worker sources");
+            Check(((Bitmap[])Get(preparation,"_ready")).All(b=>b==null),"Restore must release pending poses");
+            Check(Get(renderer,"_dancerPreparation")==null,"Restore retained preparation owner");
             Console.WriteLine("Dancer-region RGB mean error, worst case: "+worst.ToString("F3"));
         }
         // Production path: no clock calls and no foreground refresh for a
@@ -259,6 +283,8 @@ class GpuCompositionChecks
         Set(form,"_rightPartyBounds",form.RectangleToScreen(new Rectangle(3011,200,829,1626)));
         form.Invalidate();Check((bool)Call(form,"TryDrawGpu"),"GPU dancers failed");
         var gpu=Get(form,"_gpu");var generation=Get(gpu,"_capture");
+        foreach(int frame in new[]{0,3,6,9})WaitDancers(gpu,
+            new[]{new Rectangle(0,200,829,1626),new Rectangle(3011,200,829,1626)},frame,1f,0,0);
         for(int i=0;i<12;i++) {
             Set(form,"_partyVisualFrame",i%4*3);Set(form,"_partyVisualImpact",i*.1f);
             Check((bool)Call(form,"TryDrawGpu"),"Moving GPU dancer failed");
