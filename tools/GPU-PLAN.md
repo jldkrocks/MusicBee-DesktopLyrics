@@ -1,6 +1,16 @@
 # GPU rendering checkpoint
 
-Current status: version1.15.55 adds bounded high-resolution presentation wakeups and60/120 FPS targets after live54 captures confirmed a roughly40 FPS timer limit. Version54's GPU lyric composition improved MusicBee responsiveness. See `RENDERING.md` for the current backend, pacing, fallback, packaging, measurements and acceptance gates. The older probe notes below describe the original feasibility stage, not the current plugin's full feature set. DirectWrite, GPU dancers and additional effects remain deferred; live120 Hz TV validation is still required.
+Current checkpoint: version1.15.56 retains the artwork/queue/control overlay during GPU lyric motion. Version55's 60/120 FPS pacer measured about116 live draws/s; the user reports an NVIDIA global116FPS cap. The cap is a plausible explanation, not an independently verified cause. See `RENDERING.md` for measurements and gates. The older probe notes below are historical.
+
+User-authorized existing-feature sequence, developed as separate working checkpoints with TV feedback before expanding:
+1. Lyric/foreground separation: current checkpoint. Upcoming-text preparation remains a possible follow-up if new-glyph stalls justify it.
+2. GPU composition of existing dancer poses/squash/rebound/sway, preserving choreography and clocks; retain support for separate restored-window dancers.
+3. Investigate DirectWrite text quality/scaling with strict wrapping/font/outline compatibility checks. Do not assume a performance win.
+4. Artwork crossfades coordinated with existing background colour transitions.
+5. Spectrum visual polish, with bounded optional peak indicators/bar styles/glow and measured cost.
+6. Queue expansion and control feedback/fades using retained layers.
+
+None of items2-6 is implemented by the foreground checkpoint. Previously planned accent-beat selection and song-programmed celebratory effects remain later work.
 
 The plugin still uses GDI+. Keep that renderer until the complete replacement passes visual and interaction checks. Do not claim that the isolated probe enables GPU rendering in MusicBee.
 

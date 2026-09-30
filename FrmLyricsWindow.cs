@@ -24,6 +24,15 @@ namespace MusicBeePlugin
         private RenderProfile _renderProfile;
         private GpuSceneRenderer _gpu;
         private GpuSceneRenderer _gpuLyrics;
+        private bool _gpuLyricsOnly;
+        private void ComposeGpuLyrics(GpuSceneRenderer renderer, long? diagnosticTimestamp = null)
+        {
+            // Commands reference the existing text textures. Do not clear,
+            // repaint or upload the retained artwork/queue/control bitmap.
+            _gpuLyricsOnly = true;
+            try { RasterGpuForeground(renderer, diagnosticTimestamp); }
+            finally { _gpuLyricsOnly = false; }
+        }
         private void RasterGpuForeground(GpuSceneRenderer renderer, long? diagnosticTimestamp = null)
         {
             renderer.Profile=_renderProfile;
@@ -40,7 +49,7 @@ namespace MusicBeePlugin
         private string _gpuFailure;
         private double _foregroundAutoBpm;
         private bool _foregroundNoSignal;
-        private bool _foregroundNotice, _foregroundPaletteMoving;
+        private bool _foregroundNotice, _foregroundPaletteMoving, _foregroundTransition;
 
         [StructLayout(LayoutKind.Sequential)] private struct PaintState
         {
@@ -98,7 +107,8 @@ namespace MusicBeePlugin
                 }
                 var autoBpm = Math.Round(_partyBeat.Bpm, 1);
                 var noSignal = _partySpectrumMisses >= 30;
-                var redraw = _foregroundDirty || _transitionStarted != 0 || _paletteStarted != 0 ||
+                var transitioning = _transitionStarted != 0;
+                var redraw = _foregroundDirty || (_foregroundTransition && !transitioning) || _paletteStarted != 0 ||
                     HasQueueNotice || _foregroundNotice || _foregroundPaletteMoving ||
                     _foregroundAutoBpm != autoBpm || _foregroundNoSignal != noSignal;
                 if (redraw)
@@ -112,6 +122,16 @@ namespace MusicBeePlugin
                     _foregroundDirty = false; _foregroundAutoBpm = autoBpm; _foregroundNoSignal = noSignal;
                     _foregroundNotice = HasQueueNotice; _foregroundPaletteMoving = _paletteStarted != 0;
                 }
+                else if (transitioning)
+                {
+                    var stamp = _renderProfile?.Stamp ?? 0;
+                    ComposeGpuLyrics(_gpu);
+                    _renderProfile?.End(RenderMetric.LyricCompose, stamp);
+                }
+                // The final transition can change compact artwork/queue
+                // placement when a translation disappears. Refresh once on
+                // the following frame, using the completed layout.
+                _foregroundTransition = transitioning;
                 var submitted = _renderProfile?.Stamp ?? 0;
                 _gpu.Profile=_renderProfile;
                 _gpu.Draw(_palette, _bars, _settings.ShowVisualizer);
@@ -2078,10 +2098,14 @@ namespace MusicBeePlugin
         {
             var stamp = _renderProfile?.Stamp ?? 0;
             var g = e.Graphics;
+            var drawOverlay = !_gpuLyricsOnly;
             // Clear the entire double buffer before every frame. A sizing
             // operation can expose new pixels beyond the last WM_PAINT region.
-            g.Clear(foregroundOnly ? Color.Transparent : _settings.TransparentCanvas ? ClearKey : BackColor);
-            _renderProfile?.End(RenderMetric.Clear, stamp);
+            if (drawOverlay)
+            {
+                g.Clear(foregroundOnly ? Color.Transparent : _settings.TransparentCanvas ? ClearKey : BackColor);
+                _renderProfile?.End(RenderMetric.Clear, stamp);
+            }
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             var client = ClientRectangle;
@@ -2125,11 +2149,11 @@ namespace MusicBeePlugin
                 (bounds.Width < 700 || region.Height < 130)) artSize = 0;
             if (stage && _settings.ShowAlbumArt) artSize = MaximizedHeaderSize(bounds);
             stamp = _renderProfile?.Stamp ?? 0;
-            if (artSize > 0)
+            if (drawOverlay && artSize > 0)
                 DrawAlbumArt(g, new RectangleF(stage ? Math.Max(24, bounds.Width / 40) : 16,
                     stage ? 56 : Math.Max(topInset - 4f, (bounds.Height - artSize) / 2f),
                     artSize, artSize));
-            _renderProfile?.End(RenderMetric.Artwork, stamp);
+            if (drawOverlay) _renderProfile?.End(RenderMetric.Artwork, stamp);
             stamp = _renderProfile?.Stamp ?? 0;
             var panelLeft = stage ? Math.Max(24, bounds.Width / 40) : artSize > 0 ? (int)(16 + artSize + 15) : 13;
             // Equal margins keep the lyric centred over the transport controls.
@@ -2271,6 +2295,8 @@ namespace MusicBeePlugin
             }
             g.Restore(lyricClip);
             _renderProfile?.End(RenderMetric.Lyrics, stamp);
+            if (drawOverlay)
+            {
             stamp = _renderProfile?.Stamp ?? 0;
             DrawUpcomingQueue(g, bounds, panelLeft);
             _renderProfile?.End(RenderMetric.Queue, stamp);
@@ -2291,10 +2317,11 @@ namespace MusicBeePlugin
             DrawResizeGrip(g, bounds);
             _renderProfile?.End(RenderMetric.Controls, stamp);
             }
+            }
             finally
             {
                 g.Restore(state);
-                if (gutter > 0) OffsetHitTargets(gutter);
+                if (drawOverlay && gutter > 0) OffsetHitTargets(gutter);
             }
         }
 

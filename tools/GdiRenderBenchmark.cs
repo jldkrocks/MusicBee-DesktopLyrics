@@ -93,6 +93,7 @@ class GdiRenderBenchmark
                     { "process_bits", IntPtr.Size * 8 }, { "logical_processors", Environment.ProcessorCount },
                     { "paced_60_workload", paced },
                     { "fresh_lyrics_every_2s", freshLyrics },
+                    { "invalidate_at_lyric_change", true },
                     { "frame_target_fps", messageFps }, { "legacy_timer", legacyTimer },
                     { "cadence_note", "Synthetic hidden-window submissions, not physical presentation or MusicBee responsiveness" },
                     { "remote_session", SystemInformation.TerminalServerSession }
@@ -103,6 +104,7 @@ class GdiRenderBenchmark
                 int height = size.Width > 1000 ? 1626 : 454, width = (int)Math.Round(height * 180d / 353);
                 var watch = Stopwatch.StartNew();
                 double nextFrame = 0;
+                int lastVerse = -1;
                 string json = null;
                 using (var bitmap = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb))
                 using (var g = Graphics.FromImage(bitmap))
@@ -116,6 +118,10 @@ class GdiRenderBenchmark
                             nextFrame = watch.Elapsed.TotalSeconds + 1d / 60;
                         }
                         double t = watch.Elapsed.TotalSeconds;
+                        // Match UpdateLyrics' invalidation without calling its
+                        // live artwork/track lookup in this synthetic fixture.
+                        int currentVerse = (int)(t / 2);
+                        if (currentVerse != lastVerse) { form.Invalidate(); lastVerse = currentVerse; }
                         if(freshLyrics) {
                             int verse=(int)(t/2);
                             Set(form,"_line1","Current lyrics stay readable while the music and dancers move " + verse);

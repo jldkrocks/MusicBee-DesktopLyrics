@@ -1,5 +1,19 @@
 # Rendering checkpoints and acceptance criteria
 
+## Checkpoint 5: retained foreground during lyric motion, version 1.15.56
+
+User authorized working down the existing-feature improvement list, starting with lyrics/foreground separation. They also reported a global NVIDIA 116 FPS cap used with G-SYNC. This is consistent with the live55 ceiling but has not been independently confirmed for MusicBee. Do not bypass or change that setting, or treat 116 draws/s alone as a regression.
+
+All six live55 captures are preserved in `render-live-1.15.55.json` and `../render55-live`. All measured frames have original/English/preview lyrics and GPU use. Restored: 116.00-116.03 draws/s, mean interval8.620ms, p95 9.41-9.47ms, p99 9.92-10.09ms. Maximized3840x2137: 115.63-115.67 draws/s, mean8.65ms, p95 10.71-10.74ms, p99 12.40-12.52ms, maximum24.66ms; 0.20-0.23% exceed16.667ms, none exceed33.333ms. Main-UI heartbeat maxima4.97-5.80ms and whole-host CPU2.37-2.49% of the16-logical-processor machine at4K are encouraging, but not a guarantee of perceived smoothness. Formal uncapped120 criteria were narrowly missed; the reported cap is a likely confounder. GPU submit wall time includes driver/presentation waits, not just GPU execution.
+
+The actionable remaining costs are the foreground redraw/upload tails: at4K redraw mean2.51-2.65ms, p99 13.54-14.01ms; upload mean1.23-1.36ms, p99 6.34-7.03ms. Aggregate reports do not correlate individual spikes with exact lyric timestamps. Source inspection confirms every300ms lyric transition used to repaint and upload the entire retained artwork/queue/controls bitmap, even when those pixels did not change.
+
+Acceptance stated before implementation: remove at least80% of full foreground uploads during lyric-only motion, preserve existing pixel appearance and hit testing, pass the full regression and both GPU architectures/fallback checks, and compare identical all-layer workloads at restored/4K sizes. Driver-capped average FPS is not the sole success measure. Palette changes, notices and actual UI changes still legitimately repaint the overlay.
+
+This checkpoint separates GPU lyric command capture from overlay rasterization. Moving/scaling/fading text and the lyric card reuse the existing textures without clearing, painting or uploading the retained overlay. Explicit UI invalidations still refresh it; a final layout refresh handles compact artwork/queue changes when translations disappear. Hit rectangles are offset only when the corresponding controls are redrawn, preventing accumulated gutter offsets. `LyricCompose` is a new opt-in diagnostic metric. Font creation remains GDI; no new font preparation thread, cache, playback clock, dependency or native ABI is introduced. BPM/maps/lyric timing, saved English and song data are untouched. Existing GDI fallback remains intact.
+
+The hardware tests now compare GDI against GPU frames that actually reuse an earlier overlay while advancing lyric motion, including English arrival/change, preview promotion and compact/4K clipping. An isolated production-path transition test requires all12 moving frames to keep overlay pixels and hit rectangles unchanged with zero full rasterizations/uploads, while updating commands every frame. Final layout and explicit invalidation still refresh correctly. Measurements and verified installation will be recorded when complete.
+
 ## Checkpoint 4: presentation pacing, version 1.15.55
 
 The user's six 1.15.54 captures are preserved in `render-live-1.15.54.json` (workspace originals in `../render54-live`). All measured frames contain original, English and upcoming lyrics and use the GPU. The user reports noticeably smoother MusicBee scrolling at 4K, but lyrics still look low FPS, and requests a 120 FPS target on their 120 Hz displays/RTX 5090.

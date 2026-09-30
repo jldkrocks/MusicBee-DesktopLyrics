@@ -81,6 +81,7 @@ class GpuCompositionChecks
                 }
                 // Inject the actual HRESULT a lost D2D target returns, at the
                 // managed/native boundary. This does not reset the display driver.
+                RetainedForegroundChecks(assembly,form);
                 gpu=Get(form,"_gpu");var draw=gpu.GetType().GetField("_draw",Flags);
                 var parameters=draw.FieldType.GetMethod("Invoke").GetParameters().Select(p=>Expression.Parameter(p.ParameterType,p.Name)).ToArray();
                 draw.SetValue(gpu,Expression.Lambda(draw.FieldType,Expression.Constant(unchecked((int)0x8899000C)),parameters).Compile());
@@ -140,6 +141,43 @@ class GpuCompositionChecks
         for(int y=0;y<a.Height;y+=3)for(int x=0;x<a.Width;x+=3)if(a.GetPixel(x,y)!=b.GetPixel(x,y))return false;
         return true;
     }
+    static void RetainedForegroundChecks(Assembly assembly,Form form)
+    {
+        // Isolate lyric motion from palette/notice/UI invalidations. Production
+        // TryDrawGpu must update commands without uploading the full overlay.
+        form.WindowState=FormWindowState.Maximized;form.ClientSize=new Size(3840,2160);
+        Set(form,"_transitionStarted",0L);Set(form,"_paletteStarted",0L);
+        form.Invalidate();Check((bool)Call(form,"TryDrawGpu"),"Initial retained overlay failed");
+        var profileType=assembly.GetType("MusicBeePlugin.RenderProfile");
+        var profile=Activator.CreateInstance(profileType,Flags,null,new object[]{
+            new System.Collections.Generic.Dictionary<string,object>(),null,null,30d,0d,false},null);
+        Set(form,"_renderProfile",profile);
+        var gpu=Get(form,"_gpu");
+        var foreground=(Bitmap)gpu.GetType().GetProperty("Foreground",Flags).GetValue(gpu);
+        using(var original=(Bitmap)foreground.Clone()) {
+            var party=Get(form,"_partyButton");var queue=Get(form,"_queueCard");
+            var generation=(long)Get(gpu,"_capture");
+            for(int i=0;i<12;i++) {
+                Set(form,"_transitionStarted",Stopwatch.GetTimestamp()-(long)(.02*Stopwatch.Frequency));
+                Check((bool)Call(form,"TryDrawGpu"),"Lyric-only frame failed");
+            }
+            Check((long)Get(gpu,"_capture")==generation+12,"Each lyric frame must update GPU commands");
+            Check(EqualPixels(original,foreground),"Lyric-only motion changed retained overlay pixels");
+            Check(party.Equals(Get(form,"_partyButton")) && queue.Equals(Get(form,"_queueCard")),"Retained hit targets drifted across frames");
+        }
+        var samples=(Array)Get(profile,"_samples");
+        var metric=assembly.GetType("MusicBeePlugin.RenderMetric");
+        Func<string,int> count=name=>(samples.GetValue(Convert.ToInt32(Enum.Parse(metric,name))) as System.Collections.ICollection)?.Count ?? 0;
+        Check(count("ForegroundUpload")==0 && count("ForegroundRaster")==0 && count("LyricCompose")==12,
+            "Lyric-only frames must eliminate full foreground redraws/uploads");
+        Call(profile,"Finish","retained transition check");
+        Set(form,"_renderProfile",null);
+        // Final layout cleanup plus explicit UI invalidation still refresh.
+        Set(form,"_transitionStarted",0L);Call(form,"TryDrawGpu");
+        Check(!(bool)Get(form,"_foregroundTransition"),"Completed transition must finalize retained layout");
+        form.Invalidate();Check((bool)Call(form,"TryDrawGpu") && !(bool)Get(form,"_foregroundDirty"),"UI invalidation must refresh retained foreground");
+        Console.WriteLine("Lyric-only frames retained overlay pixels/hit targets and eliminated all 12 full uploads.");
+    }
     static void TextureBudget(Assembly assembly,Form form)
     {
         using(var renderer=(IDisposable)Activator.CreateInstance(assembly.GetType("MusicBeePlugin.GpuSceneRenderer"),Flags,null,
@@ -179,8 +217,15 @@ class GpuCompositionChecks
             using(var g=Graphics.FromImage(expected))Call(form,"DrawScene",new PaintEventArgs(g,form.ClientRectangle),false,instant);
             var foreground=(Bitmap)renderer.GetType().GetProperty("Foreground",Flags).GetValue(renderer);
             reset();
-            Call(form,"RasterGpuForeground",renderer,instant);
+            long prime=progress.HasValue?instant-(long)(progress.Value*.15*Stopwatch.Frequency):instant;
+            Call(form,"RasterGpuForeground",renderer,prime);
             Call(renderer,"Upload");
+            if(progress.HasValue) {
+                using(var retained=(Bitmap)foreground.Clone()) {
+                    Call(form,"ComposeGpuLyrics",renderer,instant);
+                    Check(EqualPixels(retained,foreground),"Lyric composition repainted the overlay");
+                }
+            }
             using(var g=Graphics.FromImage(actual)) {
                 var dc=g.GetHdc();
                 try {Call(renderer,"Draw",Get(form,"_palette"),Get(form,"_bars"),true,dc);}
