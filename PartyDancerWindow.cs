@@ -15,8 +15,9 @@ namespace MusicBeePlugin
     {
         internal RenderProfile Profile;
         // Source resolution only. Layout keeps the same 180:353 aspect ratio.
-        private const int FrameWidth = 360;
-        private const int FrameHeight = 706;
+        private const int FrameWidth = 900;
+        private const int FrameHeight = 1765;
+        private const int SourcePoseCount = 4;
         private const int WsExLayered = 0x80000;
         private const int WsExTransparent = 0x20;
         private const int WsExNoActivate = 0x08000000;
@@ -94,7 +95,7 @@ namespace MusicBeePlugin
                 if (stream == null) throw new InvalidOperationException("Party sprite is missing: " + resourceName);
                 using (var image = Image.FromStream(stream)) _sheet = new Bitmap(image);
             }
-            if (_sheet.Width != FrameWidth * PartyAnimation.FrameCount ||
+            if (_sheet.Width != FrameWidth * SourcePoseCount ||
                 _sheet.Height != FrameHeight)
                 throw new InvalidOperationException("The party sprite has an unexpected size.");
             FormBorderStyle = FormBorderStyle.None;
@@ -173,13 +174,16 @@ namespace MusicBeePlugin
 
         internal static Bitmap CreatePose(Bitmap sheet, Size size, int frame)
         {
+            // The animation keeps logical frames 0/3/6/9; the source packs only those four poses.
+            if (frame < 0 || frame >= PartyAnimation.FrameCount || frame % 3 != 0)
+                throw new ArgumentOutOfRangeException(nameof(frame));
             var pose = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
             try {
                 using (var g = Graphics.FromImage(pose)) {
                     g.CompositingMode = CompositingMode.SourceCopy;
                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                     g.DrawImage(sheet, new Rectangle(Point.Empty,size),
-                        new Rectangle(frame*FrameWidth,0,FrameWidth,FrameHeight),GraphicsUnit.Pixel);
+                        new Rectangle((frame / 3)*FrameWidth,0,FrameWidth,FrameHeight),GraphicsUnit.Pixel);
                 }
                 return pose;
             } catch { pose.Dispose(); throw; }

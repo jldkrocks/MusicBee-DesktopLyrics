@@ -1,6 +1,6 @@
 # GPU rendering checkpoint
 
-Current checkpoint: version1.15.58 installs approved higher-detail GIF-derived dancer sprites. Version57 GPU dancer live captures have been reviewed, showing improved4K frame tails. New artwork awaits TV visual feedback. A separate AI upscale sample is preview-only. The reported NVIDIA116FPS cap is unchanged; see RENDERING.md for measurements and limitations.
+Current checkpoint: version 1.15.59 integrates the user-approved refined AI-upscaled dancer poses, with four packed source cells per dancer and unchanged choreography. Validation/installation progress is recorded in RESUME.md. Version 57 GPU dancer live captures showed improved 4K frame tails. The reported NVIDIA116FPS cap is unchanged; see RENDERING.md for measurements and limitations.
 
 User-authorized existing-feature sequence, developed as separate working checkpoints with TV feedback before expanding:
 1. Lyric/foreground separation: completed and user-validated in56. Upcoming-text preparation remains a possible follow-up if new-glyph stalls justify it.
@@ -10,7 +10,7 @@ User-authorized existing-feature sequence, developed as separate working checkpo
 5. Spectrum visual polish, with bounded optional peak indicators/bar styles/glow and measured cost.
 6. Queue expansion and control feedback/fades using retained layers.
 
-Items3-6 remain unimplemented. Original dancer assets are unchanged; optional upscaling needs a separate visual comparison to protect outlines/details and pose consistency. Previously planned accent-beat selection and song-programmed celebratory effects remain later work.
+Items3-6 remain unimplemented. The upscaled dancer sets have completed separate visual review; actual in-plugin 4K validation remains required after installation. Previously planned accent-beat selection and song-programmed celebratory effects remain later work.
 
 ## Historical pre-integration notes
 

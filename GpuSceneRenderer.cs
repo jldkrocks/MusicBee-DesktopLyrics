@@ -48,7 +48,7 @@ namespace MusicBeePlugin
         private DancersFn _dancers;
         private readonly DancerCommand[] _dancerCommands = new DancerCommand[2];
         private readonly Size[] _dancerSizes = new Size[8];
-        private readonly Bitmap[] _dancerSheets = new Bitmap[2]; // at most 23.27 MiB decoded
+        private readonly Bitmap[] _dancerSheets = new Bitmap[2]; // at most 48.48 MiB decoded
         private int _dancerBytes;
         private int _dancerCount;
         internal void BeginDancers() { _dancerCount = 0; }
