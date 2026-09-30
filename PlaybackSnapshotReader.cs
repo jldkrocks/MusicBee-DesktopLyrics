@@ -8,7 +8,7 @@ namespace MusicBeePlugin
         internal sealed class Snapshot
         {
             internal Plugin.PlayState State;
-            internal int Position, Count;
+            internal int Position, Count, Duration;
             internal string TrackUrl;
             internal float[] Spectrum = new float[4096];
         }
@@ -30,6 +30,7 @@ namespace MusicBeePlugin
                     next.TrackUrl = _api.NowPlaying_GetFileUrl?.Invoke();
                     next.State = _api.Player_GetPlayState();
                     next.Position = Math.Max(0, _api.Player_GetPosition());
+                    next.Duration = Math.Max(0, _api.NowPlaying_GetDuration?.Invoke() ?? 0);
                     if (spectrum && next.State == Plugin.PlayState.Playing && _api.NowPlaying_GetSpectrumData != null)
                         next.Count = Math.Max(0, Math.Min(next.Spectrum.Length, _api.NowPlaying_GetSpectrumData(next.Spectrum)));
                     // Do not publish data spanning a track switch.

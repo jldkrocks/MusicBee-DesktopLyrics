@@ -34,14 +34,14 @@ internal static class TimelineChecks
         map.Sections.Add(new PartyTempoSection { StartSeconds = 20, Bpm = 120, CountIn = true, Rhythm = PartyRhythm.Waltz });
         double? position = 10; int saved = 0; PartyTempoMap last = null; int requestedSeek = -1;
         using (var editor = new FrmPartyTempoMap(map, "Test song", () => position,
-            p => requestedSeek = p, m => { saved++; last = m; }, 100, () => {}, () => true))
+            p => requestedSeek = p, m => { saved++; last = m; }, 100, () => {}, () => false))
         {
             Call(editor, "SaveMap");
             if (saved != 1 || editor.IsDisposed || editor.DialogResult != DialogResult.None)
                 throw new Exception("Save must apply without closing the editor.");
             var grid = (DataGridView)Field(editor, "_grid");
             if (Convert.ToString(grid.Rows[0].Cells[3].Value) != "Normal" || Convert.ToString(grid.Rows[0].Cells[8].Value) != "Half (0.5x)" ||
-                last.Sections[0].Style != PartyDanceStyle.Normal || last.Sections[0].Speed != 0.5 || last.Version != 4)
+                last.Sections[0].Style != PartyDanceStyle.Normal || last.Sections[0].Speed != 0.5 || last.Version != 5)
                 throw new Exception("Editor must preserve legacy Half speed as an independent speed choice.");
             if (!Convert.ToBoolean(grid.Rows[1].Cells[5].Value) || !last.Sections[1].CountIn)
                 throw new Exception("Editor must load and save the count-in checkbox.");
@@ -83,7 +83,7 @@ internal static class TimelineChecks
             Call(editor, "SaveMap");
             if (last.TrackUrl != "original") throw new Exception("Save must stay attached to the original song.");
             editor.Opacity = 0; editor.Show(); Application.DoEvents();
-            foreach (var column in new[] { 3, 6, 8 })
+            foreach (var column in new[] { 3, 6, 8, 10 })
             {
                 grid.CurrentCell = grid.Rows[0].Cells[0];
                 grid.CurrentCell = grid.Rows[1].Cells[column];

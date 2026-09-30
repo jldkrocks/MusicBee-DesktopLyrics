@@ -523,10 +523,15 @@ namespace MusicBeePlugin
 
         private void TogglePlayback()
         {
-            if (_playCommandPending) return;
             RefreshPlayState();
+            RequestPlayback(_playState != Plugin.PlayState.Playing);
+        }
+
+        private void RequestPlayback(bool playing, Action<bool> completed = null, string requiredTrack = null)
+        {
+            if (_playCommandPending) { completed?.Invoke(false); return; }
             var before = _playState;
-            _requestedPlayState = before == Plugin.PlayState.Playing ? Plugin.PlayState.Paused : Plugin.PlayState.Playing;
+            _requestedPlayState = playing ? Plugin.PlayState.Playing : Plugin.PlayState.Paused;
             _playStateRequestedAt = Stopwatch.GetTimestamp();
             _playState = _requestedPlayState.Value;
             _playCommandPending = true;
@@ -543,6 +548,7 @@ namespace MusicBeePlugin
                     if (!accepted) { _requestedPlayState = null; _playState = before; }
                     _playback.Request(true);
                     Invalidate();
+                    completed?.Invoke(accepted);
                 })); } catch (InvalidOperationException) { }
             };
             try
@@ -550,7 +556,8 @@ namespace MusicBeePlugin
                 _dispatchPlayerCommand(() =>
                 {
                     var accepted = false;
-                    try { accepted = _musicBee.Player_PlayPause(); }
+                    try { if (requiredTrack == null || string.Equals(_musicBee.NowPlaying_GetFileUrl(), requiredTrack, StringComparison.OrdinalIgnoreCase))
+                        accepted = (_musicBee.Player_GetPlayState() == Plugin.PlayState.Playing) == playing || _musicBee.Player_PlayPause(); }
                     catch (Exception) { }
                     complete(accepted);
                 });
@@ -815,14 +822,15 @@ namespace MusicBeePlugin
                 InitialBeat = -origin * bpm / 60000d,
                 Sections = new List<PartyTempoSection> { new PartyTempoSection { Bpm = bpm } } };
             using (var editor = new FrmPartyTempoMap(map, _songTitle,
-                () => editingCurrentSong() ? (double?)ReadPartyPosition(Stopwatch.GetTimestamp()) / 1000 : null,
+                () => editingCurrentSong() ? (double?)_playback.Latest.Position / 1000 : null,
                 position =>
                 {
                     if (!editingCurrentSong() || _musicBee.NowPlaying_GetFileUrl?.Invoke() != track)
                         throw new InvalidOperationException("Play the song being edited first.");
                     if (position < 0 || position > (_musicBee.NowPlaying_GetDuration?.Invoke() ?? int.MaxValue))
                         throw new ArgumentException("The selected start is outside this song.");
-                    _musicBee.Player_SetPosition(position);
+                    if (!_musicBee.Player_SetPosition(position)) throw new InvalidOperationException("MusicBee rejected the seek.");
+                    _partyClock.Reset(); _playback.Request(false);
                 },
                 result =>
                 {
@@ -839,7 +847,13 @@ namespace MusicBeePlugin
                     if (!editingCurrentSong() || _musicBee.NowPlaying_GetFileUrl?.Invoke() != track)
                         throw new InvalidOperationException("Play the song being edited first.");
                     TogglePlayback();
-                }, () => _playState == Plugin.PlayState.Playing)) editor.ShowDialog(this);
+                }, () => _playback.Latest.State == Plugin.PlayState.Playing,
+                () => editingCurrentSong() ? _playback.Latest.Duration / 1000d : 0,
+                (playing, complete) =>
+                {
+                    if (!editingCurrentSong()) { complete(false); return; }
+                    RequestPlayback(playing, complete, track);
+                }, () => _playCommandPending)) editor.ShowDialog(this);
         }
 
         private void OpenPartyTempoEditor()

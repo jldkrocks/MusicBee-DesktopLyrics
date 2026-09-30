@@ -17,6 +17,7 @@ internal static class AsyncPlaybackChecks
                 NowPlaying_GetFileUrl = () => "song",
                 Player_GetPlayState = () => { Interlocked.Increment(ref calls); entered.Set(); release.Wait(5000); return Plugin.PlayState.Playing; },
                 Player_GetPosition = () => 1234,
+                NowPlaying_GetDuration = () => 30000,
                 NowPlaying_GetSpectrumData = data => { data[0] = .5f; finished.Set(); return 1; }
             };
             using (var reader = new PlaybackSnapshotReader(api))
@@ -27,7 +28,7 @@ internal static class AsyncPlaybackChecks
                 if (calls != 1 || watch.ElapsedMilliseconds > 1000) throw new Exception("Requests must return while the API is blocked, with one outstanding read.");
                 release.Set();
                 if (!SpinWait.SpinUntil(() => reader.Latest.Position == 1234, 2000)) throw new Exception("Snapshot not published.");
-                if (reader.Latest.Count != 1 || reader.Latest.Spectrum[0] != .5f) throw new Exception("Incomplete snapshot.");
+                if (reader.Latest.Duration != 30000 || reader.Latest.Count != 1 || reader.Latest.Spectrum[0] != .5f) throw new Exception("Incomplete snapshot.");
             }
             entered.Reset(); release.Reset(); finished.Reset();
             var disposed = new PlaybackSnapshotReader(api); disposed.Request(true);

@@ -114,6 +114,7 @@
     <Compile Include="PartyTempoMap.cs" />
     <Compile Include="PartyTimeline.cs" />
     <Compile Include="FrmPartyTempoMap.cs" />
+    <Compile Include="PartyPreviewSession.cs" />
     <Compile Include="PartyAnimation.cs" />
     <Compile Include="PartyPlaybackClock.cs" />
     <Compile Include="PartyTapTempo.cs" />

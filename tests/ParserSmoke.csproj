@@ -22,6 +22,7 @@
     <Compile Include="..\PartyTempoMap.cs"><Link>PartyTempoMap.cs</Link></Compile>
     <Compile Include="..\PartyTimeline.cs"><Link>PartyTimeline.cs</Link></Compile>
     <Compile Include="..\FrmPartyTempoMap.cs"><Link>FrmPartyTempoMap.cs</Link></Compile>
+    <Compile Include="..\PartyPreviewSession.cs" />
     <Compile Include="..\PartyAnimation.cs"><Link>PartyAnimation.cs</Link></Compile>
     <Compile Include="..\PartyPlaybackClock.cs"><Link>PartyPlaybackClock.cs</Link></Compile>
     <Compile Include="..\PartyTapTempo.cs"><Link>PartyTapTempo.cs</Link></Compile>
@@ -53,6 +54,7 @@
     <Compile Include="AsyncPlaybackChecks.cs" />
     <Compile Include="RestAccentChecks.cs" />
     <Compile Include="RampShortcutChecks.cs" />
+    <Compile Include="PreviewChecks.cs" />
     <Compile Include="BpmLookupChecks.cs" />
     <Compile Include="TempoMapChecks.cs" />
     <Compile Include="RhythmChecks.cs" />

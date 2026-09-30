@@ -11,6 +11,7 @@ namespace MusicBeePlugin
         public double StartSeconds;
         public double Bpm = 120;
         public double RampSeconds;
+        public bool RampToNext;
         public double? RampStartBpm;
         public PartyDanceStyle Style;
         public PartyRhythm Rhythm;
@@ -41,7 +42,7 @@ namespace MusicBeePlugin
 
         internal void Validate()
         {
-            if ((Version != 1 && Version != 2 && Version != 3 && Version != 4) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
+            if ((Version != 1 && Version != 2 && Version != 3 && Version != 4 && Version != 5) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
                 Sections.Count == 0 || Sections.Count > 500 || !Finite(InitialBeat))
                 throw new ArgumentException("The map needs a song and 1-500 sections.");
             if (Accents == null || Accents.Count > 1000)
@@ -67,6 +68,9 @@ namespace MusicBeePlugin
                     !Enum.IsDefined(typeof(PartyDanceStyle), s.Style) ||
                     !Enum.IsDefined(typeof(PartyRhythm), s.Rhythm))
                     throw new ArgumentException("Use increasing start times, BPM 40-240, nonnegative ramps and a listed dance/rhythm.");
+                if (s.RampToNext && (i + 1 >= Sections.Count || s.Style == PartyDanceStyle.Hold ||
+                    s.RampSeconds != 0 || s.RampStartBpm.HasValue))
+                    throw new ArgumentException("Ramp to next needs a following point, cannot start on Hold, and cannot also use a custom ramp.");
                 if (s.Speed != 0.5 && s.Speed != 1 && s.Speed != 2)
                     throw new ArgumentException("Choose Half, Normal or Double dance speed.");
                 if (!Finite(s.SwingPercent) || s.SwingPercent < 50 || s.SwingPercent > 75)
@@ -139,7 +143,7 @@ namespace MusicBeePlugin
                 if (section.AlignBeat && section.Style != PartyDanceStyle.Hold)
                     beat = AlignedBeat(beat, section);
                 var sectionStartBeat = beat;
-                var sectionStartTempo = section.RampStartBpm ?? tempo;
+                var sectionStartTempo = section.RampToNext ? section.Bpm : section.RampStartBpm ?? tempo;
                 var end = i + 1 < Sections.Count ? Sections[i + 1].StartSeconds : seconds;
                 var elapsed = Math.Max(0, Math.Min(seconds, end) - section.StartSeconds);
                 var held = section.Style == PartyDanceStyle.Hold;
@@ -153,11 +157,12 @@ namespace MusicBeePlugin
                     speed = section.EffectiveSpeed;
                     rhythm = section.Rhythm;
                     swingPercent = section.SwingPercent;
-                    var ramp = section.RampSeconds;
-                    var beats = IntegratedBeats(sectionStartTempo, section, elapsed);
+                    var ramp = section.RampToNext ? end - section.StartSeconds : section.RampSeconds;
+                    var target = section.RampToNext ? (Sections[i + 1].RampStartBpm ?? Sections[i + 1].Bpm) : section.Bpm;
+                    var beats = IntegratedBeats(sectionStartTempo, section, elapsed, ramp, target);
                     beat += beats * speed;
                     tempo = ramp > 0 && elapsed < ramp ?
-                        sectionStartTempo + (section.Bpm - sectionStartTempo) * elapsed / ramp : section.Bpm;
+                        sectionStartTempo + (target - sectionStartTempo) * elapsed / ramp : target;
                 }
                 if (seconds < end || i == Sections.Count - 1)
                 {
@@ -170,10 +175,11 @@ namespace MusicBeePlugin
                     if (!held && !rest && speed == 0.5 && i + 1 < Sections.Count && Sections[i + 1].CountIn)
                     {
                         var endBeat = sectionStartBeat + IntegratedBeats(sectionStartTempo, section,
-                            end - section.StartSeconds) * 0.5;
+                            end - section.StartSeconds, section.RampToNext ? end - section.StartSeconds : section.RampSeconds,
+                            section.RampToNext ? (Sections[i + 1].RampStartBpm ?? Sections[i + 1].Bpm) : section.Bpm) * 0.5;
                         var incoming = Sections[i + 1];
                         if (incoming.AlignBeat) endBeat = AlignedBeat(endBeat, incoming);
-                        var incomingBpm = incoming.RampSeconds > 0 ? incoming.RampStartBpm ?? section.Bpm : incoming.Bpm;
+                        var incomingBpm = incoming.RampToNext ? incoming.Bpm : incoming.RampSeconds > 0 ? incoming.RampStartBpm ?? (section.RampToNext ? incoming.Bpm : section.Bpm) : incoming.Bpm;
                         var cuePhase = endBeat - (end - seconds) * incomingBpm / 60;
                         ApplyCountIn(ref pose, section, incoming, endBeat, cuePhase);
                     }
@@ -195,12 +201,14 @@ namespace MusicBeePlugin
                 Math.Floor(beat / 4) * 4 + (section.Style == PartyDanceStyle.SideToSide ? 3 : 2);
         }
 
-        private static double IntegratedBeats(double fromBpm, PartyTempoSection section, double elapsed)
+        private static double IntegratedBeats(double fromBpm, PartyTempoSection section, double elapsed, double? duration = null, double? target = null)
         {
-            var rampElapsed = Math.Min(elapsed, section.RampSeconds);
-            var beats = section.RampSeconds > 0 ? (fromBpm * rampElapsed +
-                (section.Bpm - fromBpm) * rampElapsed * rampElapsed / (2 * section.RampSeconds)) / 60 : 0;
-            return beats + Math.Max(0, elapsed - section.RampSeconds) * section.Bpm / 60;
+            var ramp = duration ?? section.RampSeconds;
+            var bpm = target ?? section.Bpm;
+            var rampElapsed = Math.Min(elapsed, ramp);
+            var beats = ramp > 0 ? (fromBpm * rampElapsed +
+                (bpm - fromBpm) * rampElapsed * rampElapsed / (2 * ramp)) / 60 : 0;
+            return beats + Math.Max(0, elapsed - ramp) * bpm / 60;
         }
 
         // Project the incoming pose clock backwards. A section boundary can be
@@ -211,7 +219,7 @@ namespace MusicBeePlugin
         {
             if (next.Style == PartyDanceStyle.Hold || next.EffectiveSpeed != 1) return;
             // A BPM ramp begins at the preceding tempo, not at its final target.
-            var incomingBpm = next.RampSeconds > 0 ? next.RampStartBpm ?? previous.Bpm : next.Bpm;
+            var incomingBpm = next.RampToNext ? next.Bpm : next.RampSeconds > 0 ? next.RampStartBpm ?? (previous.RampToNext ? next.Bpm : previous.Bpm) : next.Bpm;
             var period = 60 / incomingBpm;
             if (next.StartSeconds - previous.StartSeconds + 1e-9 < period) return;
             var earliestPhase = endBeat - (next.StartSeconds - previous.StartSeconds) / period;
