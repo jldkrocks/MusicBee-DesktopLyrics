@@ -180,7 +180,7 @@ namespace MusicBeePlugin
                         preview = _previewFrames, gpu = _gpuFrames, foreground_redrawn = _foregroundFrames },
                     measured_seconds = Math.Max(0, (Math.Min(_end, Stopwatch.GetTimestamp()) - _start) / (double)Stopwatch.Frequency),
                     pending_main_ui_ms = _pending == 0 ? 0 : (Stopwatch.GetTimestamp() - _pendingAt) * 1000d / Stopwatch.Frequency,
-                    notes = "Times are milliseconds except CPU percent, memory MiB and SkippedRenderDeadlines (counts, summed across frames). Scene/layers/FrameWork are nested; do not sum all metrics. PaintDispatch includes WinForms buffer copy, not display scan-out. FrameInterval is WM_PAINT cadence, not proven presentation. FrameWakeLateness is UI callback time minus requested deadline. CPU covers the entire host process. Missing metrics are unavailable, not zero cost.",
+                    notes = "Times are milliseconds except CPU percent, memory MiB, LyricOutlinePoints (cached path point count) and SkippedRenderDeadlines (counts, summed across frames). Scene/layers/FrameWork are nested; do not sum all metrics. PaintDispatch includes WinForms buffer copy, not display scan-out. FrameInterval is WM_PAINT cadence, not proven presentation. FrameWakeLateness is UI callback time minus requested deadline. CPU covers the entire host process. Missing metrics are unavailable, not zero cost.",
                     metrics
                 }, Formatting.Indented);
                 for (int i = 0; i < _samples.Length; i++) _samples[i] = null;

@@ -445,9 +445,29 @@ class GpuCompositionChecks
                 Call(renderer,"CommitLyrics");
             }
             Check(((Array)Get(renderer,"_paths")).Cast<object>().Count(x=>x!=null)<=24 && (int)Get(renderer,"_pointCount")<=262144,"Outline cache grew past budget");
+            var points=Enumerable.Range(0,60000).Select(i=>new PointF(i%100,(i/100)%100)).ToArray();
+            var heavy=new System.Drawing.Drawing2D.GraphicsPath[5];
+            try {
+                for(int i=0;i<5;i++){
+                    heavy[i]=new System.Drawing.Drawing2D.GraphicsPath();heavy[i].AddLines(points);
+                    Call(renderer,"BeginLyrics");Call(renderer,"AddOutline",heavy[i],heavy[i].GetBounds(),new RectangleF(0,0,960,540),0f,0f,1f,2f,1f,Color.White,Color.White,Color.Black,0);
+                    Check((int)Get(renderer,"_pointCount")<=262144,"Point-budget eviction failed");
+                }
+                Call(renderer,"BeginLyrics");bool blocked=false;
+                try {for(int i=0;i<5;i++)Call(renderer,"AddOutline",heavy[i],heavy[i].GetBounds(),new RectangleF(0,0,960,540),0f,0f,1f,2f,1f,Color.White,Color.White,Color.Black,0);}
+                catch(TargetInvocationException e){blocked=e.InnerException is InvalidOperationException;}
+                Check(blocked,"Point budget evicted an active path instead of falling back");
+            }finally{foreach(var p in heavy)p?.Dispose();}
             Call(renderer,"BeginLyrics");Call(renderer,"CommitLyrics");Check((int)Get(renderer,"_outlineCount")==0,"Old outline commands survived reset");
         }
         Set(form,"_gpuOutlineText",true);
+        Call(form,"ReleaseGpu");Check((bool)Call(form,"TryDrawGpu"),"Outline failure fixture failed to start");
+        var gpu=Get(form,"_gpu");var upload=gpu.GetType().GetField("_outline",Flags);
+        var parameters=upload.FieldType.GetMethod("Invoke").GetParameters().Select(p=>Expression.Parameter(p.ParameterType,p.Name)).ToArray();
+        upload.SetValue(gpu,Expression.Lambda(upload.FieldType,Expression.Constant(unchecked((int)0x8899000c)),parameters).Compile());
+        Set(form,"_line1","A fresh path tests native outline failure");form.Invalidate();
+        Check(!(bool)Call(form,"TryDrawGpu") && Get(form,"_gpu")==null && (bool)Get(form,"_gpuFailed"),"Outline upload error failed to restore GDI");
+        Set(form,"_gpuFailed",false);Set(form,"_line1","Current lyrics, with clear edges");
         foreach(var size in new[]{new Size(814,272),new Size(3840,2160)}) {
             form.WindowState=size.Width>1000?FormWindowState.Maximized:FormWindowState.Normal;form.ClientSize=size;
             Set(form,"_previousLine1","Café a\u0301 flowing text");Set(form,"_previousNextLine",Get(form,"_line1"));

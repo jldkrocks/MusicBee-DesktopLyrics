@@ -89,6 +89,8 @@ extern "C" HRESULT __cdecl DL_OutlineLyrics(Renderer* r,const OutlineCommand* co
         if(c.slot<0||c.slot>=24||!r->outlines[c.slot].path||!std::isfinite(c.x)||!std::isfinite(c.y)||
            !std::isfinite(c.scale)||c.scale<=0||c.scale>8||!std::isfinite(c.opacity)||c.opacity<0||c.opacity>1||
            !std::isfinite(c.stroke)||c.stroke<0||c.stroke>10||c.gradient<0||c.gradient>2)return E_INVALIDARG;
+        if(!std::isfinite(c.clip.left)||!std::isfinite(c.clip.top)||!std::isfinite(c.clip.right)||!std::isfinite(c.clip.bottom)||
+           c.clip.right<c.clip.left||c.clip.bottom<c.clip.top)return E_INVALIDARG;
         auto& o=r->outlines[c.slot];
         if(c.gradient && (!o.gradient || o.color1!=c.color1 || o.color2!=c.color2 || o.gradientMode!=c.gradient)){
             D2D1_GRADIENT_STOP stops[3]={{0,Color(c.color1)},{c.gradient==2?.5f:1.f,Color(c.color2)},{1,Color(c.color1)}};

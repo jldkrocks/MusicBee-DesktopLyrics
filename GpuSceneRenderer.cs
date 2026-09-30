@@ -65,6 +65,7 @@ namespace MusicBeePlugin
         internal void AddOutline(GraphicsPath path,RectangleF bounds,RectangleF clip,float x,float y,float scale,
             float stroke,float opacity,Color color1,Color color2,Color border,int gradient) {
             if(clip.Width<=0||clip.Height<=0||opacity<=0)return;
+            if(path.PointCount==0)return;
             if(_outlineCount+_commandCount>=8)throw new InvalidOperationException("Too many lyric layers.");
             int slot=Array.IndexOf(_paths,path);
             if(slot<0){
