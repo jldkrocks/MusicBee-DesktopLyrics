@@ -48,7 +48,7 @@ namespace MusicBeePlugin
         private DancersFn _dancers;
         private readonly DancerCommand[] _dancerCommands = new DancerCommand[2];
         private readonly Size[] _dancerSizes = new Size[8];
-        private readonly Bitmap[] _dancerSheets = new Bitmap[2]; // at most 5.82 MiB decoded
+        private readonly Bitmap[] _dancerSheets = new Bitmap[2]; // at most 23.27 MiB decoded
         private int _dancerBytes;
         private int _dancerCount;
         internal void BeginDancers() { _dancerCount = 0; }
@@ -94,6 +94,11 @@ namespace MusicBeePlugin
                 Profile?.End(RenderMetric.DancerTextureUpload,stamp);
             }
             var destination=PartyDancerWindow.PoseDestination(bounds.Size,impact,sway,anticipation);
+            // The cached pose is already the destination width. GDI's nearest
+            // sampling rounds exact half-pixel translations toward the lower
+            // pixel; some D2D hardware rounds the tie upward. Resolve that tie
+            // explicitly so sharper outlines do not shift by one pixel.
+            destination.X=(float)Math.Ceiling(destination.X-0.5f);
             destination.Offset(bounds.Location);
             _dancerCommands[_dancerCount++]=new DancerCommand {Slot=slot,Destination=new Rect(destination),Clip=new Rect(bounds)};
         }

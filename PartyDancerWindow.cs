@@ -14,8 +14,9 @@ namespace MusicBeePlugin
     internal sealed class PartyDancerWindow : Form
     {
         internal RenderProfile Profile;
-        private const int FrameWidth = 180;
-        private const int FrameHeight = 353;
+        // Source resolution only. Layout keeps the same 180:353 aspect ratio.
+        private const int FrameWidth = 360;
+        private const int FrameHeight = 706;
         private const int WsExLayered = 0x80000;
         private const int WsExTransparent = 0x20;
         private const int WsExNoActivate = 0x08000000;

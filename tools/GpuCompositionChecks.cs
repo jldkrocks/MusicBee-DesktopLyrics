@@ -211,10 +211,13 @@ class GpuCompositionChecks
             double worst=0;
             foreach(int height in new[]{454,1626})
             foreach(int frame in new[]{0,3,6,9})
-            foreach(float impact in new[]{0f,1f,2.5f}) {
+            foreach(float impact in new[]{0f,1f,2.5f})
+            foreach(float translation in new[]{float.NaN,-.5f,.5f}) {
+                if(!float.IsNaN(translation) && (frame!=0 || height!=1626 || impact!=0))continue;
                 int width=(int)Math.Round(height*180d/353);
                 var bounds=new[]{new Rectangle(10,200,width,height),new Rectangle(3830-width,200,width,height)};
                 float sway=impact==0?-.014f:.025f,anticipation=impact==0?.8f:0;
+                if(!float.IsNaN(translation))sway=translation/width;
                 using(var g=Graphics.FromImage(expected)) {
                     Call(form,"DrawScene",new PaintEventArgs(g,form.ClientRectangle),false,null);
                     foreach(var pair in new[]{new{Dancer=left,Index=0},new{Dancer=right,Index=1}}) {
@@ -234,6 +237,11 @@ class GpuCompositionChecks
                     error+=Math.Abs(a.R-e.R)+Math.Abs(a.G-e.G)+Math.Abs(a.B-e.B);count+=3;
                 }
                 worst=Math.Max(worst,error/count);
+                if(error/count>=3) {
+                    expected.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"gpu-check-images","dancer-failure-gdi.png"));
+                    actual.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"gpu-check-images","dancer-failure-gpu.png"));
+                    Console.WriteLine("Dancer mismatch height="+height+" frame="+frame+" impact="+impact);
+                }
                 Check(error/count<3,"Dancer region differs from existing GDI transform: "+error/count);
                 Check((int)Get(renderer,"_dancerBytes")<=64*1024*1024,"Dancer texture budget exceeded");
             }
