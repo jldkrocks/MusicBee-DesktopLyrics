@@ -572,7 +572,7 @@ namespace MusicBeePlugin
                 _timeline.Enabled=_overview.Enabled=available && _timeline.Duration>0;
                 _loopButton.Enabled=available;_loopButton.Text=_preview.Active?"Stop preview":"Loop preview";
                 _loopStart.Enabled=_loopEnd.Enabled=!_preview.Active;
-                _timeline.LoopStart=(double)_loopStart.Value;_timeline.LoopEnd=(double)_loopEnd.Value;
+                if (!_timeline.SelectingLoop) { _timeline.LoopStart=(double)_loopStart.Value;_timeline.LoopEnd=(double)_loopEnd.Value; }
                 _overview.Duration=_timeline.Duration;_overview.LoopStart=_timeline.ViewStart;_overview.LoopEnd=_timeline.ViewStart+(_timeline.ViewLength>0?_timeline.ViewLength:_timeline.Duration);_overview.Invalidate();
                 _play.Enabled = available && !_preview.Active; _add.Enabled = available && !_preview.Active;
                 _previewButton.Enabled = available && (_preview.Active || _timeline.Duration > 0);

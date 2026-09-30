@@ -21,6 +21,7 @@ namespace MusicBeePlugin
         internal event Action<int,double> AccentMoved;
         internal event Action<double,double> LoopRangeSelected;
         private bool _selectingLoop;
+        internal bool SelectingLoop => _selectingLoop;
         private double _loopAnchor;
         internal double ViewStart, ViewLength;
         internal double LoopStart, LoopEnd;
