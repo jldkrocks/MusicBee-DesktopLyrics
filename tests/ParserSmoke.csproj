@@ -60,6 +60,8 @@
     <Compile Include="Editor47Checks.cs" />
     <Compile Include="SeekClockChecks.cs" />
     <Compile Include="SeekSettlingChecks.cs" />
+    <Compile Include="..\RenderProfile.cs" />
+    <Compile Include="RenderProfileChecks.cs" />
     <Compile Include="BpmLookupChecks.cs" />
     <Compile Include="TempoMapChecks.cs" />
     <Compile Include="RhythmChecks.cs" />

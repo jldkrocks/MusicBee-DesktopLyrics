@@ -26,11 +26,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build isolated Direct2D feasibility probe
         run: msbuild tools/GpuRenderProbe.vcxproj /p:Configuration=Release /p:Platform=x64
+      - name: Build isolated GDI rendering benchmark
+        run: msbuild tools/GdiRenderBenchmark.csproj /p:Configuration=Release
       - uses: actions/upload-artifact@v4
         with:
-          name: DesktopLyrics-1.15.51.0
+          name: DesktopLyrics-1.15.52.0
           path: |
             bin/Release/mb_DesktopLyrics.dll
             pkg/*.zip
             tools/bin/Release/GpuRenderProbe.exe
+            tools/bin/Release/GdiRenderBenchmark.exe
           if-no-files-found: error

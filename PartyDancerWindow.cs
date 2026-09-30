@@ -13,6 +13,7 @@ namespace MusicBeePlugin
     // lyric layout and preserves the PNG's soft per-pixel transparent edges.
     internal sealed class PartyDancerWindow : Form
     {
+        internal RenderProfile Profile;
         private const int FrameWidth = 180;
         private const int FrameHeight = 353;
         private const int WsExLayered = 0x80000;
@@ -144,6 +145,7 @@ namespace MusicBeePlugin
                 }
                 _scaledPoses[frame] = pose;
             }
+            var stamp = Profile?.Stamp ?? 0;
             _graphics.Clear(Color.Transparent);
             _graphics.DrawImage(pose, new RectangleF(swayQuarterPixels / 4f,
                     squashPixels - liftQuarterPixels / 4f,
@@ -152,6 +154,8 @@ namespace MusicBeePlugin
             // GDI+ draws directly into the DIB consumed by UpdateLayeredWindow.
             // Flush before handing the shared pixels to Windows; no managed copy.
             _graphics.Flush(FlushIntention.Sync);
+            Profile?.End(RenderMetric.DancerRaster, stamp);
+            stamp = Profile?.Stamp ?? 0;
 
             var screenDc = GetDC(IntPtr.Zero);
             if (screenDc == IntPtr.Zero) throw new Win32Exception();
@@ -166,6 +170,7 @@ namespace MusicBeePlugin
                     throw new Win32Exception(Marshal.GetLastWin32Error());
             }
             finally { ReleaseDC(IntPtr.Zero, screenDc); }
+            Profile?.End(RenderMetric.DancerUpload, stamp);
             _lastFrame = frame;
             _lastSquashPixels = squashPixels;
             _lastSwayQuarterPixels = swayQuarterPixels;

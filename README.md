@@ -178,6 +178,11 @@ Playback controls and accent motion (1.15.46):
 - Existing cues load as Bop and are not rewritten until Save. Save writes map version 6; older plugin versions cannot load newly saved maps. New cue styles never change BPM, beat phase, rhythm, speed or lyric timing.
 
 
+Rendering baseline capture (1.15.52):
+- The lyrics menu now offers **Capture rendering performance (33 s)**: 3 seconds of warm-up followed by 30 seconds of measurements. Keep the size fixed and play with lyrics, translation, spectrum, artwork, queue and dancers active. Scroll MusicBee during part of the capture. Repeat three times restored and three times maximized on the 4K display for a matched baseline.
+- Two bounded summary files in `DesktopLyrics-Rendering` under MusicBee plugin storage retain the latest three runs per window mode. They include frame/timer intervals, layer drawing times, CPU/memory and a main-UI heartbeat, without lyrics or song identity. Closing/resizing marks an incomplete capture. The menu indicates when the report is saved; capture is disabled during normal use until explicitly started.
+- The renderer is still GDI+. Off-screen profiling identifies large-area background/spectrum composition as the first GPU candidate; actual 4K cadence and perceived smoothness still require live measurement. Acceptance criteria, baseline percentiles, native-component/packaging options, recovery requirements and the prioritized feature plan are in [tools/RENDERING.md](tools/RENDERING.md). No playback or song data changes are included.
+
 Seek settling (1.15.51):
 - While seeking during playback, dancers briefly hold their previous pose until four fresh advancing position readings establish a stable phase. They then show the pose for the current song position and continue at normal speed. This applies to MusicBee and tempo-map seeks. No extra setting is needed. The captured five-seek regression settles in 0.56 to 0.69 seconds; live timing depends on MusicBee's reporting.
 - State and position now come from the same playback snapshot. After settling, phase verification tolerates normal coarse-reporting jitter while still correcting larger confirmed offsets. It does not speed the dance up to catch up.

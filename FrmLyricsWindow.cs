@@ -21,6 +21,8 @@ namespace MusicBeePlugin
         private readonly PlaybackHistory _history;
         private readonly PlaybackSnapshotReader _playback;
         private readonly PlaybackTimingTrace _playbackTrace;
+        private RenderProfile _renderProfile;
+        private string _renderProfileStatus = "Capture rendering performance (33 s)";
         private readonly Action<Action> _dispatchPlayerCommand;
         private bool _playCommandPending;
         private System.Windows.Forms.Timer _stopHideTimer;
@@ -137,6 +139,9 @@ namespace MusicBeePlugin
         private static extern IntPtr SendMessage(IntPtr window, int message,
             IntPtr wParam, IntPtr lParam);
 
+        [DllImport("gdi32.dll")]
+        private static extern int GetDeviceCaps(IntPtr dc, int index);
+
         public Form Form => this;
         public bool IsAtEndOfQueue => _queueEnded;
         public bool HasQueueNotice => _queueNoticeStarted != 0 &&
@@ -211,6 +216,7 @@ namespace MusicBeePlugin
             LocationChanged += (sender, args) => { SaveBounds(); UpdatePartyDancers(); };
             SizeChanged += (sender, args) =>
             {
+                _renderProfile?.Finish("window resized; repeat capture at a fixed size");
                 TopMost = WindowState != FormWindowState.Minimized;
                 if (WindowState == FormWindowState.Minimized) _animationTimer.Stop();
                 else if (_loaded && Visible) StartAnimation();
@@ -279,12 +285,20 @@ namespace MusicBeePlugin
             _lastFrameTimestamp = 0;
             _lastPaintRequest = 0;
             _lastSpectrumSample = 0;
-            // An 8 ms target gives the UI up to 120 frames per second. Slow
+            // The 16 ms timer requests roughly 60 frames per second. Slow
             // paints drop frames instead of building up a queue of old frames.
             _animationTimer.Start();
         }
 
         private void AnimationClockTick(object sender, EventArgs args)
+        {
+            var profile = _renderProfile;
+            var stamp = profile?.BeginTick() ?? 0;
+            try { AnimationClockTickCore(sender, args); }
+            finally { profile?.End(RenderMetric.Tick, stamp); }
+        }
+
+        private void AnimationClockTickCore(object sender, EventArgs args)
         {
             if (IsDisposed || !Visible) return;
             var now = Stopwatch.GetTimestamp();
@@ -310,7 +324,9 @@ namespace MusicBeePlugin
             if (_settings.PartyMode && (_lastPartyUpdate == 0 ||
                 (now - _lastPartyUpdate) * 1000.0 / Stopwatch.Frequency >= 15))
             {
+                var stamp = _renderProfile?.Stamp ?? 0;
                 UpdatePartyDancers();
+                _renderProfile?.End(RenderMetric.Dancers, stamp);
                 _lastPartyUpdate = now;
             }
             if (!_playCommandPending && _settings.ShowSongQueue &&
@@ -420,8 +436,50 @@ namespace MusicBeePlugin
             menu.Items.Add("More settings…", null, (sender, args) =>
                 BeginInvoke(new Action(() => _openSettings?.Invoke())));
             menu.Items.Add(new ToolStripSeparator());
+            var capture = menu.Items.Add("Capture rendering performance (33 s)", null,
+                (sender, args) => BeginInvoke(new Action(StartRenderCapture)));
+            capture.ToolTipText = "3 seconds warm-up, then 30 seconds of local diagnostics. Keep this size, play lyrics with all layers enabled, and scroll MusicBee. No song text or paths are recorded.";
+            menu.Opening += (sender, args) => { capture.Text = _renderProfileStatus; capture.Enabled = _renderProfile == null; };
             menu.Items.Add("Close lyrics window", null, (sender, args) => Close());
             return menu;
+        }
+
+        private void StartRenderCapture()
+        {
+            if (_renderProfile != null) return;
+            var folder = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(
+                System.IO.Path.GetDirectoryName(_partyTempoStore.PlaybackTracePath)), "DesktopLyrics-Rendering");
+            var mode = WindowState == FormWindowState.Maximized ? "maximized" : "restored";
+            var metadata = new Dictionary<string, object> {
+                { "renderer", "GDI+" }, { "mode", mode }, { "width", ClientSize.Width }, { "height", ClientSize.Height },
+                { "remote_session", SystemInformation.TerminalServerSession }, { "process_bits", IntPtr.Size * 8 },
+                { "logical_processors", Environment.ProcessorCount }, { "lyrics", !string.IsNullOrWhiteSpace(_line1) },
+                { "english", !string.IsNullOrWhiteSpace(_line2) }, { "preview", !string.IsNullOrWhiteSpace(_nextLine) },
+                { "spectrum", _settings.ShowVisualizer }, { "transparent", _settings.TransparentCanvas },
+                { "artwork_loaded", _albumArtwork != null }, { "queue", _settings.ShowSongQueue },
+                { "queue_entries", _queueTracks.Count }, { "dancers", _settings.PartyMode },
+                { "playing_at_start", _playState == Plugin.PlayState.Playing },
+                { "screen", Screen.FromControl(this).DeviceName }
+            };
+            using (var g = CreateGraphics()) {
+                metadata["dpi_x"] = g.DpiX; metadata["dpi_y"] = g.DpiY;
+                var dc = g.GetHdc();
+                try { metadata["reported_refresh_hz"] = GetDeviceCaps(dc, 116); }
+                finally { g.ReleaseHdc(dc); }
+            }
+            _renderProfileStatus = "Recording rendering performance...";
+            _renderProfile = new RenderProfile(metadata, _dispatchPlayerCommand, json => ThreadPool.QueueUserWorkItem(unused => {
+                var status = "Capture again (last report saved)";
+                try { RenderProfile.Save(System.IO.Path.Combine(folder, "gdi-" + mode + ".json"), json); }
+                catch (Exception) { status = "Capture again (last report could not be saved)"; }
+                try { if (!IsDisposed) BeginInvoke(new Action(() => {
+                    _renderProfile = null; _renderProfileStatus = status;
+                    if (_leftDancer != null) _leftDancer.Profile = null;
+                    if (_rightDancer != null) _rightDancer.Profile = null;
+                })); } catch (InvalidOperationException) { }
+            }));
+            if (_leftDancer != null) _leftDancer.Profile = _renderProfile;
+            if (_rightDancer != null) _rightDancer.Profile = _renderProfile;
         }
 
         private void AddToggle(ContextMenuStrip menu, string label, Func<bool> getter,
@@ -1125,6 +1183,7 @@ namespace MusicBeePlugin
                     _leftDancer = new PartyDancerWindow("MusicBeePlugin.PartyRem.png");
                 if (_rightDancer == null)
                     _rightDancer = new PartyDancerWindow("MusicBeePlugin.PartyRam.png");
+                _leftDancer.Profile = _rightDancer.Profile = _renderProfile;
                 var position = ReadPartyPosition(Stopwatch.GetTimestamp());
                 if (_partyClock.IsSettling && _lastPartyPosition.HasValue)
                     position = _lastPartyPosition.Value;
@@ -1800,18 +1859,32 @@ namespace MusicBeePlugin
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            var profile = _renderProfile;
+            var stamp = profile?.Stamp ?? 0;
+            try { DrawScene(e); }
+            finally { profile?.End(RenderMetric.Scene, stamp); }
+        }
+
+        private void DrawScene(PaintEventArgs e)
+        {
+            var stamp = _renderProfile?.Stamp ?? 0;
             var g = e.Graphics;
             // Clear the entire double buffer before every frame. A sizing
             // operation can expose new pixels beyond the last WM_PAINT region.
             g.Clear(_settings.TransparentCanvas ? ClearKey : BackColor);
+            _renderProfile?.End(RenderMetric.Clear, stamp);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             var client = ClientRectangle;
             var gutter = PartyGutter;
             var bounds = new Rectangle(0, 0, client.Width - gutter * 2, client.Height);
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
+            stamp = _renderProfile?.Stamp ?? 0;
             DrawBackground(g, client);
+            _renderProfile?.End(RenderMetric.Background, stamp);
+            stamp = _renderProfile?.Stamp ?? 0;
             if (_settings.ShowVisualizer && !_settings.TransparentCanvas) DrawSpectrum(g, client);
+            _renderProfile?.End(RenderMetric.Spectrum, stamp);
             var state = g.Save();
             if (gutter > 0) g.TranslateTransform(gutter, 0);
             try
@@ -1840,10 +1913,13 @@ namespace MusicBeePlugin
             if ((!string.IsNullOrWhiteSpace(_line2) || !string.IsNullOrWhiteSpace(_previousLine2)) &&
                 (bounds.Width < 700 || region.Height < 130)) artSize = 0;
             if (stage && _settings.ShowAlbumArt) artSize = MaximizedHeaderSize(bounds);
+            stamp = _renderProfile?.Stamp ?? 0;
             if (artSize > 0)
                 DrawAlbumArt(g, new RectangleF(stage ? Math.Max(24, bounds.Width / 40) : 16,
                     stage ? 56 : Math.Max(topInset - 4f, (bounds.Height - artSize) / 2f),
                     artSize, artSize));
+            _renderProfile?.End(RenderMetric.Artwork, stamp);
+            stamp = _renderProfile?.Stamp ?? 0;
             var panelLeft = stage ? Math.Max(24, bounds.Width / 40) : artSize > 0 ? (int)(16 + artSize + 15) : 13;
             // Equal margins keep the lyric centred over the transport controls.
             var panelWidth = Math.Max(40, bounds.Width - panelLeft * 2);
@@ -1981,7 +2057,11 @@ namespace MusicBeePlugin
                     fontSize, (int)(145 * (promotePreview ? eased : 1)), 0, stage ? currentFit * 0.68f : float.MaxValue);
             }
             g.Restore(lyricClip);
+            _renderProfile?.End(RenderMetric.Lyrics, stamp);
+            stamp = _renderProfile?.Stamp ?? 0;
             DrawUpcomingQueue(g, bounds, panelLeft);
+            _renderProfile?.End(RenderMetric.Queue, stamp);
+            stamp = _renderProfile?.Stamp ?? 0;
             DrawQueueNotice(g, content);
             DrawSongTitle(g, bounds);
             DrawTransport(g, bounds);
@@ -1996,6 +2076,7 @@ namespace MusicBeePlugin
             DrawPartyButton(g, bounds);
             DrawMenuButton(g, bounds);
             DrawResizeGrip(g, bounds);
+            _renderProfile?.End(RenderMetric.Controls, stamp);
             }
             finally
             {
@@ -2619,7 +2700,10 @@ namespace MusicBeePlugin
 
         protected override void WndProc(ref Message message)
         {
-            base.WndProc(ref message);
+            var profile = message.Msg == 0x000F ? _renderProfile : null;
+            var stamp = profile?.BeginPaint() ?? 0;
+            try { base.WndProc(ref message); }
+            finally { profile?.End(RenderMetric.PaintDispatch, stamp); }
             if (message.Msg == 0x84 && _settings != null &&
                 _settings.TransparentCanvas &&
                 _resizeGrip.Contains(PointToClient(System.Windows.Forms.Cursor.Position)))
@@ -3036,6 +3120,7 @@ namespace MusicBeePlugin
             if (disposing)
             {
                 _animationDisposed = true;
+                _renderProfile?.Dispose();
                 CancelPartyLookup();
                 Interlocked.Increment(ref _artworkRequestId);
                 _animationTimer?.Dispose();
