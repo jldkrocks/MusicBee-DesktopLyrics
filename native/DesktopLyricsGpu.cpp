@@ -247,6 +247,9 @@ extern "C" HRESULT __cdecl DL_Draw(Renderer* r, const Scene* s, HDC diagnosticOu
     if(r->art.enabled) {
         const auto& c=r->art;auto rect=c.bounds;
         r->target->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        // GDI+ shape coordinates use integer pixel centres; D2D uses half
+        // centres. Keep the existing card/placeholder coverage when moving it.
+        r->target->SetTransform(D2D1::Matrix3x2F::Translation(.5f,.5f));
         auto rounded=D2D1::RoundedRect(rect,10,10);
         r->panelBrush->SetColor(D2D1::ColorF(9/255.f,12/255.f,22/255.f,115/255.f));
         r->target->FillRoundedRectangle(rounded,r->panelBrush.Get());
@@ -256,11 +259,14 @@ extern "C" HRESULT __cdecl DL_Draw(Renderer* r, const Scene* s, HDC diagnosticOu
         r->target->DrawEllipse(D2D1::Ellipse(middle,radius,radius),r->panelBrush.Get(),2);
         r->panelBrush->SetColor(Color(s->colors[4],90/255.f));
         r->target->FillEllipse(D2D1::Ellipse(middle,4,4),r->panelBrush.Get());
+        r->target->SetTransform(D2D1::Matrix3x2F::Identity());
         r->target->PushLayer(D2D1::LayerParameters(rect,r->artClip.Get()),r->artLayer.Get());
         if(c.previous)r->target->DrawBitmap(r->artwork[0].Get(),rect,c.current?1:1-c.progress,D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
         if(c.current)r->target->DrawBitmap(r->artwork[1].Get(),rect,c.progress,D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
         r->target->PopLayer();
+        r->target->SetTransform(D2D1::Matrix3x2F::Translation(.5f,.5f));
         r->panelBrush->SetColor(Color(s->colors[4],110/255.f));r->target->DrawRoundedRectangle(rounded,r->panelBrush.Get());
+        r->target->SetTransform(D2D1::Matrix3x2F::Identity());
     }
     if(r->panel.right>r->panel.left && r->panel.bottom>r->panel.top) {
         r->target->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
