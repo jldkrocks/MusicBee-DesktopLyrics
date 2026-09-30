@@ -84,7 +84,7 @@ namespace MusicBeePlugin
         private const int MarginX = 18;
         internal PartyTimeline()
         {
-            DoubleBuffered = true; Height = 160; TabStop = true;
+            DoubleBuffered = true; Height = 180; TabStop = true;
             BackColor = Color.FromArgb(23, 27, 38); ForeColor = Color.FromArgb(232, 236, 245);
             AccessibleName = "Song timeline. Arrow keys seek five seconds; click a marker to select its section.";
             AccessibleRole = AccessibleRole.Slider;

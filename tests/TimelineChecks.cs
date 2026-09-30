@@ -80,12 +80,15 @@ internal static class TimelineChecks
             if(cue.Prepare!=.5 || changes!=1)throw new Exception("Escape must restore duration without committing.");
         }
         var map = new PartyTempoMap { TrackUrl = "original" };
+        map.Accents.Add(new PartyAccentCue {TimeSeconds=5});
         map.Sections.Add(new PartyTempoSection { Bpm = 120, Style = PartyDanceStyle.HalfSpeed });
         map.Sections.Add(new PartyTempoSection { StartSeconds = 20, Bpm = 120, CountIn = true, Rhythm = PartyRhythm.Waltz });
         double? position = 10; int saved = 0; PartyTempoMap last = null; int requestedSeek = -1;
         using (var editor = new FrmPartyTempoMap(map, "Test song", () => position,
             p => requestedSeek = p, m => { saved++; last = m; }, 100, () => {}, () => false))
         {
+            Call(editor,"RefreshMarkers");
+            if(((PartyTimeline)Field(editor,"_timeline")).Accents[0].Recovery!=.22)throw new Exception("Timeline must show legacy Bop recovery as 0.22 seconds.");
             Call(editor, "SaveMap");
             if (saved != 1 || editor.IsDisposed || editor.DialogResult != DialogResult.None)
                 throw new Exception("Save must apply without closing the editor.");

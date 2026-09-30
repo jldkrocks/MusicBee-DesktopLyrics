@@ -222,14 +222,14 @@ namespace MusicBeePlugin
             _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 232));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 252));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             var detail=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Margin=Padding.Empty};
-            detail.RowStyles.Add(new RowStyle(SizeType.Absolute,32));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,160));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,40));
+            detail.RowStyles.Add(new RowStyle(SizeType.Absolute,32));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,180));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,40));
             var editing=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
             AddButton(editing,"Whole song",()=>{_timeline.ViewStart=_timeline.ViewLength=0;_timeline.Invalidate();});
             editing.Controls.Add(new Label {Text="Loop (s)",AutoSize=true,Margin=new Padding(6,9,3,0)});
@@ -557,7 +557,7 @@ namespace MusicBeePlugin
             {
                 double time;
                 if (double.TryParse(Convert.ToString(row.Cells[0].Value), out time) && !double.IsNaN(time) && !double.IsInfinity(time) && time >= 0 && time <= _timeline.Duration)
-                    _timeline.Accents.Add(new PartyTimeline.Marker { Row = row.Index, Seconds = time, Prepare=SafeDuration(row,2,.1), Hold=SafeDuration(row,3,0), Recovery=SafeDuration(row,6,Convert.ToString(row.Cells[4].Value)=="Bop"?.22:.42) });
+                    _timeline.Accents.Add(new PartyTimeline.Marker { Row = row.Index, Seconds = time, Prepare=SafeDuration(row,2,.1), Hold=SafeDuration(row,3,0), Recovery=SafeDuration(row,6,Convert.ToString(row.Cells[4].Value)==AccentMotions[0]?.22:.42) });
             }
             _timeline.SelectedRow = _tabs.SelectedIndex == 0 ? _grid.CurrentRow?.Index ?? -1 : -1;
             _timeline.SelectedAccent = _tabs.SelectedIndex == 1 ? _accentGrid.CurrentRow?.Index ?? -1 : -1;
