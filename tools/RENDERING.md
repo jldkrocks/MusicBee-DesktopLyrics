@@ -1,5 +1,39 @@
 # Rendering checkpoints and acceptance criteria
 
+## Checkpoint 6: GPU dancer composition, version 1.15.57
+
+User accepted56 visually and authorized continuing to dancers. Inspected clean a739440 and draft PR1 before changes. Six completed live56 captures are preserved in render-live-1.15.56.json. All measured frames have original/English/preview lyrics and GPU activity, despite the initial metadata flags. Restored: average8.62ms, p959.28-9.37, p999.74-9.98, no intervals over16.667ms. Maximized3840x2137: average8.635-8.639ms (~115.8 draws/s), p9510.66-10.74, p9912.19-12.32, maximum21.05-24.36, only3-4 intervals over16.667 per30s, none over33.333. Foreground redraws dropped from134-136 to10-11. MainUI heartbeat mean4.14-4.45ms/max5.51ms and user reports no new issues. HostCPU mean2.34-2.87% machine. These are draw intervals, not proven physical presentation. Leave the reported NVIDIA116 cap unchanged.
+
+Dancers remain a measured CPU cost: mean1.37-1.41ms per tick, p953.36-3.52 and p993.67-4.55. Scope: maximized dancers only, composed on the existing opaque Direct2D target. Restored/outside-window dancers remain layered GDI windows. Reuse the computed pose/impact/sway/anticipation and existing bicubic scaled pixels, quarter-pixel sway/lift and integer squash. No timing, clocks, maps, lyrics or data changes. Original180x353-per-pose sheets remain unchanged. AI upscaling is a separate possible visual comparison, not silently bundled with performance work.
+
+Acceptance criteria: zero steady-state dancer CPU raster/layered-window uploads at4K; at least90% less steady CPU dancer preparation; target at least20% reduction in matched mean total frame work, with p95/p99 and stall counts reported even when they fail to improve. Same restored workload must not materially regress. Dancer-region RGB mean error below3/255 across both characters/four key poses, small/4K sizes, strong impact, lift and opposite sway. Verify cache bounds, resize/restore, unchanged foreground, injected failures and x86/x64 hardware. Live3+3 TV captures and subjective responsiveness remain the final gate.
+
+Eight native pose slots are bounded to8MiB each/64MiB total, separate from the24MiB lyric cache. Each new pose/size uses a temporary CPU staging bitmap with the existing GDI bicubic enlargement and then disposes it; warm frames send only two small transform/clip commands. Existing layered windows and their CPU buffers are disposed after successful GPU presentation. Restore clears native dancer textures. Unsupported sizes/failures use existing GDI fallback. Old helpers missing the two added exports safely fall back before native creation. No new DLLs or dependencies: existing architecture helpers still use Windows Direct2D/User32/GDI32 and static CRT. First-use/resizing pose uploads are measured separately; no claim that cold frames are free.
+
+Final local measurements are committed in render-comparison-1.15.57.json. Same revised benchmark executable and workload, three restored plus three4K runs per build: verified56 artifact in ../render57-baseline-bin against final57 code/native helpers. Raw outputs ../render57-baseline and ../render57-final-gpu. Earlier ../render57-gpu is preliminary before decoded-sheet reuse. All layers are active; fresh lyrics every2s, palette motion1s/8s, same120 scheduler and four real key poses with identical transforms. Hidden64-bit HWNDs measure CPU/submission work, not live32-bit MusicBee, display scan-out or GPU execution time.
+
+| 4K measure | Version56 | Version57 |
+| --- | --- | --- |
+| Mean frame work | 3.70-3.87 ms | 0.85-0.88 ms |
+| Frame-work p95 | 7.45-7.94 ms | 4.11-4.45 ms |
+| Frame-work p99 | 9.40-9.48 ms | 6.07-6.51 ms |
+| Maximum frame work | 16.32-17.93 ms | 13.10-14.57 ms |
+| Mean frame interval | 8.385-8.403 ms | 8.348-8.353 ms |
+| Interval p99 | 9.78-10.03 ms | 8.83-8.98 ms |
+| Intervals over16.667ms | 1 per run | 0 |
+| ProcessCPU, percent of one logical core | 45.80-47.87 | 10.41-13.18 |
+| Working set, whole benchmark | 258-267 MiB | 197-208 MiB |
+
+Mean frame work improves about77%, passing the20% target. GPU dancer command preparation is around0.003ms versus2.87-3.01ms for CPU dancer work in this continuously moving synthetic workload, with zero steady dancer raster/layered uploads and no repeated texture uploads. This passes the90% preparation target; native GPU work is inside submission, not separately timed. Real56 dances averaged1.4ms because some frames reuse identical transforms, so the live benefit will differ. Restored mean frame work remains0.83-0.92ms versus0.83-0.90ms, and interval~8.333ms; no material cadence regression. Driver-capped liveFPS should not be expected to increase by77%.
+
+The nominal4K dancer pixel cache is41.14MiB; limit64MiB plus two decoded original sheets5.82MiB and a temporary pose up to8MiB during upload. Driver allocation overhead/VRAM is not measured. The old CPU layered windows, caches and DIBs are disposed after a successful maximized GPU draw. Cache/sheets release on restore/off and renderer disposal. The repeated sheet decoding found in the first candidate was removed before release, and initial maximized startup no longer rasterizes an unnecessary full GDI pair before GPU creation.
+
+Cold preparation remains a limitation: an isolated local64-bit run measured49ms for the first pair and23-28ms for each first unseen pose, versus52ms then26-30ms in the existing GDI path. Warm preparation is0.001-0.005ms versus2.89-3.02ms. This is a small diagnostic sample, not percentiles or a live-frame guarantee. First use and resizing can still hitch. Do not hide that cost in warm-cache claims; a future prewarming stage would need its own lifecycle/memory checks.
+
+Full local regressions and both localx86/x64 hardware suites passed after the refinement. Dancer-region mean RGB error below the unchanged3/255 gate (worst2.988 local,0.574 final Actions build), across both characters/all four poses/two sizes/strong impact/lift/sway. Existing scene comparisons also pass. Screenshots inspected; no sprite file changes. Tests cover retained foreground, cache/sheet release, repeated resize, native device-loss HRESULT fallback, pacing lifecycle and GDI paths. Actual display-driver reset and remote-session transitions remain manual limitations. User TV feedback and3restored/3maximized captures are required before progressing to text quality.
+
+Release2b514e2511877c77df50c0568b7c8ac322e71ea3 passed [Actions36751252513](https://github.com/jldkrocks/MusicBee-DesktopLyrics/actions/runs/36751252513), including full regressions and realx86/x64 GPU tests. [Final artifact11113959357](https://github.com/jldkrocks/MusicBee-DesktopLyrics/actions/runs/36751252513/artifacts/11113959357) ZIP SHA2563fe7d742529d23bca9e9f9ad8578a6275a3004f7165f25b09b2476bf9795d130 verified, including matching all three normal-plugin ZIP DLLs. Installed with MusicBee closed via ../install-musicbee-1.15.57.ps1 from ../artifact-1.15.57.0-final. Independent installed hashes: managed0977e9e639db674bb3f9affaedcebcaea4492e6c86cb69822edd738f1d140a1f; Win325672a72e5b92a7dd242b490b0ee8aaf216c57ba4a5ac4b218664fd4ab26cc990; x64a09ebc624dcfc30453a973988e551a4f2fcfb88f3ee84f3c23bf2db39035170b. All three56 DLLs backed up in ../backups/MusicBee-20260930-1.15.56.0 and independently matched the56 artifact. DLL sizes2662400/528384/684544 bytes, total growth5632bytes. Preliminary Actions36749848916/artifact11114147847 was never installed and is superseded.
+
 ## Checkpoint 5: retained foreground during lyric motion, version 1.15.56
 
 User authorized working down the existing-feature improvement list, starting with lyrics/foreground separation. They also reported a global NVIDIA 116 FPS cap used with G-SYNC. This is consistent with the live55 ceiling but has not been independently confirmed for MusicBee. Do not bypass or change that setting, or treat 116 draws/s alone as a regression.

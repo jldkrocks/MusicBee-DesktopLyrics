@@ -1,16 +1,18 @@
 # GPU rendering checkpoint
 
-Current checkpoint: version1.15.56 retains the artwork/queue/control overlay during GPU lyric motion. Version55's 60/120 FPS pacer measured about116 live draws/s; the user reports an NVIDIA global116FPS cap. The cap is a plausible explanation, not an independently verified cause. See `RENDERING.md` for measurements and gates. The older probe notes below are historical.
+Current checkpoint: version1.15.57 moves maximized dancer composition to the existing Direct2D target, pending hardware/performance and TV validation. Version1.15.56 retained the artwork/queue/control overlay during GPU lyric motion and the user accepted its live results. Version55's 60/120 FPS pacer measured about116 live draws/s; the user reports an NVIDIA global116FPS cap. The cap is a plausible explanation, not an independently verified cause. See `RENDERING.md` for measurements and gates. The older probe notes below are historical.
 
 User-authorized existing-feature sequence, developed as separate working checkpoints with TV feedback before expanding:
-1. Lyric/foreground separation: current checkpoint. Upcoming-text preparation remains a possible follow-up if new-glyph stalls justify it.
-2. GPU composition of existing dancer poses/squash/rebound/sway, preserving choreography and clocks; retain support for separate restored-window dancers.
+1. Lyric/foreground separation: completed and user-validated in56. Upcoming-text preparation remains a possible follow-up if new-glyph stalls justify it.
+2. GPU composition of existing dancer poses/squash/rebound/sway: current57 checkpoint, maximized only. Preserve choreography/clocks and separate restored-window GDI dancers.
 3. Investigate DirectWrite text quality/scaling with strict wrapping/font/outline compatibility checks. Do not assume a performance win.
 4. Artwork crossfades coordinated with existing background colour transitions.
 5. Spectrum visual polish, with bounded optional peak indicators/bar styles/glow and measured cost.
 6. Queue expansion and control feedback/fades using retained layers.
 
-None of items2-6 is implemented by the foreground checkpoint. Previously planned accent-beat selection and song-programmed celebratory effects remain later work.
+Items3-6 remain unimplemented. Original dancer assets are unchanged; optional upscaling needs a separate visual comparison to protect outlines/details and pose consistency. Previously planned accent-beat selection and song-programmed celebratory effects remain later work.
+
+## Historical pre-integration notes
 
 The plugin still uses GDI+. Keep that renderer until the complete replacement passes visual and interaction checks. Do not claim that the isolated probe enables GPU rendering in MusicBee.
 
