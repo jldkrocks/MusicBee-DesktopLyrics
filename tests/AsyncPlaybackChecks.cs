@@ -12,13 +12,13 @@ internal static class AsyncPlaybackChecks
         using (var release = new ManualResetEventSlim())
         using (var finished = new ManualResetEventSlim())
         {
-            int calls = 0;
+            int calls = 0; long spectrumStarted = 0;
             var api = new Plugin.MusicBeeApiInterface {
                 NowPlaying_GetFileUrl = () => "song",
                 Player_GetPlayState = () => { Interlocked.Increment(ref calls); entered.Set(); release.Wait(5000); return Plugin.PlayState.Playing; },
                 Player_GetPosition = () => 1234,
                 NowPlaying_GetDuration = () => 30000,
-                NowPlaying_GetSpectrumData = data => { data[0] = .5f; finished.Set(); return 1; }
+                NowPlaying_GetSpectrumData = data => { spectrumStarted = Stopwatch.GetTimestamp(); data[0] = .5f; finished.Set(); return 1; }
             };
             using (var reader = new PlaybackSnapshotReader(api))
             {
@@ -29,6 +29,8 @@ internal static class AsyncPlaybackChecks
                 release.Set();
                 if (!SpinWait.SpinUntil(() => reader.Latest.Position == 1234, 2000)) throw new Exception("Snapshot not published.");
                 if (reader.Latest.Duration != 30000 || reader.Latest.Count != 1 || reader.Latest.Spectrum[0] != .5f) throw new Exception("Incomplete snapshot.");
+                if (reader.Latest.PositionTimestamp <= 0 || reader.Latest.PositionTimestamp > spectrumStarted)
+                    throw new Exception("Playback position must be timestamped before spectrum work, not at publication.");
             }
             entered.Reset(); release.Reset(); finished.Reset();
             var disposed = new PlaybackSnapshotReader(api); disposed.Request(true);

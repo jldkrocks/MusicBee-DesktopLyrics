@@ -50,6 +50,36 @@ internal static class SeekClockChecks
         expired.PositionAt(10000, 1000, 1000, true);
         Check(expired.PositionAt(10500, 1016, 1000, true) == 10500,
             "An old Play request must not affect a later external seek.");
+        // Background spectrum work and drawing can deliver a position much
+        // later than it was read. That delay must not become a tempo correction.
+        foreach (bool explicitSeek in new[] { false, true })
+        {
+            var clock = new PartyPlaybackClock();
+            if (explicitSeek) clock.Seek(5000, 0, 1000, true);
+            else { clock.PositionAt(10000, -20, 1000, true); clock.PositionAt(5000, 0, 1000, true); }
+            clock.PositionAt(5100, 180, 1000, true, false, 100);
+            Check(clock.PositionAt(5200, 280, 1000, true, false, 200) == 5280,
+                "Seek phase must use position acquisition time, not delayed delivery time.");
+            int previous = 5280;
+            for (int wall = 290; wall <= 6000; wall += 10)
+            {
+                int delay = wall < 1500 ? 80 : 10;
+                int sampledAt = (wall - delay) / 100 * 100;
+                int position = clock.PositionAt(5000 + sampledAt, wall, 1000, true, false, sampledAt);
+                Check(position - previous == 10 && position == 5000 + wall,
+                    "Post-seek beats must stay at 1x even when delivery latency improves.");
+                previous = position;
+            }
+            // A new backward or forward seek must still replace the phase,
+            // not remain attached to the previous 1x run.
+            Check(clock.PositionAt(2000, 6020, 1000, true, false, 6000) == 2020,
+                "Later backward seek must remain authoritative.");
+            Check(clock.PositionAt(20000, 6040, 1000, true, false, 6020) == 20020,
+                "Later forward seek must remain authoritative.");
+        }
+        var delayedPause = new PartyPlaybackClock();
+        Check(delayedPause.PositionAt(12345, 100, 1000, false, false, 0) == 12345,
+            "Paused samples must not be projected forward.");
         Console.WriteLine("External seek speed, paused-seek resume and explicit Play intent checks passed.");
     }
 }

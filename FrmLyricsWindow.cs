@@ -1159,9 +1159,10 @@ namespace MusicBeePlugin
 
         private int ReadPartyPosition(long timestamp)
         {
-            var rawPosition = Math.Max(0, _playback.Latest.Position);
-            return _partyClock.PositionAt(rawPosition, timestamp,
-                Stopwatch.Frequency, _playState == Plugin.PlayState.Playing);
+            var sample = _playback.Latest;
+            return _partyClock.PositionAt(Math.Max(0, sample.Position), timestamp,
+                Stopwatch.Frequency, _playState == Plugin.PlayState.Playing, false,
+                sample.PositionTimestamp == 0 ? (long?)null : sample.PositionTimestamp);
         }
 
         private void RefreshPartyLayout()

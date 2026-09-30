@@ -16,6 +16,9 @@ The plugin receives only its normal DLL. The probe is a separate artifact file, 
 3. Avoid rendering the full frame in GDI+ and then uploading it; that keeps the CPU bottleneck. Retain GPU bitmaps/brushes/text layouts between frames.
 4. Compare screenshots at compact/1080p/4K sizes and measure presented frames while playing MusicBee. Test resize, display changes and device recreation before enabling it by default.
 
+## Later: per-song visual effect cues
+After the GPU renderer is stable, add manually timed flying stars/particles and bottom-edge spark bursts for choruses, builds and tense passages, inspired by the user's Taiko no Tatsujin example description. Plan type/start/duration/intensity controls without crowding the existing tempo editor. Preserve lyric readability and keep effect timing separate from dance/BPM settings. Reuse GPU textures and cap particles; offer reduced/off effects. Reconstruct current effects after seeking without firing past cues again. This is a planned feature, not part of the current renderer or a gameplay scoring system.
+
 References: [Direct2D QuickStart](https://learn.microsoft.com/en-us/windows/win32/direct2d/getting-started-with-direct2d) and [GDI interoperability](https://learn.microsoft.com/en-us/windows/win32/direct2d/direct2d-and-gdi-interoperation-overview).
 
 Verified locally from Actions artifact 11047942054 (run 36598712653): hardware target creation and 120 off-screen frames at both sizes passed. No presented-frame benchmark or plugin integration has been performed.

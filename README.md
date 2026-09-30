@@ -178,6 +178,11 @@ Playback controls and accent motion (1.15.46):
 - Existing cues load as Bop and are not rewritten until Save. Save writes map version 6; older plugin versions cannot load newly saved maps. New cue styles never change BPM, beat phase, rhythm, speed or lyric timing.
 
 
+Post-seek clock stability (1.15.49):
+- Position samples carry the time they were acquired, before spectrum work. Drawing accounts for their age instead of treating delayed samples as new positions.
+- After a seek the clock reacquires phase once from two fresh position steps, then advances at normal playback speed. It no longer speeds up or slows down by 3% to reconcile sample delays after a seek. A new seek still resets the position; paused seeking stays exact.
+- MusicBee can still require an initial phase correction while its fresh position reports arrive. This does not remove the player's audio buffering or display latency. Existing maps and BPM settings are unchanged.
+
 External seek correction (1.15.48):
 - Seeking with MusicBee's main seek bar no longer triggers the dancer clock's 20% resume catch-up. Resume easing is reserved for an explicit ordinary Play command from the plugin; temporary non-playing states during external seeks use the fresh playback position directly.
 - Play after a paused seek also bypasses resume easing. BPM, saved beat alignment, tempo maps and accent timing are unchanged. MusicBee's audio buffering/fade latency is outside this correction.

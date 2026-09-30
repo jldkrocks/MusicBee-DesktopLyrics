@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Diagnostics;
 
 namespace MusicBeePlugin
 {
@@ -9,6 +10,7 @@ namespace MusicBeePlugin
         {
             internal Plugin.PlayState State;
             internal int Position, Count, Duration;
+            internal long PositionTimestamp;
             internal string TrackUrl;
             internal float[] Spectrum = new float[4096];
         }
@@ -32,6 +34,7 @@ namespace MusicBeePlugin
                     next.TrackUrl = _api.NowPlaying_GetFileUrl?.Invoke();
                     next.State = _api.Player_GetPlayState();
                     next.Position = Math.Max(0, _api.Player_GetPosition());
+                    next.PositionTimestamp = Stopwatch.GetTimestamp();
                     next.Duration = Math.Max(0, _api.NowPlaying_GetDuration?.Invoke() ?? 0);
                     if (spectrum && next.State == Plugin.PlayState.Playing && _api.NowPlaying_GetSpectrumData != null)
                         next.Count = Math.Max(0, Math.Min(next.Spectrum.Length, _api.NowPlaying_GetSpectrumData(next.Spectrum)));
@@ -53,6 +56,7 @@ namespace MusicBeePlugin
                 ++_generation;
                 var prior = Latest;
                 Volatile.Write(ref _latest, new Snapshot { TrackUrl = trackUrl, Position = Math.Max(0, position),
+                    PositionTimestamp = Stopwatch.GetTimestamp(),
                     Duration = prior.TrackUrl == trackUrl ? prior.Duration : 0, State = prior.State,
                     Count = prior.Count, Spectrum = prior.Spectrum });
             }

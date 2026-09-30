@@ -17,6 +17,8 @@ namespace MusicBeePlugin
         private bool _resumeBlend, _resumeSawAdvance;
         private bool _seekBeforeResume;
         private long _resumeRequestedAt = long.MinValue;
+        private bool _seekClock;
+        private int _seekSamples;
         private readonly Queue<Sample> _samples = new Queue<Sample>();
         private struct Sample
         {
@@ -33,6 +35,8 @@ namespace MusicBeePlugin
             _samples.Clear();
             _seekBeforeResume = false;
             _resumeRequestedAt = long.MinValue;
+            _seekClock = false;
+            _seekSamples = 0;
         }
 
         // Only a known Play command may ease a resume. MusicBee's own seek
@@ -44,6 +48,15 @@ namespace MusicBeePlugin
             Reset();
             PositionAt(positionMs, timestamp, frequency, playing);
             _seekBeforeResume = !playing;
+            StartSeekClock();
+        }
+
+        private void StartSeekClock()
+        {
+            _seekClock = true;
+            _seekSamples = 0;
+            _anchored = true;
+            _samples.Clear();
         }
 
         private void Observe(int position, long timestamp, long frequency)
@@ -56,7 +69,7 @@ namespace MusicBeePlugin
         }
 
         internal int PositionAt(int rawPositionMs, long timestamp,
-            long frequency, bool playing, bool smoothResume = false)
+            long frequency, bool playing, bool smoothResume = false, long? positionTimestamp = null)
         {
             if (frequency <= 0) throw new ArgumentOutOfRangeException(nameof(frequency));
             var requestedResume = _resumeRequestedAt != long.MinValue &&
@@ -64,12 +77,16 @@ namespace MusicBeePlugin
                 (timestamp - _resumeRequestedAt) * 1000d / frequency <= 750;
             _resumeRequestedAt = long.MinValue;
             rawPositionMs = Math.Max(0, rawPositionMs);
+            // Position was read before spectrum/metadata work and before painting.
+            // Project from its acquisition time, not the time the UI consumes it.
+            var sampledAt = Math.Min(timestamp, positionTimestamp ?? timestamp);
+            var reported = rawPositionMs + (playing ? Math.Min(250, (timestamp - sampledAt) * 1000d / frequency) : 0);
             if (!_initialized || timestamp < _lastTimestamp)
             {
                 _initialized = true;
                 _playing = playing;
                 _anchored = false;
-                _positionMs = rawPositionMs;
+                _positionMs = reported;
                 _samples.Clear();
             }
             else if (!playing || !_playing)
@@ -77,11 +94,12 @@ namespace MusicBeePlugin
                 // Paused seeks use the actual position. Optional resume easing
                 // starts from the settled paused display, before a buffered step.
                 if (Math.Abs(rawPositionMs - _lastRawPosition) > 100)
-                    _seekBeforeResume = true;
+                { _seekBeforeResume = true; StartSeekClock(); }
                 _resumeBlend = (smoothResume || requestedResume) && playing && !_playing && !_seekBeforeResume;
+                if (_resumeBlend) _seekClock = false;
                 if (playing) _seekBeforeResume = false;
                 _resumeSawAdvance = rawPositionMs > _lastRawPosition;
-                _positionMs = _resumeBlend ? _positionMs : rawPositionMs;
+                _positionMs = _resumeBlend ? _positionMs : reported;
                 _playing = playing;
                 _anchored = false;
                 _samples.Clear();
@@ -90,38 +108,55 @@ namespace MusicBeePlugin
             {
                 var elapsedMs = (timestamp - _lastTimestamp) * 1000d / frequency;
                 var predicted = _positionMs + elapsedMs;
-                if (_resumeBlend && rawPositionMs >= _lastRawPosition - 100 && Math.Abs(rawPositionMs - predicted) < 1000)
+                if (_resumeBlend && rawPositionMs >= _lastRawPosition - 100 && Math.Abs(reported - predicted) < 1000)
                 {
                     // A resume often publishes a buffered position in one large step.
                     // Ease that display-only correction; never seek or change saved phase.
                     if (rawPositionMs > _lastRawPosition) _resumeSawAdvance = true;
-                    var difference = rawPositionMs - predicted;
+                    var difference = reported - predicted;
                     _positionMs = predicted + Math.Max(-elapsedMs * .2, Math.Min(elapsedMs * .2, difference));
                     if (_resumeSawAdvance && Math.Abs(difference) < 25) { _resumeBlend = false; _anchored = false; }
                 }
                 else if (rawPositionMs < _lastRawPosition - 100 ||
-                    rawPositionMs > predicted + 250 ||
-                    predicted - rawPositionMs > 750)
+                    reported > predicted + 250 ||
+                    predicted - reported > 750)
                 {
                     // A real seek or stalled player must replace the estimate.
                     _resumeBlend = false;
-                    _positionMs = rawPositionMs;
-                    _anchored = false;
-                    _samples.Clear();
+                    _positionMs = reported;
+                    StartSeekClock();
+                }
+                else if (_seekClock)
+                {
+                    _positionMs = predicted;
+                    // Reacquire phase once from two fresh position steps. Then
+                    // run at 1x, without stretching beats to repay sample delay.
+                    // A later real discontinuity still replaces the anchor above.
+                    if (_seekSamples < 2 && rawPositionMs > _lastRawPosition)
+                    {
+                        Observe(rawPositionMs, sampledAt, frequency);
+                        if (++_seekSamples == 2)
+                        {
+                            var best = double.NegativeInfinity;
+                            foreach (var sample in _samples) best = Math.Max(best, sample.Offset);
+                            _positionMs = timestamp * 1000d / frequency + best;
+                            _samples.Clear();
+                        }
+                    }
                 }
                 else if (!_anchored && rawPositionMs > _lastRawPosition)
                 {
                     // The first fresh position step removes the arbitrary
                     // age of the sample taken when the window appeared.
-                    _positionMs = rawPositionMs;
+                    _positionMs = reported;
                     _anchored = true;
-                    Observe(rawPositionMs, timestamp, frequency);
+                    Observe(rawPositionMs, sampledAt, frequency);
                 }
                 else
                 {
                     _positionMs = predicted;
                     if (_anchored && rawPositionMs > _lastRawPosition)
-                        Observe(rawPositionMs, timestamp, frequency);
+                        Observe(rawPositionMs, sampledAt, frequency);
                     if (_samples.Count > 0)
                     {
                         var best = double.NegativeInfinity;
