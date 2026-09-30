@@ -65,5 +65,47 @@
   "Ram_sheet": {
     "sha256": "e1797d1397e9912798b137286ca6b810ebf19d3bf7bae1794946989c92fa6c9b",
     "bytes": 4365424
-  }
+  },
+  "packing_verification": [
+    {
+      "character": "Rem",
+      "logical_frame": 0,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Rem",
+      "logical_frame": 3,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Rem",
+      "logical_frame": 6,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Rem",
+      "logical_frame": 9,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Ram",
+      "logical_frame": 0,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Ram",
+      "logical_frame": 3,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Ram",
+      "logical_frame": 6,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Ram",
+      "logical_frame": 9,
+      "packed_pixels_match_approved": true
+    }
+  ]
 }

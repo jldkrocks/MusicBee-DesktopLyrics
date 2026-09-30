@@ -12,6 +12,15 @@ User-authorized existing-feature sequence, developed as separate working checkpo
 
 Items3-6 remain unimplemented. The upscaled dancer sets have completed separate visual review; actual in-plugin 4K validation remains required after installation. Previously planned accent-beat selection and song-programmed celebratory effects remain later work.
 
+## Proposed next checkpoint after artwork validation
+
+1. Reduce measured first-use and resize preparation stalls. Release59 cold GPU pair preparation was 204 ms initially, then 61-64 ms for uncached poses, while warm preparation is negligible. Investigate bounded source/pose preparation without growing a per-size/per-song cache or creating a new animation clock. Moderate difficulty; expected benefit at transitions rather than steady FPS. Confirm on the user's 4K display before expanding.
+2. Text quality and DirectWrite feasibility. Keep existing layout, wrapping, outlines and English translation behavior; compare glyph quality and new-line preparation cost before deciding what to port. High compatibility risk/difficulty; performance benefit unproven.
+3. Artwork crossfades, then spectrum polish, then queue/control transitions. Keep each a separately measured and user-reviewed checkpoint. Crossfades should be modest steady GPU work; glow can be expensive at 4K and should remain optional/bounded.
+4. Selectable accent beat 1/2/3/4 and manually programmed celebration effects remain future functional work. Effects need particle caps, lyric readability, reduced/off controls and deterministic seek reconstruction.
+
+These are recommendations, not additional implementation in the sprite release.
+
 ## Historical pre-integration notes
 
 The plugin still uses GDI+. Keep that renderer until the complete replacement passes visual and interaction checks. Do not claim that the isolated probe enables GPU rendering in MusicBee.

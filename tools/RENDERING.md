@@ -1,3 +1,19 @@
+## Checkpoint 8: approved upscaled sprites, 1.15.59
+
+Four reviewed 900x1765 source poses per character, packed in logical order 0/3/6/9. Both rendering paths use the same mapping. Pixel verification confirms every packed cell matches the approved preview exactly. No changes to animation state, clocks, tempo maps, song storage, display layout, native helpers or GPU cache limits.
+
+Both decoded source sheets total 48.48 MiB, up 25.21 MiB from 58. Packing four cells avoids a 145.43 MiB twelve-cell duplicate layout. Display-sized pose textures still total 41.14 MiB in the 4K benchmark (64 MiB nominal cap). Local managed DLL 9,464,320 bytes, up 1,347,584 bytes. No additional runtime files or dependencies.
+
+Full local regression suite passed. Actual x86/x64 GPU checks passed all poses/characters, strong squash/lift/sway, sampling, cache bounds/release, resize and injected fallback; worst dancer mean RGB error 0.588 under unchanged 3/255 gate.
+
+Three restored and three 4K benchmark runs, all layers active, fresh lyrics/palette motion, 120 target. The JSON metadata confirms these benchmark runs are **32-bit**. Earlier narrative summaries calling this harness 64-bit were incorrect; raw reports are authoritative. Synthetic hidden HWND draw/submission timings are not display scan-out or user-perceived MusicBee responsiveness.
+
+4K frame work mean 0.799-0.855 ms, p95 3.94-4.37, p99 5.98-6.29. Draw intervals mean 8.342-8.345 ms, p99 8.868-8.894, maximum 14.175, none over 16.667. Warm rendering is essentially unchanged from 58 (frame work mean 0.82-0.86, interval p99 8.86-8.99). Restored work mean 0.823-0.849, interval mean 8.333, max 9.151. Whole-harness working set averages 303.6-311.3 MiB at 4K vs 250.7-258.7 in 58; harness retains extra GDI objects, so this is not a direct plugin or VRAM delta.
+
+Separate cold sample: first GPU pair 204.324 ms; other unseen pairs 61.659/64.325/60.802. Warm pair preparation 0.001-0.005 ms. Version58 cold sample was 109 ms then 33-35. Larger input resampling/decoding increases initial and resize hitch risk; warm figures exclude this. Prioritize measured source preparation/caching work as a follow-up, not timing changes. User's actual TV feedback remains required.
+
+Raw workload reports and cold numbers: render-check-1.15.59.json. [Actions36765101803](https://github.com/jldkrocks/MusicBee-DesktopLyrics/actions/runs/36765101803) passed at79a977e, including both actual hardware architectures (worst dancer RGB0.596). [Artifact11120697420](https://github.com/jldkrocks/MusicBee-DesktopLyrics/actions/runs/36765101803/artifacts/11120697420) verified and installed with MusicBee closed, all58 DLLs backed up and independently hash-checked. ZIP SHA25674dbb0549a9e694f347aa7813277e83064b08afa01c961e99f8bccfd52c66022. See RESUME.md for installed hashes and backup paths. Await liveTV feedback.
+
 # Rendering checkpoints and acceptance criteria
 
 ## Source-quality checkpoint: version 1.15.58
