@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Threading;
 using MusicBeePlugin;
 
 internal static class SeekClockChecks
@@ -80,6 +82,66 @@ internal static class SeekClockChecks
         var delayedPause = new PartyPlaybackClock();
         Check(delayedPause.PositionAt(12345, 100, 1000, false, false, 0) == 12345,
             "Paused samples must not be projected forward.");
+        // Early readings can advance normally before their buffered offset
+        // settles. Two advancing samples are not proof of a final phase.
+        foreach (bool explicitSeek in new[] { false, true })
+        foreach (int direction in new[] { -1, 1 })
+        {
+            var clock = new PartyPlaybackClock();
+            if (explicitSeek) clock.Seek(10000, 0, 1000, true);
+            else { clock.PositionAt(50000, -20, 1000, true); clock.PositionAt(10000, 0, 1000, true); }
+            int previous = 0;
+            for (int wall = 20; wall <= 4000; wall += 20)
+            {
+                int step = wall / 100 * 100;
+                int earlyOffset = direction * (step < 400 ? 200 : Math.Max(0, 200 - (step - 300) * 2 / 5));
+                int position = clock.PositionAt(10000 + step + earlyOffset, wall, 1000, true, false, wall);
+                if (wall >= 1500)
+                    Check(Math.Abs(position - (10000 + wall)) <= 20,
+                        "A provisional post-seek phase must recover when later reads establish a different phase.");
+                if (wall > 1500)
+                    Check(position - previous == 20, "Verified phase must retain normal playback speed.");
+                previous = position;
+            }
+        }
+        var quantized = new PartyPlaybackClock();
+        quantized.Seek(10000, 0, 1000, true);
+        int tick = 0, iteration = 0;
+        var gaps = new[] { 13, 27, 43, 7, 81, 16, 24 };
+        while (tick < 30000)
+        {
+            tick += gaps[iteration++ % gaps.Length];
+            Check(quantized.PositionAt(10000 + tick / 100 * 100, tick, 1000, true, false, tick) == 10000 + tick,
+                "Irregular polling of a coarse position must not produce false phase corrections.");
+        }
+        Check(quantized.PhaseCorrections == 0, "Sampling uncertainty must be respected.");
+        var tracePath = Path.Combine(Path.GetTempPath(), "DesktopLyrics-trace-" + Guid.NewGuid(), "seek.log");
+        var traceClock = new PartyPlaybackClock();
+        var trace = new PlaybackTimingTrace(tracePath);
+        for (int i = 0; i < 1000; i++)
+        {
+            if (i == 0 || i == 700) traceClock.Seek(i, i * 10, 1000, true);
+            trace.Record(i * 10, 1000, new PlaybackSnapshotReader.Snapshot {
+                Position = i, PositionTimestamp = i * 10, TrackUrl = "private-song-path",
+                State = Plugin.PlayState.Playing }, i, true, traceClock);
+        }
+        // A fast test may still have the first async write in progress.
+        string text = null;
+        Check(SpinWait.SpinUntil(() => {
+            trace.Flush();
+            try {
+                using (var stream = new FileStream(tracePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                using (var reader = new StreamReader(stream)) text = reader.ReadToEnd();
+                return text.Contains(",999,999,");
+            }
+            catch (IOException) { return false; }
+        }, 3000), "Latest seek diagnostics were not written.");
+        Check(text.Split('\n').Length <= 603 && text.Length < 100000 && !text.Contains("private-song-path"),
+            "Trace must be bounded, replace earlier data and exclude song paths.");
+        Check(SpinWait.SpinUntil(() => {
+            try { File.Delete(tracePath); Directory.Delete(Path.GetDirectoryName(tracePath)); return true; }
+            catch (IOException) { return false; }
+        }, 3000), "Trace cleanup did not complete.");
         Console.WriteLine("External seek speed, paused-seek resume and explicit Play intent checks passed.");
     }
 }

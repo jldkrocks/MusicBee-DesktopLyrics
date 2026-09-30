@@ -50,6 +50,7 @@
     <Compile Include="..\ImportedLyricsTagStore.cs"><Link>ImportedLyricsTagStore.cs</Link></Compile>
     <Compile Include="..\FrmLrcLibPicker.cs"><Link>FrmLrcLibPicker.cs</Link></Compile>
     <Compile Include="..\PlaybackSnapshotReader.cs" />
+    <Compile Include="..\PlaybackTimingTrace.cs" />
     <Compile Include="..\LyricsWindowThread.cs" />
     <Compile Include="AsyncPlaybackChecks.cs" />
     <Compile Include="RestAccentChecks.cs" />

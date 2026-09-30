@@ -23,6 +23,7 @@ namespace MusicBeePlugin
     internal sealed class PartyTempoStore
     {
         private readonly string _folder;
+        internal string PlaybackTracePath => Path.Combine(_folder, "last-playback-seek.log");
         private const string KeyFileName = "getsongbpm-key.bin";
         private static readonly byte[] KeyEntropy =
             Encoding.UTF8.GetBytes("MusicBee-DesktopLyrics:GetSongBPM:v1");

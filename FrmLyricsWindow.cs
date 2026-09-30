@@ -20,6 +20,7 @@ namespace MusicBeePlugin
         private readonly Plugin.MusicBeeApiInterface _musicBee;
         private readonly PlaybackHistory _history;
         private readonly PlaybackSnapshotReader _playback;
+        private readonly PlaybackTimingTrace _playbackTrace;
         private readonly Action<Action> _dispatchPlayerCommand;
         private bool _playCommandPending;
         private System.Windows.Forms.Timer _stopHideTimer;
@@ -161,6 +162,7 @@ namespace MusicBeePlugin
             _savedTiming = savedTiming;
             _englishStore = englishStore;
             _partyTempoStore = partyTempoStore;
+            _playbackTrace = new PlaybackTimingTrace(partyTempoStore.PlaybackTracePath);
             _partyApiKey = _partyTempoStore.LoadApiKey();
             _englishSaved = englishSaved;
             _useArtworkColors = settings.UseArtworkColors;
@@ -1160,9 +1162,12 @@ namespace MusicBeePlugin
         private int ReadPartyPosition(long timestamp)
         {
             var sample = _playback.Latest;
-            return _partyClock.PositionAt(Math.Max(0, sample.Position), timestamp,
+            var position = _partyClock.PositionAt(Math.Max(0, sample.Position), timestamp,
                 Stopwatch.Frequency, _playState == Plugin.PlayState.Playing, false,
                 sample.PositionTimestamp == 0 ? (long?)null : sample.PositionTimestamp);
+            _playbackTrace.Record(timestamp, Stopwatch.Frequency, sample, position,
+                _playState == Plugin.PlayState.Playing, _partyClock);
+            return position;
         }
 
         private void RefreshPartyLayout()
@@ -3025,6 +3030,7 @@ namespace MusicBeePlugin
                 Interlocked.Increment(ref _artworkRequestId);
                 _animationTimer?.Dispose();
                 _playback?.Dispose();
+                _playbackTrace?.Flush();
                 _stopHideTimer?.Dispose();
                 DisposePartyDancers();
                 _albumArtwork?.Dispose();

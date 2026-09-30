@@ -178,6 +178,11 @@ Playback controls and accent motion (1.15.46):
 - Existing cues load as Bop and are not rewritten until Save. Save writes map version 6; older plugin versions cannot load newly saved maps. New cue styles never change BPM, beat phase, rhythm, speed or lyric timing.
 
 
+Post-seek alignment verification (1.15.50):
+- Fixes a case where the first advancing MusicBee readings establish a temporary offset which then stays locked for the song. After seeking, the clock continues checking groups of consistent readings, respecting the uncertainty between coarse position updates. A confirmed offset replaces the estimate directly, without a catch-up speed change. The premature two-reading lock is removed.
+- A small local diagnostic file, `DesktopLyrics-PartyTempo/last-playback-seek.log` in MusicBee's plugin storage, records the latest seek. It replaces the previous trace, keeps at most 600 timing rows and excludes song names, file paths and audio. Formatting and writing run in the background. It is intended to help verify actual player behavior if synchronization problems persist.
+- Saved BPM, beat alignment and tempo maps are unchanged. Brief position corrections can still occur as a seek settles; live playback testing remains necessary.
+
 Post-seek clock stability (1.15.49):
 - Position samples carry the time they were acquired, before spectrum work. Drawing accounts for their age instead of treating delayed samples as new positions.
 - After a seek the clock reacquires phase once from two fresh position steps, then advances at normal playback speed. It no longer speeds up or slows down by 3% to reconcile sample delays after a seek. A new seek still resets the position; paused seeking stays exact.

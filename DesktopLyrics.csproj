@@ -111,6 +111,7 @@
     <Compile Include="FrmLyricsWindow.cs" />
     <Compile Include="LyricsWindowThread.cs" />
     <Compile Include="PlaybackSnapshotReader.cs" />
+    <Compile Include="PlaybackTimingTrace.cs" />
     <Compile Include="PartyTempoMap.cs" />
     <Compile Include="PartyTimeline.cs" />
     <Compile Include="FrmPartyTempoMap.cs" />
