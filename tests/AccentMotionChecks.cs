@@ -30,6 +30,11 @@ internal static class AccentMotionChecks
    m.Accents[0].Motion=motion;Check(m.At(1).Frame==(motion==PartyAccentMotion.Left?6:motion==PartyAccentMotion.Right?0:clean.At(1).Frame),"Explicit accent pose failed.");
   }
   m.Accents[0].Motion=(PartyAccentMotion)99;bool rejected=false;try{m.Validate();}catch(ArgumentException){rejected=true;}Check(rejected,"Unknown motion accepted.");
+  var legacyHold=new PartyTempoMap{TrackUrl="legacy-hold"};legacyHold.Sections.Add(new PartyTempoSection{Bpm=100});
+  legacyHold.Sections.Add(new PartyTempoSection{StartSeconds=1.7,Bpm=100,Style=PartyDanceStyle.Rest});
+  var captured=legacyHold.At(1).Frame;
+  legacyHold.Accents.Add(new PartyAccentCue{TimeSeconds=1,HoldSeconds=2});
+  Check(legacyHold.At(2).Frame==captured,"Original bop hold must keep its captured drawing across section boundaries.");
   var clock=new PartyPlaybackClock();clock.PositionAt(10000,0,1000,false,true);
   clock.PositionAt(10000,100,1000,true,true);
   var before=clock.PositionAt(10000,116,1000,true,true);

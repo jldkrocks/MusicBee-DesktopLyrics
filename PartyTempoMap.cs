@@ -153,7 +153,7 @@ namespace MusicBeePlugin
                 }
                 // A cue never modifies beat integration. Only an explicit post-hit
                 // hold pins the drawing; release returns to the running timeline.
-                if (!pose.Held && strongest.Motion == PartyAccentMotion.Bop && strongest.HoldSeconds > 0 && seconds >= strongest.TimeSeconds &&
+                if (strongest.Motion == PartyAccentMotion.Bop && strongest.HoldSeconds > 0 && seconds >= strongest.TimeSeconds &&
                     seconds < strongest.TimeSeconds + strongest.HoldSeconds)
                     pose.Frame = CoreAt(strongest.TimeSeconds).Frame;
             }
