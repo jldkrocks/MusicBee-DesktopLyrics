@@ -12,7 +12,26 @@ Acceptance stated before implementation: remove at least80% of full foreground u
 
 This checkpoint separates GPU lyric command capture from overlay rasterization. Moving/scaling/fading text and the lyric card reuse the existing textures without clearing, painting or uploading the retained overlay. Explicit UI invalidations still refresh it; a final layout refresh handles compact artwork/queue changes when translations disappear. Hit rectangles are offset only when the corresponding controls are redrawn, preventing accumulated gutter offsets. `LyricCompose` is a new opt-in diagnostic metric. Font creation remains GDI; no new font preparation thread, cache, playback clock, dependency or native ABI is introduced. BPM/maps/lyric timing, saved English and song data are untouched. Existing GDI fallback remains intact.
 
-The hardware tests now compare GDI against GPU frames that actually reuse an earlier overlay while advancing lyric motion, including English arrival/change, preview promotion and compact/4K clipping. An isolated production-path transition test requires all12 moving frames to keep overlay pixels and hit rectangles unchanged with zero full rasterizations/uploads, while updating commands every frame. Final layout and explicit invalidation still refresh correctly. Measurements and verified installation will be recorded when complete.
+The hardware tests now compare GDI against GPU frames that actually reuse an earlier overlay while advancing lyric motion, including English arrival/change, preview promotion and compact/4K clipping. An isolated production-path transition test requires all12 moving frames to keep overlay pixels and hit rectangles unchanged with zero full rasterizations/uploads, while updating commands every frame. Final layout and explicit invalidation still refresh correctly. Both local architectures passed, with image error0.95-1.68/255 under the unchanged3/255 threshold. The full local regression suite passed.
+
+Final matched measurements are in `render-comparison-1.15.56.json`, with raw files in `../render56-final-baseline` (verified55 artifact) and `../render56-final-retained` (56). Each has three restored and three4K runs, all layers, fresh strings every2s, palette animation1s/8s, same120-target scheduler. The benchmark now explicitly invalidates at each lyric change, matching the first overlay refresh performed by production UpdateLyrics. Earlier exploratory `render56-baseline`/`render56-retained` runs did not model that invalidation and are not the final comparison. The benchmark uses hidden HWNDs and64-bit submission timing, not live32-bit MusicBee or display scan-out. The reported driver cap was not modified and is not confirmed to apply to the benchmark executable.
+
+| 4K measurement | Version55 baseline | Version56 retained overlay |
+| --- | --- | --- |
+| Full foreground uploads per measured run | 249-250 | 119-125 |
+| Total foreground raster + upload wall time | 1174-1191 ms | 556-577 ms |
+| Mean full-frame CPU/submission work | 4.31-4.40 ms | 3.90-3.93 ms |
+| Frame-work p95 | 8.41-8.52 ms | 7.89-8.44 ms |
+| Frame-work p99 | 9.35-10.39 ms | 9.51-11.10 ms |
+| Maximum frame work | 17.71-18.17 ms | 15.93-16.78 ms |
+| Mean frame interval | 8.45-8.47 ms | 8.39-8.44 ms |
+| Interval p95 / p99 | 8.88-9.04 / 10.06-10.49 ms | 8.77-8.99 / 9.93-11.27 ms |
+
+The isolated lyric-motion upload gate passes (12/12 uploads avoided). Across the mixed workload, palette/UI/first-frame/final-layout refreshes remain: upload count falls about50-52%, and raster/upload wall time about51-53%. Lyric-only command capture averages0.46-0.49ms at4K. Overall frame work improves about10%, not50%; dancers and GPU submission remain. Tail improvements are not uniform: one run's p99 is higher, and first-time glyph/palette work still needs headroom. Restored mean frame work falls1.02-1.05ms to0.84-0.87ms, with uploads269 to129. Do not claim a large FPS gain from this checkpoint.
+
+Whole benchmark-process CPU at4K averages50.67-51.42% of one logical core for55 versus45.57-48.51% for56. Working set averages253-264MiB versus253-267MiB; these are not per-plugin or VRAM measurements. No new surfaces/caches/native libraries are allocated. Managed DLL size2,659,328bytes is512bytes larger; native sources and ABI are unchanged. Live TV validation, especially lyric changes, compact translation appearance/removal, queue/control interaction and MusicBee scrolling, remains the next gate.
+
+Release `5341c669612cf87257711623c39e561b97cc6ffe` passed [Actions36747087201](https://github.com/jldkrocks/MusicBee-DesktopLyrics/actions/runs/36747087201), including the full suite and both actual hardware architectures. [Artifact11112858226](https://github.com/jldkrocks/MusicBee-DesktopLyrics/actions/runs/36747087201/artifacts/11112858226) ZIP digest `4f9db76d06a1dbe4198602d7ecac84fc989a008e28af03304325d2328f213637` was verified, along with all three DLLs in the normal plugin ZIP. Installed with MusicBee closed via `../install-musicbee-1.15.56.ps1`; independently verified installed hashes: managed `d7435fe4eaaa01bc61093daded3867b2931433beb5900b6f24566ac7e5e65391`, Win32 `cd169612fcad20eba878b20689b6821864e8392afd02dee913fa12e45162f467`, x64 `a97124c6ec63687a4aeeae198d873e41db112f5a732b383ca3e599f9425f37c0`. All previous55 binaries are backed up in `../backups/MusicBee-20260930-1.15.55.0`; backup hashes independently match the55 artifact.
 
 ## Checkpoint 4: presentation pacing, version 1.15.55
 
