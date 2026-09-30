@@ -94,6 +94,7 @@ class GdiRenderBenchmark
                     { "process_bits", IntPtr.Size * 8 }, { "logical_processors", Environment.ProcessorCount },
                     { "paced_60_workload", paced },
                     { "fresh_lyrics_every_2s", freshLyrics },
+                    { "artwork_crossfades", args.Length>5 && args[5]=="artwork" },
                     { "lyric_outlines", !(args.Length>4 && args[4]=="bitmap") },
                     { "invalidate_at_lyric_change", true },
                     { "frame_target_fps", messageFps }, { "legacy_timer", legacyTimer },
@@ -126,7 +127,16 @@ class GdiRenderBenchmark
                         // Match UpdateLyrics' invalidation without calling its
                         // live artwork/track lookup in this synthetic fixture.
                         int currentVerse = (int)(t / 2);
-                        if (currentVerse != lastVerse) { form.Invalidate(); lastVerse = currentVerse; }
+                        if (currentVerse != lastVerse) {
+                            if(args.Length>5 && args[5]=="artwork") {
+                                var cover=new Bitmap(256,256,PixelFormat.Format32bppPArgb);
+                                using(var cg=Graphics.FromImage(cover))using(var brush=new LinearGradientBrush(new Rectangle(0,0,256,256),
+                                    currentVerse%2==0?Color.Coral:Color.MediumPurple,Color.SteelBlue,45f))cg.FillRectangle(brush,0,0,256,256);
+                                Call(form,"StartArtwork",cover,Stopwatch.GetTimestamp());
+                            }
+                            form.Invalidate(); lastVerse = currentVerse;
+                        }
+                        Call(form,"AdvanceArtwork",Stopwatch.GetTimestamp());
                         if(freshLyrics) {
                             int verse=(int)(t/2);
                             Set(form,"_line1","Current lyrics stay readable while the music and dancers move " + verse);

@@ -503,6 +503,11 @@ class GpuCompositionChecks
         now+=duration*2;Call(form,"StartArtwork",null,now);Call(form,"AdvanceArtwork",now+duration/2);PixelCompare(assembly,form);
         Call(form,"AdvanceArtwork",now+duration+1);Check(Get(form,"_albumArtwork")==null && Get(form,"_previousArtwork")==null,"Missing artwork retained old covers");
         form.Invalidate();Call(form,"TryDrawGpu");
+        gpu=Get(form,"_gpu");var artCommand=gpu.GetType().GetField("_artwork",Flags);
+        var arguments=artCommand.FieldType.GetMethod("Invoke").GetParameters().Select(p=>Expression.Parameter(p.ParameterType,p.Name)).ToArray();
+        artCommand.SetValue(gpu,Expression.Lambda(artCommand.FieldType,Expression.Constant(unchecked((int)0x8899000c)),arguments).Compile());
+        Check(!(bool)Call(form,"TryDrawGpu") && Get(form,"_gpu")==null && (bool)Get(form,"_gpuFailed"),"Artwork native failure did not restore GDI");
+        Set(form,"_gpuFailed",false);
         Console.WriteLine("Artwork fade, interruption snapshot, missing cover, cleanup and retained overlay passed.");
     }
 }
