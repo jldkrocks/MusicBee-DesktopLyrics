@@ -36,6 +36,10 @@ namespace MusicBeePlugin
             if (!UseGpuDancers) { _gpu.ClearDancers(); return; }
             var stamp = _renderProfile?.Stamp ?? 0;
             _gpu.BeginDancers();
+            for (int frame = 0; frame < PartyAnimation.FrameCount; frame += 3) {
+                _gpu.SeedDancer(0, frame, _leftDancer?.CachedPose(frame));
+                _gpu.SeedDancer(1, frame, _rightDancer?.CachedPose(frame));
+            }
             _gpu.AddDancer(0, RectangleToClient(_leftPartyBounds), _partyVisualFrame,
                 _partyVisualImpact, _partyVisualSway, _partyVisualAnticipation);
             _gpu.AddDancer(1, RectangleToClient(_rightPartyBounds), _partyVisualFrame,
@@ -48,8 +52,8 @@ namespace MusicBeePlugin
         {
             if (!_partyVisualValid || !_settings.PartyMode || !Visible ||
                 WindowState == FormWindowState.Minimized || _animationDisposed) return;
-            if (_leftDancer == null) _leftDancer = new PartyDancerWindow("MusicBeePlugin.PartyRem.png");
-            if (_rightDancer == null) _rightDancer = new PartyDancerWindow("MusicBeePlugin.PartyRam.png");
+            if (_leftDancer == null) _leftDancer = new PartyDancerWindow("MusicBeePlugin.PartyRem.png", true);
+            if (_rightDancer == null) _rightDancer = new PartyDancerWindow("MusicBeePlugin.PartyRam.png", true);
             _leftDancer.Profile = _rightDancer.Profile = _renderProfile;
             PlacePartyDancer(_leftDancer, _leftPartyBounds, _partyVisualFrame,
                 _partyVisualImpact, _partyVisualSway, _partyVisualAnticipation);
@@ -169,7 +173,7 @@ namespace MusicBeePlugin
                 submitted = _renderProfile?.Stamp ?? 0;
                 _gpu.Draw(_palette, _bars, _settings.ShowVisualizer);
                 _renderProfile?.End(RenderMetric.GpuSubmit, submitted);
-                if (UseGpuDancers) DisposePartyDancers();
+                if (UseGpuDancers) { _leftDancer?.Hide(); _rightDancer?.Hide(); }
                 _renderProfile?.FrameActivity(!string.IsNullOrWhiteSpace(_line1), !string.IsNullOrWhiteSpace(_line2),
                     !string.IsNullOrWhiteSpace(_nextLine), true, redraw);
                 return true;
@@ -1537,7 +1541,7 @@ namespace MusicBeePlugin
                 return;
             }
             dancer.Present(bounds, frame, impact, sway, anticipation);
-            if (!dancer.Visible) dancer.Show(this);
+            if (dancer.HasSurface && !dancer.Visible) dancer.Show(this);
         }
 
         private void DisposePartyDancers()

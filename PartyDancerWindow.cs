@@ -22,6 +22,10 @@ namespace MusicBeePlugin
         private const int WsExTransparent = 0x20;
         private const int WsExNoActivate = 0x08000000;
         private readonly Bitmap _sheet;
+        private readonly DancerPosePreparer _preparation;
+        private readonly int _character;
+        internal Bitmap CachedPose(int frame) { return _scaledPoses[frame]; }
+        internal bool HasSurface => _surface != null;
         private Bitmap _surface;
         private Graphics _graphics;
         private readonly Bitmap[] _scaledPoses = new Bitmap[PartyAnimation.FrameCount];
@@ -88,8 +92,17 @@ namespace MusicBeePlugin
             ref NativePoint destination, ref NativeSize size, IntPtr sourceDc,
             ref NativePoint source, uint colorKey, ref BlendFunction blend, uint flags);
 
-        public PartyDancerWindow(string resourceName)
+        public PartyDancerWindow(string resourceName) : this(resourceName, false) { }
+
+        // The synchronous overload remains the independent pixel reference.
+        public PartyDancerWindow(string resourceName, bool prepareAsync)
         {
+            if (prepareAsync) {
+                if (resourceName != "MusicBeePlugin.PartyRem.png" && resourceName != "MusicBeePlugin.PartyRam.png")
+                    throw new ArgumentException("Unknown dancer resource.", nameof(resourceName));
+                _character = resourceName == "MusicBeePlugin.PartyRem.png" ? 0 : 1;
+                _preparation = new DancerPosePreparer { ReleaseSourcesWhenIdle = true };
+            } else {
             using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
             {
                 if (stream == null) throw new InvalidOperationException("Party sprite is missing: " + resourceName);
@@ -98,6 +111,7 @@ namespace MusicBeePlugin
             if (_sheet.Width != FrameWidth * SourcePoseCount ||
                 _sheet.Height != FrameHeight)
                 throw new InvalidOperationException("The party sprite has an unexpected size.");
+            }
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
@@ -121,6 +135,18 @@ namespace MusicBeePlugin
         {
             if (IsDisposed || bounds.Width < 1 || bounds.Height < 1) return;
             if (Bounds != bounds) Bounds = bounds;
+            if (_preparation != null) {
+                _preparation.Request(_character, bounds.Size, frame);
+                for (int f = 0; f < PartyAnimation.FrameCount; f += 3) {
+                    var ready = _preparation.Take(_character * 4 + f / 3);
+                    if (ready == null) continue;
+                    _scaledPoses[f]?.Dispose(); _scaledPoses[f] = ready;
+                    _lastFrame = -1;
+                }
+                // Keep an already prepared matching pose through size changes.
+                // Never substitute another beat's pose or block on the worker.
+                if (_scaledPoses[frame] == null) return;
+            }
             // Every beat lands; the side poses have the stronger squash.
             // A small lift just before the next pose softens the static hold.
             var squashPixels = (int)Math.Round(bounds.Height * 0.045f * impact);
@@ -199,7 +225,7 @@ namespace MusicBeePlugin
 
         private void CreateBuffer(Size size)
         {
-            ReleaseBuffer();
+            ReleaseBuffer(_preparation == null);
             var byteCount = checked(size.Width * size.Height * 4);
             var screenDc = GetDC(IntPtr.Zero);
             if (screenDc == IntPtr.Zero) throw new Win32Exception();
@@ -237,7 +263,7 @@ namespace MusicBeePlugin
             _lastLiftQuarterPixels = int.MinValue;
         }
 
-        private void ReleaseBuffer()
+        private void ReleaseBuffer(bool clearPoses = true)
         {
             _graphics?.Dispose();
             _graphics = null;
@@ -248,6 +274,7 @@ namespace MusicBeePlugin
             if (_dib != IntPtr.Zero) DeleteObject(_dib);
             if (_memoryDc != IntPtr.Zero) DeleteDC(_memoryDc);
             _oldBitmap = _dib = _memoryDc = _dibBits = IntPtr.Zero;
+            if (!clearPoses) return;
             for (var i = 0; i < _scaledPoses.Length; i++)
             {
                 _scaledPoses[i]?.Dispose();
@@ -259,6 +286,7 @@ namespace MusicBeePlugin
         {
             if (disposing)
             {
+                _preparation?.Dispose();
                 ReleaseBuffer();
                 _sheet?.Dispose();
             }

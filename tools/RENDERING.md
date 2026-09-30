@@ -1,3 +1,13 @@
+## Checkpoint 1.15.61: maximize and drag-restore handoff
+
+User validation of60 exposed a missing transition: restored dancers were disposed on every successful maximized GPU frame. Consequently maximize had no seed images, and restoring recreated/decoded the GDI sheets synchronously. Native drag restore also changes layout while moving, potentially requesting more sizes in that synchronous path.
+
+Retain and hide the restored dancer windows on maximize, seed empty GPU slots with their correctly indexed display rasters, then let the existing worker replace them with sharp target-size poses. Production restored windows now use the same bounded serial preparation service; resizing keeps existing matching poses until replacements are ready. Retained restored preparers release source sheets when idle. Display-pose caches remain one size per pose, never a list of old sizes or songs. The synchronous constructor remains an independent reference for pixel checks.
+
+Acceptance: no omitted dancer commands during warmed normal-to-maximized handoff for any of0/3/6/9; no synchronous source sheet in production restored windows; obsolete resize work and source release remain bounded; existing GPU/GDI appearance, fallback and full regression gates remain unchanged. Test transition UI cost separately from initial layered-window creation, and let the user verify actual native title-bar dragging on the TV.
+
+Local full suite and actual x86/x64 hardware checks pass. Initial asynchronous pair Present maximum21.69/22.68ms includes first native HWND/DIB creation, rather than PNG/bicubic work. Same worst dancer RGB error.588. Retained windows avoid recreating those handles on subsequent restore. Further measurement/Actions/install follow below when complete.
+
 ## Checkpoint 1.15.60: bounded asynchronous sprite preparation and text investigation
 
 Scope: user-approved 59 artwork is unchanged. Maximized GPU sprites prepare on one serial background worker, replacing obsolete resize requests; no playback state is accessed. Cached textures continue to scale during resize. A cold pair appears only after its current poses are ready. Restored/GDI dancers retain their existing path in this checkpoint.

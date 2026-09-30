@@ -1,3 +1,9 @@
+## In progress: 1.15.61 transition fix
+
+User reports a brief dancer disappearance on maximize and a window freeze when dragging the maximized title bar to restore. Inspected clean2f9db25 and draftPR1. Found that60 disposed restored windows on successful GPU drawing, while GPU cold poses were omitted until ready; restoring recreated PNG sheets and bicubic poses synchronously. This checkpoint retains hidden restored windows/cached poses, seeds missing GPU slots from those correctly indexed rasters, and makes the production GDI constructor use bounded asynchronous preparation too. Restored preparers release decoded source sheets when idle, so hidden windows retain only one display-size pose set and DIB. Resize reuses matching old poses until replacements arrive. No clocks/timing/maps/data/assets changed. Synchronous GDI constructor remains an independent test reference.
+
+Full local suite and x86/x64 hardware checks passed, including new async restored-cache release and immediate all-four-pose maximize handoff checks. Dancer pixel error .588 unchanged. Initial pair Present maxima21.69/22.68ms include first layered HWND/DIB creation; this is not a claim of sub-frame cold startup. Repeat restore should reuse these objects; native interactive title-bar drag remains for the user's final validation. Version61 not built in Actions/installed yet. Continue with benchmark, CI, verify package and backup-aware install. MusicBee was absent from latest process query; recheck before install.
+
 ## Installed release: 1.15.60.0
 
 User approved59 visually and authorized next items1/2: reduce dancer preparation stalls, then text-quality/DirectWrite investigation. Inspected repo and draftPR1 at clean a27ab364. Release3576ea6070946fc56e688d29b347f5e633f83236, earlier dev265ec4c not installed. No playback clocks/BPM/maps/lyrics timing/English/songdata/artwork edits.

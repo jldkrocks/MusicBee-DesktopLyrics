@@ -63,6 +63,20 @@ namespace MusicBeePlugin
             _dancerPreparation?.Dispose(); _dancerPreparation = null;
         }
         internal void CommitDancers() { Marshal.ThrowExceptionForHR(_dancers(_renderer,_dancerCommands,_dancerCount == 2 ? 2 : 0)); }
+        internal void SeedDancer(int character, int frame, Bitmap pose)
+        {
+            if (pose == null) return;
+            if (character < 0 || character > 1 || frame < 0 || frame > 9 || frame % 3 != 0)
+                throw new ArgumentOutOfRangeException("dancer");
+            int slot = character * 4 + frame / 3;
+            if (!_dancerSizes[slot].IsEmpty) return;
+            int bytes = checked(pose.Width * pose.Height * 4);
+            if (bytes > 8 * 1024 * 1024) return;
+            var bits = pose.LockBits(new Rectangle(Point.Empty, pose.Size), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+            try { Marshal.ThrowExceptionForHR(_dancerTexture(_renderer, slot, (uint)pose.Width, (uint)pose.Height, bits.Scan0, (uint)bits.Stride)); }
+            finally { pose.UnlockBits(bits); }
+            _dancerSizes[slot] = pose.Size; _dancerBytes += bytes;
+        }
         internal void AddDancer(int character, Rectangle bounds, int frame, float impact, float sway, float anticipation)
         {
             if (bounds.Width<=0 || bounds.Height<=0) return;

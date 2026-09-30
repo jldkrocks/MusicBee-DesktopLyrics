@@ -82,6 +82,7 @@ class GpuCompositionChecks
                 // Inject the actual HRESULT a lost D2D target returns, at the
                 // managed/native boundary. This does not reset the display driver.
                 RetainedForegroundChecks(assembly,form);
+                DancerHandoffChecks(assembly,form);
                 DancerChecks(assembly,form);
                 // A raster-worker error must select the same reliable fallback.
                 form.WindowState=FormWindowState.Maximized;Set(form,"_partyVisualValid",true);
@@ -207,6 +208,59 @@ class GpuCompositionChecks
             Check(((Bitmap[])Get(renderer,"_textImages")).Count(b=>b!=null)<=6,"Byte-budget eviction failed");
         }
         Console.WriteLine("Lyric texture cache remained bounded through repeated uploads/evictions.");
+    }
+    static void DancerHandoffChecks(Assembly assembly, Form form)
+    {
+        var type=assembly.GetType("MusicBeePlugin.PartyDancerWindow");
+        var pair=new Form[2];
+        try {
+            for(int c=0;c<2;c++)pair[c]=(Form)Activator.CreateInstance(type,new object[]{c==0?"MusicBeePlugin.PartyRem.png":"MusicBeePlugin.PartyRam.png",true});
+            double worstCall=0;
+            foreach(int height in new[]{454,500,454}) {
+                int width=(int)Math.Round(height*180d/353);
+                var watch=Stopwatch.StartNew();
+                while(true) {
+                    var call=Stopwatch.StartNew();
+                    for(int c=0;c<2;c++)Call(pair[c],"Present",new Rectangle(-20000+c*1000,-20000,width,height),0,1f,0f,0f);
+                    worstCall=Math.Max(worstCall,call.Elapsed.TotalMilliseconds);
+                    if(pair.All(d=>new[]{0,3,6,9}.All(f=>((Bitmap)Call(d,"CachedPose",f))?.Size==new Size(width,height))))break;
+                    Check(watch.ElapsedMilliseconds<10000,"Restored dancer preparation timed out");
+                    System.Threading.Thread.Sleep(1);
+                }
+                foreach(var d in pair) {
+                    Check(Get(d,"_sheet")==null,"Production GDI constructor decoded a sheet synchronously");
+                    var prep=Get(d,"_preparation");
+                    var release=Stopwatch.StartNew();
+                    while((bool)Get(prep,"_running") && release.ElapsedMilliseconds<5000)System.Threading.Thread.Sleep(1);
+                    Check(((Bitmap[])Get(prep,"_sources")).All(b=>b==null),"Hidden restored cache retained source sheets");
+                }
+            }
+            form.WindowState=FormWindowState.Maximized;form.ClientSize=new Size(3840,2160);
+            using(var renderer=(IDisposable)Activator.CreateInstance(assembly.GetType("MusicBeePlugin.GpuSceneRenderer"),Flags,null,new object[]{form.Handle,form.ClientSize,true},null)) {
+                for(int c=0;c<2;c++)foreach(int f in new[]{0,3,6,9})Call(renderer,"SeedDancer",c,f,Call(pair[c],"CachedPose",f));
+                foreach(int f in new[]{0,3,6,9}) {
+                    Call(renderer,"BeginDancers");
+                    for(int c=0;c<2;c++)Call(renderer,"AddDancer",c,new Rectangle(c*2000,0,829,1626),f,1f,0f,0f);
+                    Check((int)Get(renderer,"_dancerCount")==2,"Maximize handoff temporarily omitted a dancer");
+                    Call(renderer,"CommitDancers");
+                }
+                Check((int)Get(renderer,"_dancerBytes")<=64*1024*1024,"Seeded dancer cache exceeded its bound");
+            }
+            // Production handoff retains (hides) the same windows instead of
+            // decoding new sheets when restored, including native drag restore.
+            Set(form,"_leftDancer",pair[0]);Set(form,"_rightDancer",pair[1]);
+            Set(form,"_partyVisualValid",true);Set(form,"_partyVisualFrame",0);
+            Set(form,"_leftPartyBounds",form.RectangleToScreen(new Rectangle(0,200,829,1626)));
+            Set(form,"_rightPartyBounds",form.RectangleToScreen(new Rectangle(3011,200,829,1626)));
+            Check((bool)Call(form,"TryDrawGpu"),"Handoff render failed");
+            Check(ReferenceEquals(Get(form,"_leftDancer"),pair[0]) && !pair[0].IsDisposed && !pair[0].Visible,"Maximize discarded or exposed restored dancer window");
+            Check((int)Get(Get(form,"_gpu"),"_dancerCount")==2,"Production maximize did not seed both dancers");
+            Set(form,"_partyVisualValid",false);
+            Console.WriteLine("Async restored poses and immediate seeded maximize handoff passed; maximum pair Present call ms: "+worstCall.ToString("F3"));
+        } finally {
+            Set(form,"_leftDancer",null);Set(form,"_rightDancer",null);
+            foreach(var d in pair)d?.Dispose();
+        }
     }
     static void WaitDancers(object renderer,Rectangle[] bounds,int frame,float impact,float sway,float anticipation)
     {

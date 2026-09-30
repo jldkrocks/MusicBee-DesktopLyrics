@@ -22,6 +22,7 @@ namespace MusicBeePlugin
         private bool _running, _disposed;
         private int _nextCharacter;
         private Exception _failure;
+        internal bool ReleaseSourcesWhenIdle;
 
         internal void Request(int character, Size size, int frame)
         {
@@ -69,7 +70,12 @@ namespace MusicBeePlugin
                     int character = -1, slot = -1, generation = 0;
                     Size size = Size.Empty;
                     lock (_gate) {
-                        if (_disposed || !HasWork()) { _running = false; if (_disposed) Release(); return; }
+                        if (_disposed || !HasWork()) {
+                            _running = false;
+                            if (_disposed) Release();
+                            else if (ReleaseSourcesWhenIdle) ReleaseSources();
+                            return;
+                        }
                         for (int attempt = 0; attempt < 2 && slot < 0; attempt++) {
                             character = (_nextCharacter + attempt) % 2;
                             if (_sizes[character].IsEmpty) continue;
@@ -103,6 +109,11 @@ namespace MusicBeePlugin
         private void Release()
         {
             for (int i = 0; i < 8; i++) { _ready[i]?.Dispose(); _ready[i] = null; }
+            ReleaseSources();
+        }
+
+        private void ReleaseSources()
+        {
             for (int i = 0; i < 2; i++) { _sources[i]?.Dispose(); _sources[i] = null; }
         }
 

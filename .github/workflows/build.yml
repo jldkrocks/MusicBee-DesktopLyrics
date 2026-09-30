@@ -58,7 +58,7 @@ jobs:
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: DesktopLyrics-1.15.60.0
+          name: DesktopLyrics-1.15.61.0
           path: |
             bin/Release/mb_DesktopLyrics.dll
             bin/Release/DesktopLyricsGpu.*.dll
