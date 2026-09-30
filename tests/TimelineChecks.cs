@@ -44,6 +44,28 @@ internal static class TimelineChecks
             Call(timeline,"OnKeyDown",new KeyEventArgs(Keys.Left|Keys.Shift));
             if(Math.Abs(cue.Seconds-51.009)>1e-8)throw new Exception("Accent nudges must support 10 and 1 milliseconds.");
         }
+        using(var t=new PartyTimeline {Width=236,Duration=100,ViewStart=20,ViewLength=10,EditAccents=true}) {
+            t.ZoomAt(.5,168);
+            if(t.ViewLength!=5 || t.ViewStart!=23.75)throw new Exception("Pointer anchor must stay at 75 percent when zooming.");
+            t.ViewStart=20;t.ViewLength=10;
+            var cue=new PartyTimeline.Marker {Row=0,Seconds=25};t.Accents.Add(cue);
+            double moved=-1;t.AccentMoved+=(r,v)=>moved=v;
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,121,27,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,141,27,0));
+            if(cue.Seconds!=26)throw new Exception("Drag must preserve grab offset.");
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,122,27,0));
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,122,27,0));
+            if(moved!=25.05)throw new Exception("Returning near drag origin must not stick or lose commit.");
+        }
+        using(var t=new PartyTimeline {Width=236,Duration=100,Overview=true,LoopStart=20,LoopEnd=25}) {
+            int seeks=0;t.SeekRequested+=v=>seeks++;
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,63,15,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,83,15,0));
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,83,15,0));
+            if(t.LoopStart!=30 || t.LoopEnd!=35 || seeks!=0)throw new Exception("Overview must pan preserving span without seeking.");
+            Call(t,"OnMouseWheel",new MouseEventArgs(MouseButtons.None,0,83,15,-120));
+            if(t.LoopStart!=31 || t.LoopEnd!=36)throw new Exception("Overview wheel must pan by visible span.");
+        }
         var map = new PartyTempoMap { TrackUrl = "original" };
         map.Sections.Add(new PartyTempoSection { Bpm = 120, Style = PartyDanceStyle.HalfSpeed });
         map.Sections.Add(new PartyTempoSection { StartSeconds = 20, Bpm = 120, CountIn = true, Rhythm = PartyRhythm.Waltz });

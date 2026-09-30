@@ -28,6 +28,29 @@ namespace MusicBeePlugin
         internal bool Overview, EditAccents;
         private Marker _dragAccent;
         private int _dragX;
+        private bool _accentDragging, _panning;
+        private double _panStart;
+        private int _panX;
+        internal event Action<double> ViewPanned;
+        private void Pan(double start)
+        {
+            var length = Math.Min(Duration, Math.Max(0, LoopEnd - LoopStart));
+            LoopStart = Math.Max(0, Math.Min(Duration - length, start));
+            LoopEnd = LoopStart + length;
+            ViewPanned?.Invoke(LoopStart);
+            Invalidate();
+        }
+        internal void ZoomAt(double factor, int x)
+        {
+            if (Duration <= 0 || _dragAccent != null || _selectingLoop) return;
+            var fraction = SecondsAt(x, Width, 1);
+            var anchor = ViewStart + fraction * Span;
+            ViewLength = Math.Min(Duration, Math.Max(.5, Span * factor));
+            ViewStart = Math.Max(0, Math.Min(Duration - ViewLength, anchor - fraction * ViewLength));
+            Invalidate();
+        }
+        private double DragTime(int x) => Math.Round(Math.Max(0, Math.Min(Duration,
+            _dragOriginal + (x - _dragX) * Span / Math.Max(1, Width - MarginX * 2))), 3);
         private double _dragOriginal;
         private double Span => ViewLength>0?Math.Min(Duration,ViewLength):Duration;
         private double At(int x) => Math.Max(0,Math.Min(Duration,ViewStart+SecondsAt(x,Width,Span)));
@@ -95,7 +118,7 @@ namespace MusicBeePlugin
             }
             foreach (var cue in Accents.FindAll(c=>c.Seconds>=ViewStart && c.Seconds<=ViewStart+Span))
                 using (var fill = new SolidBrush(cue.Row == SelectedAccent ? Color.White : Color.FromArgb(247, 206, 115)))
-                    g.FillEllipse(fill, X(cue.Seconds) - 4, 23, 8, 8);
+                    g.FillEllipse(fill, X(_dragAccent != null && cue.Row == _dragAccent.Row ? _dragAccent.Seconds : cue.Seconds) - 4, 23, 8, 8);
             using (var pen = new Pen(Color.FromArgb(247, 206, 115), 2))
                 g.DrawLine(pen, X(Position), 29, X(Position), 62);
             var divisions = Math.Max(2, Math.Min(8, Width / 115));
@@ -113,7 +136,15 @@ namespace MusicBeePlugin
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left || Duration <= 0 || !Enabled) return;
             Focus();
-            if(Overview){SeekRequested?.Invoke(SecondsAt(e.X,Width,Duration));return;}
+            if (Overview)
+            {
+                var left = MarginX + LoopStart / Duration * (Width - MarginX * 2);
+                var right = MarginX + LoopEnd / Duration * (Width - MarginX * 2);
+                if (e.X < left - 3 || e.X > right + 3)
+                    Pan(SecondsAt(e.X, Width, Duration) - (LoopEnd - LoopStart) / 2);
+                _panStart = LoopStart; _panX = e.X; _panning = true; Capture = true;
+                return;
+            }
             if((ModifierKeys&Keys.Shift)!=0){_selectingLoop=true;_loopAnchor=At(e.X);Capture=true;return;}
             if (e.Y >= 20 && e.Y <= 31)
             {
@@ -122,7 +153,7 @@ namespace MusicBeePlugin
                     if (Math.Abs(X(cue.Seconds) - e.X) < best) { accent = cue; best = Math.Abs(X(cue.Seconds) - e.X); }
                 if (accent != null)
                 {
-                    if(EditAccents){SelectedAccent=accent.Row;AccentSelected?.Invoke(accent.Row);_dragAccent=Accents.Find(c=>c.Row==accent.Row)??accent;_dragOriginal=_dragAccent.Seconds;_dragX=e.X;Capture=true;Invalidate();return;}
+                    if(EditAccents){SelectedAccent=accent.Row;AccentSelected?.Invoke(accent.Row);_dragAccent=Accents.Find(c=>c.Row==accent.Row)??accent;_dragOriginal=_dragAccent.Seconds;_dragX=e.X;_accentDragging=false;Capture=true;Invalidate();return;}
                     AccentSelected?.Invoke(accent.Row); Position = Math.Max(0, Math.Min(Duration, accent.Seconds));
                     SeekRequested?.Invoke(Position); Invalidate(); return;
                 }
@@ -143,23 +174,37 @@ namespace MusicBeePlugin
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            if (_panning) { Pan(_panStart + (e.X - _panX) * Duration / Math.Max(1, Width - MarginX * 2)); return; }
             if(_selectingLoop){LoopStart=Math.Min(_loopAnchor,At(e.X));LoopEnd=Math.Max(_loopAnchor,At(e.X));Invalidate();return;}
-            if(_dragAccent!=null){if(Math.Abs(e.X-_dragX)>2)_dragAccent.Seconds=Math.Round(At(e.X),3);Invalidate();return;}
+            if (_dragAccent != null)
+            {
+                _accentDragging |= Math.Abs(e.X - _dragX) > 2;
+                if (_accentDragging) _dragAccent.Seconds = DragTime(e.X);
+                Invalidate(); return;
+            }
             if (!Scrubbing) return;
             Position = At(e.X); Invalidate();
         }
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (_panning && e.Button == MouseButtons.Left) { Pan(_panStart + (e.X - _panX) * Duration / Math.Max(1, Width - MarginX * 2)); _panning = false; Capture = false; return; }
             if(_selectingLoop && e.Button==MouseButtons.Left){_selectingLoop=false;Capture=false;LoopStart=Math.Min(_loopAnchor,At(e.X));LoopEnd=Math.Max(_loopAnchor,At(e.X));if(LoopEnd-LoopStart>=.01)LoopRangeSelected?.Invoke(LoopStart,LoopEnd);Invalidate();return;}
-            if(_dragAccent!=null && e.Button==MouseButtons.Left){var cue=_dragAccent;_dragAccent=null;Capture=false;if(Math.Abs(e.X-_dragX)>2)AccentMoved?.Invoke(cue.Row,Math.Round(At(e.X),3));Invalidate();return;}
+            if(_dragAccent!=null && e.Button==MouseButtons.Left){var cue=_dragAccent;_dragAccent=null;Capture=false;if(_accentDragging)AccentMoved?.Invoke(cue.Row,DragTime(e.X));Invalidate();return;}
             if (!Scrubbing || e.Button != MouseButtons.Left) return;
             Position = At(e.X); Scrubbing = false; Capture = false;
             SeekRequested?.Invoke(Position); Invalidate();
         }
         protected override void OnMouseCaptureChanged(EventArgs e)
-        { base.OnMouseCaptureChanged(e); if (!Capture) {_selectingLoop=false;Scrubbing = false;if(_dragAccent!=null)_dragAccent.Seconds=_dragOriginal;_dragAccent=null;Invalidate();} }
-        protected override void OnMouseWheel(MouseEventArgs e){base.OnMouseWheel(e);Zoom(e.Delta>0?.5:2);}
+        { base.OnMouseCaptureChanged(e); if (!Capture) {_panning=false;_selectingLoop=false;Scrubbing = false;if(_dragAccent!=null)_dragAccent.Seconds=_dragOriginal;_dragAccent=null;Invalidate();} }
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            if (e.Delta == 0) return;
+            if (Overview) Pan(LoopStart - e.Delta / 120d * (LoopEnd - LoopStart) * .2);
+            else ZoomAt(Math.Pow(.8, e.Delta / 120d), e.X);
+            if (e is HandledMouseEventArgs handled) handled.Handled = true;
+        }
         protected override bool IsInputKey(Keys keyData)
         { var key = keyData & Keys.KeyCode; return key == Keys.Left || key == Keys.Right || key == Keys.Home || key == Keys.End || base.IsInputKey(keyData); }
         protected override void OnKeyDown(KeyEventArgs e)

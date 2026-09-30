@@ -164,9 +164,9 @@ namespace MusicBeePlugin
             _timeline.EditAccents=true;
             _timeline.AccentMoved += MoveAccent;
             _timeline.LoopRangeSelected += (start,end)=>{if(!_preview.Active){_loopStart.Value=(decimal)Math.Round(start,3);_loopEnd.Value=(decimal)Math.Round(end,3);}};
-            _tips.SetToolTip(_timeline,"Mouse wheel zooms around the playhead. Shift-drag selects a loop range. Drag gold accents to move their hit time. Select an accent, then Left/Right nudges 10 ms; Shift nudges 1 ms. Clicking a section still selects and seeks. Editing does not seek playback.");
+            _tips.SetToolTip(_timeline,"Mouse wheel zooms under the pointer. Shift-drag selects a loop range. Drag gold accents to move their hit time. Select an accent, then Left/Right nudges 10 ms; Shift nudges 1 ms. Clicking a section still selects and seeks. Editing does not seek playback.");
             _overview.Duration=_timeline.Duration;_overview.Dock=DockStyle.Fill;
-            _overview.SeekRequested += seconds=>{_timeline.ViewLength=Math.Min(10,_timeline.Duration);_timeline.ViewStart=Math.Max(0,Math.Min(_timeline.Duration-_timeline.ViewLength,seconds-_timeline.ViewLength/2));_timeline.Invalidate();};
+            _overview.ViewPanned += start => { _timeline.ViewStart=start; _timeline.Invalidate(); };
             _timeline.MarkerSelected += row => { _tabs.SelectedIndex = 0; if (row >= 0 && row < _grid.Rows.Count) _grid.CurrentCell = _grid.Rows[row].Cells[0]; };
             var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
             _add = AddButton(actions, "Add at playhead", () =>
@@ -203,7 +203,7 @@ namespace MusicBeePlugin
             AddButton(actions, "Close", () => Close());
             _status.Text = "Diamonds select sections; gold circles select accents. Save applies both tabs and keeps this window open.";
             _status.ForeColor = Color.FromArgb(178, 192, 212);
-            help.Text = "Overview: click to zoom. Detail: drag gold accents; Shift-drag a loop. Hover for help.";
+            help.Text = "Overview: drag or scroll to pan. Wheel over detail to zoom. Detail: drag gold accents; Shift-drag a loop. Hover for help.";
             _tips.SetToolTip(_seekStep, "Seconds moved by - step and + step. Pause for precise placement; 0.01 s is the smallest step.");
             _tips.SetToolTip(_seekTime, "Exact song position in seconds. Enter or Seek moves playback without changing your rows.");
             _tips.SetToolTip(_enabled, "Apply this song's saved sections and accent cues. Uncheck to use its ordinary BPM settings.");
@@ -229,7 +229,6 @@ namespace MusicBeePlugin
             var detail=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Margin=Padding.Empty};
             detail.RowStyles.Add(new RowStyle(SizeType.Absolute,32));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,100));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,40));
             var editing=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
-            AddButton(editing,"Zoom +",()=>_timeline.Zoom(.5));AddButton(editing,"Zoom -",()=>_timeline.Zoom(2));
             AddButton(editing,"Whole song",()=>{_timeline.ViewStart=_timeline.ViewLength=0;_timeline.Invalidate();});
             editing.Controls.Add(new Label {Text="Loop (s)",AutoSize=true,Margin=new Padding(6,9,3,0)});
             ConfigureSeekNumber(_loopStart,0,(decimal)Math.Max(0,duration),.001m,0,3);
@@ -237,7 +236,7 @@ namespace MusicBeePlugin
             _loopStart.Width=_loopEnd.Width=85;editing.Controls.Add(_loopStart);editing.Controls.Add(_loopEnd);
             AddButton(editing,"Use view",()=>{_loopStart.Value=(decimal)_timeline.ViewStart;_loopEnd.Value=(decimal)Math.Min(_timeline.Duration,_timeline.ViewStart+(_timeline.ViewLength>0?_timeline.ViewLength:_timeline.Duration));});
             _loopButton=AddButton(editing,"Loop preview",()=>BeginPreview(true));
-            _tips.SetToolTip(_overview,"Whole-song overview. Click to show a 10-second detail window without seeking.");
+            _tips.SetToolTip(_overview,"Drag the selected window or scroll to pan without changing zoom or seeking. Click outside it to centre the view there.");
             _tips.SetToolTip(_loopButton,"Audition the range repeatedly with 0.5 s lead-in. Valid edits preview without saving. Loop boundaries pause/seek/resume MusicBee and are not gapless. Stop restores the saved map.");
             detail.Controls.Add(_overview,0,0);detail.Controls.Add(_timeline,0,1);detail.Controls.Add(editing,0,2);
             layout.Controls.Add(help, 0, 0); layout.Controls.Add(detail, 0, 1);
