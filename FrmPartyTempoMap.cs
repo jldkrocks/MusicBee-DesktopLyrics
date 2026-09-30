@@ -77,7 +77,7 @@ namespace MusicBeePlugin
             _grid.Columns[2].Visible = _grid.Columns[9].Visible = false;
             _grid.Columns[10].DisplayIndex = 2;
             _grid.Columns[10].ToolTipText = "Keep BPM: stay at this BPM until the next point. Ramp to next: gradually reach the next point's BPM at its time. Moving or deleting points recalculates the ramp. Custom (saved) preserves an imported ramp that ends between points; choose Ramp to next to replace it.";
-            _grid.Columns[1].HeaderText = "BPM at point";
+            _grid.Columns[1].HeaderText = "BPM";
             _grid.Columns[9].ToolTipText = "Optional starting BPM for this row's forward ramp. Blank uses the preceding tempo. Ramp to row fills this on the preceding row.";
             _grid.Columns[8].FillWeight = 120;
             _grid.Columns[8].ToolTipText = "Half, normal or double dance speed, independent of Dance and Rhythm. Does not change the song BPM. Hold stops all motion.";
@@ -100,9 +100,9 @@ namespace MusicBeePlugin
             _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
             var weights = new float[] { 85, 85, 95, 185, 50, 95, 170, 65, 110, 80, 150 };
             for (int c = 0; c < weights.Length; c++) _grid.Columns[c].FillWeight = weights[c];
-            _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             _grid.Columns[3].MinimumWidth = 180;
             _grid.Columns[6].MinimumWidth = 155;
+            _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             _grid.RowTemplate.Height = 29;
             foreach (DataGridViewColumn column in _grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
             for (int i = 0; i < map.Sections.Count; i++)
