@@ -18,6 +18,31 @@ class GpuCompositionChecks
     static void Set(object o,string n,object v) => o.GetType().GetField(n,Flags).SetValue(o,v);
     static object Call(object o,string n,params object[] a) => o.GetType().GetMethod(n,Flags).Invoke(o,a);
     static void Check(bool ok,string why) { if(!ok)throw new Exception(why); }
+    static void WaveformChecks(Assembly assembly)
+    {
+        var file=Path.Combine(Path.GetTempPath(),"DesktopLyrics-wave-"+Guid.NewGuid()+".wav");
+        try {
+            const int rate=44100,count=rate*2;
+            using(var w=new BinaryWriter(File.Create(file))) {
+                w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));w.Write(36+count*2);w.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt "));
+                w.Write(16);w.Write((short)1);w.Write((short)1);w.Write(rate);w.Write(rate*2);w.Write((short)2);w.Write((short)16);
+                w.Write(System.Text.Encoding.ASCII.GetBytes("data"));w.Write(count*2);
+                for(int n=0;n<count;n++)w.Write((short)((n==rate/2 || n==rate*3/2)?30000:0));
+            }
+            var read=assembly.GetType("MusicBeePlugin.TimelineWaveform").GetMethod("Read",BindingFlags.Static|BindingFlags.NonPublic);
+            Func<string,double,double,System.Threading.CancellationToken,object> decode=(path,start,length,token)=>
+                System.Threading.Tasks.Task.Run(()=>read.Invoke(null,new object[]{path,start,length,token})).Result;
+            var result=decode(file,.4,.3,System.Threading.CancellationToken.None);
+            var peaks=(float[])Get(result,"Peaks");
+            Check(peaks!=null,"WAV decode failed: "+Get(result,"Error"));
+            int highest=Array.IndexOf(peaks,peaks.Max());
+            Check(Math.Abs(.4+highest*.3/peaks.Length-.5)<.002 && peaks.Max()>.9,"Waveform timestamp or amplitude shifted");
+            Check(Get(decode(file,0,61,System.Threading.CancellationToken.None),"Peaks")==null,"Oversized waveform range accepted");
+            Check(Get(decode(file,0,1,new System.Threading.CancellationToken(true)),"Peaks")==null,"Cancelled waveform decoded");
+            Check(Get(decode(file+".missing",0,1,System.Threading.CancellationToken.None),"Peaks")==null,"Missing audio must fail safely");
+            Console.WriteLine("Native waveform timing, amplitude, bounds, cancellation and missing-file checks passed.");
+        }finally{if(File.Exists(file))File.Delete(file);}
+    }
     [STAThread] static void Main(string[] args)
     {
         Assembly.LoadFrom(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"mb_DesktopLyrics.dll"));
@@ -27,6 +52,7 @@ class GpuCompositionChecks
     static void Run(string[] args)
     {
         var assembly=typeof(Plugin).Assembly;
+        WaveformChecks(assembly);
         var type=assembly.GetType("MusicBeePlugin.FrmLyricsWindow");
         var settings=SettingsObj.GenerateDefault();settings.PartyMode=true;settings.DisableDeezerBpmLookup=true;
         var ctor=type.GetConstructors()[0];var pars=ctor.GetParameters();var values=new object[pars.Length];

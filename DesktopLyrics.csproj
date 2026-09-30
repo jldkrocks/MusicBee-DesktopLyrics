@@ -116,6 +116,7 @@
     <Compile Include="RenderFramePacer.cs" />
     <Compile Include="GpuSceneRenderer.cs" />
     <Compile Include="PartyTempoMap.cs" />
+    <Compile Include="TimelineWaveform.cs" />
     <Compile Include="PartyTimeline.cs" />
     <Compile Include="FrmPartyTempoMap.cs" />
     <Compile Include="PartyPreviewSession.cs" />

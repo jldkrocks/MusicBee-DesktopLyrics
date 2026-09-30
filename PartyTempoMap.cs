@@ -36,6 +36,8 @@ namespace MusicBeePlugin
         public double Strength = 1.7;
         public double PrepareSeconds = 0.1;
         public double HoldSeconds;
+        public double? RecoverySeconds;
+        internal double EffectiveRecovery => RecoverySeconds ?? (Motion == PartyAccentMotion.Bop ? .22 : .42);
         internal const double ReleaseSeconds = 0.22;
     }
 
@@ -61,8 +63,8 @@ namespace MusicBeePlugin
                 if (cue == null || !Enum.IsDefined(typeof(PartyAccentMotion), cue.Motion) || (cue.Pose.HasValue && !Enum.IsDefined(typeof(PartyAccentPose), cue.Pose.Value)) || !Finite(cue.TimeSeconds) || cue.TimeSeconds < 0 || cue.TimeSeconds > 604800 ||
                     cue.TimeSeconds <= lastCue || !Finite(cue.Strength) || cue.Strength < 0.5 || cue.Strength > 2.5 ||
                     !Finite(cue.PrepareSeconds) || cue.PrepareSeconds < 0 || cue.PrepareSeconds > 1 ||
-                    !Finite(cue.HoldSeconds) || cue.HoldSeconds < 0 || cue.HoldSeconds > 5)
-                    throw new ArgumentException("Accent times must be distinct and increasing; strength 0.5-2.5, lead-in 0-1 s, hold 0-5 s.");
+                    !Finite(cue.HoldSeconds) || cue.HoldSeconds < 0 || cue.HoldSeconds > 5 || !Finite(cue.EffectiveRecovery) || cue.EffectiveRecovery < .02 || cue.EffectiveRecovery > 2)
+                    throw new ArgumentException("Accent times must be distinct and increasing; strength 0.5-2.5, lead-in 0-1 s, hold 0-5 s, recovery 0.02-2 s.");
                 lastCue = cue.TimeSeconds;
             }
             double previous = -1;
@@ -93,8 +95,8 @@ namespace MusicBeePlugin
                 if (s.Style == PartyDanceStyle.Rest && s.AlignBeat)
                     throw new ArgumentException("Rest keeps counting; use Align only on the next dancing row if you need a new beat origin.");
                 if (s.CountIn && (i == 0 || s.Style == PartyDanceStyle.Hold || s.Style == PartyDanceStyle.Rest || s.EffectiveSpeed != 1 ||
-                    Sections[i - 1].Style == PartyDanceStyle.Hold || Sections[i - 1].Style == PartyDanceStyle.Rest || Sections[i - 1].EffectiveSpeed != 0.5))
-                    throw new ArgumentException("Count-in belongs on a Normal-speed row immediately after Half speed (neither may Hold). It adds up to four lead-in bobs and a final bop on the return beat.");
+                    (Sections[i - 1].Style != PartyDanceStyle.Hold && Sections[i - 1].Style != PartyDanceStyle.Rest && Sections[i - 1].EffectiveSpeed != 0.5)))
+                    throw new ArgumentException("Count-in belongs on a dancing Normal-speed row immediately after Half speed, Hold or Rest. It adds up to four lead-in bobs and a final bop on the return beat.");
                 if (i + 1 < Sections.Count && Sections[i + 1] != null &&
                     s.RampSeconds > Sections[i + 1].StartSeconds - s.StartSeconds)
                     throw new ArgumentException("A ramp must finish before the next section.");
@@ -127,8 +129,8 @@ namespace MusicBeePlugin
                 if (pose.Held && side != 0 && cue.TimeSeconds >= heldStart && cue.TimeSeconds <= seconds)
                     pose.Frame = side < 0 ? 6 : 0;
                 var relative = seconds - cue.TimeSeconds;
-                if (relative < -cue.PrepareSeconds || relative >= cue.HoldSeconds + (cue.Motion == PartyAccentMotion.Bop ? PartyAccentCue.ReleaseSeconds : .42)) continue;
-                var release = cue.Motion == PartyAccentMotion.Bop ? PartyAccentCue.ReleaseSeconds : .42;
+                if (relative < -cue.PrepareSeconds || relative >= cue.HoldSeconds + cue.EffectiveRecovery) continue;
+                var release = cue.EffectiveRecovery;
                 var envelope = relative < 0 ? SmoothStep(1 + relative / cue.PrepareSeconds) :
                     relative <= cue.HoldSeconds ? 1 : 1 - SmoothStep((relative - cue.HoldSeconds) / release);
                 if (envelope * cue.Strength <= amount) continue;
@@ -142,7 +144,7 @@ namespace MusicBeePlugin
                 if (strongest.Motion != PartyAccentMotion.Bop)
                 {
                     var relative = seconds - strongest.TimeSeconds;
-                    var recovery = relative - strongest.HoldSeconds;
+                    var recovery = (relative - strongest.HoldSeconds) * .42 / strongest.EffectiveRecovery;
                     // Deep landing, then a smaller second crouch for a visible rebound.
                     // Keep the feet planted: stretching above the source bitmap would clip.
                     var hit = relative <= strongest.HoldSeconds ? weight : 1 - SmoothStep(recovery / .15);
@@ -242,18 +244,18 @@ namespace MusicBeePlugin
                         pose.Frame = restFrame; pose.Held = true;
                         pose.Impact = pose.Anticipation = pose.Sway = 0;
                     }
-                    if (!held && !rest && speed == 0.5 && i + 1 < Sections.Count && Sections[i + 1].CountIn)
+                    if ((held || rest || speed == 0.5) && i + 1 < Sections.Count && Sections[i + 1].CountIn)
                     {
-                        var endBeat = sectionStartBeat + IntegratedBeats(sectionStartTempo, section,
+                        var endBeat = sectionStartBeat + (held ? 0 : IntegratedBeats(sectionStartTempo, section,
                             end - section.StartSeconds, section.RampToNext ? end - section.StartSeconds : section.RampSeconds,
-                            section.RampToNext ? (Sections[i + 1].RampStartBpm ?? Sections[i + 1].Bpm) : section.Bpm) * 0.5;
+                            section.RampToNext ? (Sections[i + 1].RampStartBpm ?? Sections[i + 1].Bpm) : section.Bpm) * speed);
                         var incoming = Sections[i + 1];
                         if (incoming.AlignBeat) endBeat = AlignedBeat(endBeat, incoming);
                         var incomingBpm = incoming.RampToNext ? incoming.Bpm : incoming.RampSeconds > 0 ? incoming.RampStartBpm ?? (section.RampToNext ? incoming.Bpm : section.Bpm) : incoming.Bpm;
                         var cuePhase = endBeat - (end - seconds) * incomingBpm / 60;
                         ApplyCountIn(ref pose, section, incoming, endBeat, cuePhase);
                     }
-                    else if (!held && !rest && section.CountIn && i > 0 && Sections[i - 1].EffectiveSpeed == 0.5)
+                    else if (!held && !rest && section.CountIn && i > 0 && (Sections[i - 1].EffectiveSpeed == 0.5 || Sections[i - 1].Style == PartyDanceStyle.Hold || Sections[i - 1].Style == PartyDanceStyle.Rest))
                         ApplyCountIn(ref pose, Sections[i - 1], section, sectionStartBeat, beat);
                     return pose;
                 }

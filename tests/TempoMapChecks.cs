@@ -99,9 +99,18 @@ internal static class TempoMapChecks
         Near(map.At(9.9).CountInAccent, 0, "Less than one incoming beat cannot fit a bob");
         map.Sections.RemoveAt(0); map.Sections[0].StartSeconds = 0;
         map.Sections[0].Style = PartyDanceStyle.Hold;
-        bool rejected = false;
-        try { map.Validate(); } catch (ArgumentException) { rejected = true; }
-        if (!rejected || map.At(9.25).CountInAccent != 0) throw new Exception("Count-in must not animate a hold.");
+        map.Validate();
+        foreach(var style in new[]{PartyDanceStyle.Hold,PartyDanceStyle.Rest}) {
+            map.Sections[0].Style=style; map.Validate();
+            returning.AlignBeat=true;
+            var before=map.At(9.5);
+            Near(before.CountInAccent,1,"Hold/rest lead-in lands before aligned return");
+            Near(map.At(10).CountInAccent,1,"Hold/rest return gets final bop");
+            returning.CountIn=false;var plain=map.At(9.5);returning.CountIn=true;
+            Near(before.Beat,plain.Beat,"Count-in must not change hold/rest beat integration");
+            if(before.Frame!=plain.Frame || !before.Held)throw new Exception("Count-in must retain held pose.");
+            returning.AlignBeat=false;
+        }
         map.Sections[0].Style = PartyDanceStyle.HalfSpeed; map.Validate();
         map.Sections.Add(new PartyTempoSection { StartSeconds = 10.1, Bpm = 120, Style = PartyDanceStyle.Hold });
         map.Validate();
@@ -118,6 +127,15 @@ internal static class TempoMapChecks
     internal static void Run()
     {
         var countInMap = CheckCountIn();
+        var accentMap=new PartyTempoMap {TrackUrl="recovery",Sections={new PartyTempoSection {Bpm=120,Style=PartyDanceStyle.Rest}},Accents={new PartyAccentCue {TimeSeconds=1,RecoverySeconds=.1}}};
+        accentMap.Validate();
+        Near(accentMap.At(1.1).Impact,0,"Custom recovery ends at selected duration");
+        if(accentMap.At(1.05).Impact<=0)throw new Exception("Custom recovery must retain its dip before ending.");
+        var roundTrip=JsonConvert.DeserializeObject<PartyTempoMap>(JsonConvert.SerializeObject(accentMap));
+        Near(roundTrip.Accents[0].EffectiveRecovery,.1,"Recovery persists");
+        accentMap.Accents[0].RecoverySeconds=null;Near(accentMap.Accents[0].EffectiveRecovery,.22,"Legacy bop recovery");
+        accentMap.Accents[0].Motion=PartyAccentMotion.Rebound;Near(accentMap.Accents[0].EffectiveRecovery,.42,"Legacy rebound recovery");
+
         var map = new PartyTempoMap { TrackUrl = "test-track", InitialBeat = -0.17 };
         map.Sections.Add(new PartyTempoSection { Bpm = 85.4 }); map.Validate();
         for (int t = 0; t < 300000; t += 37)

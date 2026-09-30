@@ -12,3 +12,5 @@ EXPORTS
  DL_OutlineLyrics
  DL_ArtTexture
  DL_Artwork
+
+ DL_Waveform

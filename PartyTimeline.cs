@@ -12,6 +12,7 @@ namespace MusicBeePlugin
         internal sealed class Marker
         {
             internal double Seconds;
+            internal double Prepare=.1, Hold, Recovery=.22;
             internal int Row;
             internal PartyDanceStyle Style;
         }
@@ -19,6 +20,20 @@ namespace MusicBeePlugin
         internal int SelectedAccent = -1;
         internal event Action<int> AccentSelected;
         internal event Action<int,double> AccentMoved;
+        internal event Action<int,double,double,double> EnvelopeChanged;
+        internal Func<double,double> SnapTime;
+        internal TimelineWaveform.Range Waveform;
+        internal string WaveformStatus;
+        private Marker _envelope;
+        private int _handle;
+        private double _prepareOriginal,_holdOriginal,_recoveryOriginal;
+        private void MoveEnvelope(int x)
+        {
+            var time=At(x);
+            if(_handle==0)_envelope.Prepare=Math.Round(Math.Max(0,Math.Min(1,_envelope.Seconds-time)),3);
+            if(_handle==1)_envelope.Hold=Math.Round(Math.Max(0,Math.Min(5,time-_envelope.Seconds)),3);
+            if(_handle==2)_envelope.Recovery=Math.Round(Math.Max(.02,Math.Min(2,time-_envelope.Seconds-_envelope.Hold)),3);
+        }
         internal event Action<double,double> LoopRangeSelected;
         private bool _selectingLoop;
         internal bool SelectingLoop => _selectingLoop;
@@ -42,7 +57,7 @@ namespace MusicBeePlugin
         }
         internal void ZoomAt(double factor, int x)
         {
-            if (Duration <= 0 || _dragAccent != null || _selectingLoop) return;
+            if (Duration <= 0 || _dragAccent != null || _envelope != null || _selectingLoop) return;
             var fraction = SecondsAt(x, Width, 1);
             var anchor = ViewStart + fraction * Span;
             ViewLength = Math.Min(Duration, Math.Max(.5, Span * factor));
@@ -69,7 +84,7 @@ namespace MusicBeePlugin
         private const int MarginX = 18;
         internal PartyTimeline()
         {
-            DoubleBuffered = true; Height = 100; TabStop = true;
+            DoubleBuffered = true; Height = 160; TabStop = true;
             BackColor = Color.FromArgb(23, 27, 38); ForeColor = Color.FromArgb(232, 236, 245);
             AccessibleName = "Song timeline. Arrow keys seek five seconds; click a marker to select its section.";
             AccessibleRole = AccessibleRole.Slider;
@@ -129,6 +144,33 @@ namespace MusicBeePlugin
                 var left = Math.Max(0, Math.Min(Width - size.Width, (int)X(seconds) - size.Width / 2));
                 TextRenderer.DrawText(g, label, Font, new Point(left, 67), Color.FromArgb(166, 177, 197));
             }
+            if(Waveform?.Peaks != null && Waveform.Start==ViewStart && Math.Abs(Waveform.Length-Span)<.00001)
+            {
+                using(var pen=new Pen(Color.FromArgb(125,184,209)))
+                {
+                    int pixels=Math.Max(1,Width-MarginX*2);var peaks=Waveform.Peaks;
+                    for(int px=0;px<pixels;px++){
+                        int first=px*peaks.Length/pixels,last=Math.Max(first+1,(px+1)*peaks.Length/pixels);float peak=0;
+                        for(int n=first;n<Math.Min(last,peaks.Length);n++)peak=Math.Max(peak,peaks[n]);
+                        g.DrawLine(pen,MarginX+px,108-peak*19,MarginX+px,108+peak*19);
+                    }
+                }
+            }
+            else TextRenderer.DrawText(g,WaveformStatus??"Waveform",Font,new Point(MarginX,94),Color.Silver);
+            var selectedAccent=_envelope??Accents.Find(c=>c.Row==SelectedAccent);
+            if(selectedAccent!=null){
+                var cue=selectedAccent;
+                var points=new[]{cue.Seconds-cue.Prepare,cue.Seconds,cue.Seconds+cue.Hold,cue.Seconds+cue.Hold+cue.Recovery};
+                var colors=new[]{Color.MediumPurple,Color.Gold,Color.MediumSeaGreen};
+                for(int i=0;i<3;i++)using(var fill=new SolidBrush(colors[i])){
+                    float left=Math.Max(MarginX,X(points[i])),right=Math.Min(Width-MarginX,X(points[i+1]));
+                    if(right>left)g.FillRectangle(fill,left,135,right-left,6);
+                }
+                foreach(var time in new[]{points[0],points[2],points[3]}){
+                    float x=X(time);if(x>=MarginX&&x<=Width-MarginX)g.FillRectangle(Brushes.White,x-3,132,6,12);
+                }
+                TextRenderer.DrawText(g,"Selected accent: purple = preparation, gold = hold, green = recovery. Drag white handles.",Font,new Point(MarginX,145),Color.Silver);
+            }
             if (Focused) ControlPaint.DrawFocusRectangle(g, new Rectangle(2, 2, Width - 4, Height - 4));
         }
         protected override void OnMouseDown(MouseEventArgs e)
@@ -144,6 +186,15 @@ namespace MusicBeePlugin
                     Pan(SecondsAt(e.X, Width, Duration) - (LoopEnd - LoopStart) / 2);
                 _panStart = LoopStart; _panX = e.X; _panning = true; Capture = true;
                 return;
+            }
+            if(e.Y>=129 && e.Y<=144){
+                var cue=Accents.Find(c=>c.Row==SelectedAccent);
+                if(cue!=null){
+                    var times=new[]{cue.Seconds-cue.Prepare,cue.Seconds+cue.Hold,cue.Seconds+cue.Hold+cue.Recovery};
+                    for(int i=0;i<3;i++)if(Math.Abs(X(times[i])-e.X)<=6){
+                        _envelope=cue;_handle=i;_prepareOriginal=cue.Prepare;_holdOriginal=cue.Hold;_recoveryOriginal=cue.Recovery;Capture=true;return;
+                    }
+                }
             }
             if((ModifierKeys&Keys.Shift)!=0){_selectingLoop=true;_loopAnchor=At(e.X);Capture=true;return;}
             if (e.Y >= 20 && e.Y <= 31)
@@ -174,6 +225,7 @@ namespace MusicBeePlugin
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            if (_envelope != null) { MoveEnvelope(e.X); Invalidate(); return; }
             if (_panning) { Pan(_panStart + (e.X - _panX) * Duration / Math.Max(1, Width - MarginX * 2)); return; }
             if(_selectingLoop){LoopStart=Math.Min(_loopAnchor,At(e.X));LoopEnd=Math.Max(_loopAnchor,At(e.X));Invalidate();return;}
             if (_dragAccent != null)
@@ -188,15 +240,20 @@ namespace MusicBeePlugin
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (_envelope != null && e.Button==MouseButtons.Left) {
+                MoveEnvelope(e.X);var cue=_envelope;_envelope=null;Capture=false;
+                EnvelopeChanged?.Invoke(cue.Row,cue.Prepare,cue.Hold,cue.Recovery);Invalidate();return;
+            }
             if (_panning && e.Button == MouseButtons.Left) { Pan(_panStart + (e.X - _panX) * Duration / Math.Max(1, Width - MarginX * 2)); _panning = false; Capture = false; return; }
             if(_selectingLoop && e.Button==MouseButtons.Left){_selectingLoop=false;Capture=false;LoopStart=Math.Min(_loopAnchor,At(e.X));LoopEnd=Math.Max(_loopAnchor,At(e.X));if(LoopEnd-LoopStart>=.01)LoopRangeSelected?.Invoke(LoopStart,LoopEnd);Invalidate();return;}
-            if(_dragAccent!=null && e.Button==MouseButtons.Left){var cue=_dragAccent;_dragAccent=null;Capture=false;if(_accentDragging)AccentMoved?.Invoke(cue.Row,DragTime(e.X));Invalidate();return;}
+            if(_dragAccent!=null && e.Button==MouseButtons.Left){var cue=_dragAccent;_dragAccent=null;Capture=false;if(_accentDragging)AccentMoved?.Invoke(cue.Row,SnapTime?.Invoke(DragTime(e.X))??DragTime(e.X));Invalidate();return;}
             if (!Scrubbing || e.Button != MouseButtons.Left) return;
             Position = At(e.X); Scrubbing = false; Capture = false;
             SeekRequested?.Invoke(Position); Invalidate();
         }
         protected override void OnMouseCaptureChanged(EventArgs e)
-        { base.OnMouseCaptureChanged(e); if (!Capture) {_panning=false;_selectingLoop=false;Scrubbing = false;if(_dragAccent!=null)_dragAccent.Seconds=_dragOriginal;_dragAccent=null;Invalidate();} }
+        { base.OnMouseCaptureChanged(e); if (!Capture) {_panning=false;_selectingLoop=false;Scrubbing = false;
+            if(_envelope!=null){_envelope.Prepare=_prepareOriginal;_envelope.Hold=_holdOriginal;_envelope.Recovery=_recoveryOriginal;_envelope=null;}if(_dragAccent!=null)_dragAccent.Seconds=_dragOriginal;_dragAccent=null;Invalidate();} }
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             base.OnMouseWheel(e);
@@ -210,7 +267,7 @@ namespace MusicBeePlugin
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e); if (Duration <= 0 || !Enabled) return;
-            if(e.KeyCode==Keys.Escape && _dragAccent!=null){Capture=false;e.Handled=true;return;}
+            if(e.KeyCode==Keys.Escape && (_dragAccent!=null || _envelope!=null)){Capture=false;e.Handled=true;return;}
             if(EditAccents && SelectedAccent>=0 && (e.KeyCode==Keys.Left||e.KeyCode==Keys.Right)){
                 var cue=Accents.Find(c=>c.Row==SelectedAccent);if(cue!=null)AccentMoved?.Invoke(cue.Row,Math.Round(Math.Max(0,Math.Min(Duration,cue.Seconds+(e.KeyCode==Keys.Left?-1:1)*(e.Shift?.001:.01))),3));
                 e.Handled=true;e.SuppressKeyPress=true;return;

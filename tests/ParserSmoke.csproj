@@ -20,6 +20,7 @@
     <Compile Include="..\LyricCardLayout.cs"><Link>LyricCardLayout.cs</Link></Compile>
     <Compile Include="..\LyricTextLayout.cs"><Link>LyricTextLayout.cs</Link></Compile>
     <Compile Include="..\PartyTempoMap.cs"><Link>PartyTempoMap.cs</Link></Compile>
+    <Compile Include="..\TimelineWaveform.cs" />
     <Compile Include="..\PartyTimeline.cs"><Link>PartyTimeline.cs</Link></Compile>
     <Compile Include="..\FrmPartyTempoMap.cs"><Link>FrmPartyTempoMap.cs</Link></Compile>
     <Compile Include="..\PartyPreviewSession.cs" />

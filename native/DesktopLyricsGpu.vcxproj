@@ -11,8 +11,8 @@
   <PropertyGroup><OutDir>$(ProjectDir)..\bin\Release\</OutDir><IntDir>$(ProjectDir)obj\$(Platform)\</IntDir><TargetName>DesktopLyricsGpu.$(Platform)</TargetName></PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile><LanguageStandard>stdcpp17</LanguageStandard><ExceptionHandling>Sync</ExceptionHandling><RuntimeLibrary>MultiThreaded</RuntimeLibrary><Optimization>MaxSpeed</Optimization><WarningLevel>Level4</WarningLevel></ClCompile>
-    <Link><ModuleDefinitionFile>DesktopLyricsGpu.def</ModuleDefinitionFile><AdditionalDependencies>d2d1.lib;user32.lib;gdi32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+    <Link><ModuleDefinitionFile>DesktopLyricsGpu.def</ModuleDefinitionFile><AdditionalDependencies>d2d1.lib;user32.lib;gdi32.lib;mfuuid.lib;ole32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="DesktopLyricsGpu.cpp" /></ItemGroup>
+  <ItemGroup><ClCompile Include="DesktopLyricsGpu.cpp" /><ClCompile Include="TimelineWaveform.cpp" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
