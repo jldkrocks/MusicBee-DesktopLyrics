@@ -10,4 +10,8 @@
     <Compile Include="GdiRenderBenchmark.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="CopyNative" AfterTargets="Build">
+    <ItemGroup><Native Include="..\bin\Release\DesktopLyricsGpu.*.dll" /></ItemGroup>
+    <Copy SourceFiles="@(Native)" DestinationFolder="$(OutputPath)" />
+  </Target>
 </Project>

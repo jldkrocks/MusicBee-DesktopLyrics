@@ -231,6 +231,8 @@
     </GetAssemblyIdentity>
     <RemoveDir Directories="@(ZipFiles)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="pkgtemp\" />
+    <ItemGroup><GpuHelpers Include="$(TargetDir)DesktopLyricsGpu.Win32.dll;$(TargetDir)DesktopLyricsGpu.x64.dll" Condition="Exists('$(TargetDir)DesktopLyricsGpu.Win32.dll') and Exists('$(TargetDir)DesktopLyricsGpu.x64.dll')" /></ItemGroup>
+    <Copy SourceFiles="@(GpuHelpers)" DestinationFolder="pkgtemp\" />
     <Zip ZipFileName="pkg\$(ProjectName)_%(MyAssemblyIdentities.Version).zip" WorkingDirectory="pkg" Files="@(ZipFiles)" Flatten="true" Quiet="true" />
     <RemoveDir Directories="@(ZipFiles)" />
   </Target>

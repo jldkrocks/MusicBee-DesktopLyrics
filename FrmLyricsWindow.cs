@@ -72,11 +72,17 @@ namespace MusicBeePlugin
                 if (_gpu == null)
                 {
                     _gpu = new GpuSceneRenderer(Handle, ClientSize);
+                    using (var windowGraphics = CreateGraphics())
+                        _gpu.Foreground.SetResolution(windowGraphics.DpiX, windowGraphics.DpiY);
                     _foregroundDirty = true;
                     _backgroundCache?.Dispose(); _backgroundCache = null;
                     _spectrumCache?.Dispose(); _spectrumCache = null;
                 }
-                if (_gpu.Resize(ClientSize)) _foregroundDirty = true;
+                if (_gpu.Resize(ClientSize)) {
+                    using (var windowGraphics = CreateGraphics())
+                        _gpu.Foreground.SetResolution(windowGraphics.DpiX, windowGraphics.DpiY);
+                    _foregroundDirty = true;
+                }
                 var autoBpm = Math.Round(_partyBeat.Bpm, 1);
                 var noSignal = _partySpectrumMisses >= 30;
                 var redraw = _foregroundDirty || _transitionStarted != 0 || _paletteStarted != 0 ||
@@ -1983,12 +1989,14 @@ namespace MusicBeePlugin
             var gutter = PartyGutter;
             var bounds = new Rectangle(0, 0, client.Width - gutter * 2, client.Height);
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
-            stamp = _renderProfile?.Stamp ?? 0;
-            if (!foregroundOnly) DrawBackground(g, client);
-            _renderProfile?.End(RenderMetric.Background, stamp);
-            stamp = _renderProfile?.Stamp ?? 0;
-            if (!foregroundOnly && _settings.ShowVisualizer && !_settings.TransparentCanvas) DrawSpectrum(g, client);
-            _renderProfile?.End(RenderMetric.Spectrum, stamp);
+            if (!foregroundOnly) {
+                stamp = _renderProfile?.Stamp ?? 0;
+                DrawBackground(g, client);
+                _renderProfile?.End(RenderMetric.Background, stamp);
+                stamp = _renderProfile?.Stamp ?? 0;
+                if (_settings.ShowVisualizer && !_settings.TransparentCanvas) DrawSpectrum(g, client);
+                _renderProfile?.End(RenderMetric.Spectrum, stamp);
+            }
             var state = g.Save();
             if (gutter > 0) g.TranslateTransform(gutter, 0);
             try

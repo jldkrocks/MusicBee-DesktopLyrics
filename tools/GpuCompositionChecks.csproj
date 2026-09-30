@@ -1,0 +1,7 @@
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup><Configuration>Release</Configuration><OutputType>Exe</OutputType><AssemblyName>GpuCompositionChecks</AssemblyName><TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion><PlatformTarget Condition="'$(PlatformTarget)'==''">x64</PlatformTarget><OutputPath>bin\$(PlatformTarget)\</OutputPath><IntermediateOutputPath>obj\GpuChecks\$(PlatformTarget)\</IntermediateOutputPath></PropertyGroup>
+  <ItemGroup><Reference Include="System" /><Reference Include="System.Core" /><Reference Include="System.Drawing" /><Reference Include="System.Windows.Forms" />
+    <Reference Include="mb_DesktopLyrics"><HintPath>..\bin\Release\mb_DesktopLyrics.dll</HintPath></Reference><Compile Include="GpuCompositionChecks.cs" /></ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="CopyNative" AfterTargets="Build"><ItemGroup><Native Include="..\bin\Release\DesktopLyricsGpu.*.dll" /></ItemGroup><Copy SourceFiles="@(Native)" DestinationFolder="$(OutputPath)" /></Target>
+</Project>

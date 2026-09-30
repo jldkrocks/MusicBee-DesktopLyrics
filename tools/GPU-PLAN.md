@@ -1,5 +1,7 @@
 # GPU rendering checkpoint
 
+Current status: version1.15.53 implements the first bounded background/spectrum composition stage. See `RENDERING.md` for the current backend, retained GDI foreground, fallback, packaging, measurements and acceptance gates. The older probe notes below describe the original feasibility stage, not the current plugin's full feature set. DirectWrite and GPU dancers are still deferred.
+
 The plugin still uses GDI+. Keep that renderer until the complete replacement passes visual and interaction checks. Do not claim that the isolated probe enables GPU rendering in MusicBee.
 
 ## Measured CPU improvements

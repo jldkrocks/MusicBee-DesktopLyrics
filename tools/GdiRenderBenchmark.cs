@@ -34,6 +34,8 @@ class GdiRenderBenchmark
         Application.SetCompatibleTextRenderingDefault(false);
         string output = Path.GetFullPath(args.Length > 0 ? args[0] : "render-baseline");
         Directory.CreateDirectory(output);
+        bool gpuMode = args.Length > 1 && args[1] == "gpu";
+        bool paced = args.Length > 2 && args[2] == "paced";
         var assembly = typeof(Plugin).Assembly;
         var formType = assembly.GetType("MusicBeePlugin.FrmLyricsWindow");
         var profileType = assembly.GetType("MusicBeePlugin.RenderProfile");
@@ -56,6 +58,9 @@ class GdiRenderBenchmark
             using (var left = (Form)Activator.CreateInstance(dancerType, new object[] { "MusicBeePlugin.PartyRem.png" }))
             using (var right = (Form)Activator.CreateInstance(dancerType, new object[] { "MusicBeePlugin.PartyRam.png" }))
             {
+                // Materialize the HWND before starting diagnostics: handle
+                // creation can raise SizeChanged and end an active capture.
+                var handle = form.Handle;
                 if (size.Width > 1000) form.WindowState = FormWindowState.Maximized;
                 form.ClientSize = size;
                 if (form.ClientSize != size) throw new Exception("Requested benchmark size was changed by Windows.");
@@ -78,9 +83,10 @@ class GdiRenderBenchmark
                     g.FillRectangle(b, 0, 0, 600, 600);
                 Set(form, "_albumArtwork", art);
                 var metadata = new Dictionary<string, object> {
-                    { "mode", "offscreen actual GDI code; no display FPS claim" }, { "width", size.Width }, { "height", size.Height },
+                    { "mode", gpuMode ? "hardware HWND composition, unpaced; no display FPS claim" : "offscreen actual GDI code; no display FPS claim" }, { "width", size.Width }, { "height", size.Height },
                     { "run", run }, { "workload", "all layers; lyric transition every 2 s, uncached palette path 1 s every 8 s; two hidden layered dancer uploads" },
                     { "process_bits", IntPtr.Size * 8 }, { "logical_processors", Environment.ProcessorCount },
+                    { "paced_60_workload", paced },
                     { "remote_session", SystemInformation.TerminalServerSession }
                 };
                 var profile = Activator.CreateInstance(profileType, Fields, null, new object[] { metadata, null, null, 30d, 2d, true }, null);
@@ -88,12 +94,20 @@ class GdiRenderBenchmark
                 var bars = (float[])Get(form, "_bars");
                 int height = size.Width > 1000 ? 1626 : 454, width = (int)Math.Round(height * 180d / 353);
                 var watch = Stopwatch.StartNew();
+                double nextFrame = 0;
                 string json = null;
                 using (var bitmap = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb))
                 using (var g = Graphics.FromImage(bitmap))
                 {
                     while (watch.Elapsed.TotalSeconds < 11.9)
                     {
+                        if (paced) {
+                            while (watch.Elapsed.TotalSeconds < nextFrame) {
+                                if (nextFrame - watch.Elapsed.TotalSeconds > .002) System.Threading.Thread.Sleep(1);
+                                else System.Threading.Thread.SpinWait(20);
+                            }
+                            nextFrame = watch.Elapsed.TotalSeconds + 1d / 60;
+                        }
                         double t = watch.Elapsed.TotalSeconds;
                         if (t % 2 < .3) {
                             Set(form, "_previousLine1", "An earlier lyric fades smoothly away");
@@ -101,11 +115,17 @@ class GdiRenderBenchmark
                             Set(form, "_previousNextLine", Get(form, "_line1"));
                         }
                         for (int i = 0; i < bars.Length; i++) bars[i] = .45f + .35f * (float)Math.Sin(t * 4 + i);
-                        Set(form, "_transitionStarted", Stopwatch.GetTimestamp() - (long)((t % 2 < .3 ? t % 2 : .3) * Stopwatch.Frequency));
+                        // Let the final transition paint clear the existing
+                        // state instead of repeatedly re-starting it when idle.
+                        if (t % 2 < .3) Set(form, "_transitionStarted", Stopwatch.GetTimestamp() - (long)(t % 2 * Stopwatch.Frequency));
                         Set(form, "_paletteStarted", t % 8 < 1 ? Stopwatch.GetTimestamp() : 0L);
                         long started = (long)profileType.GetProperty("Stamp", Fields).GetValue(profile);
-                        Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(Point.Empty, size)));
-                        g.Flush(FlushIntention.Sync);
+                        if (gpuMode) {
+                            if (!(bool)Call(form, "TryDrawGpu")) throw new Exception("GPU failed: " + Get(form, "_gpuFailure"));
+                        } else {
+                            Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(Point.Empty, size)));
+                            g.Flush(FlushIntention.Sync);
+                        }
                         long dancers = (long)profileType.GetProperty("Stamp", Fields).GetValue(profile);
                         float impact = .5f + .5f * (float)Math.Sin(t * 10);
                         int pose = (int)(t * 2) % 4;
@@ -115,14 +135,32 @@ class GdiRenderBenchmark
                         Call(profile, "End", Enum.Parse(metricType, "FrameWork"), started);
                     }
                     json = (string)Call(profile, "Finish", "offscreen benchmark completed; presentation unavailable");
-                    bitmap.Save(Path.Combine(output, "fixture-" + size.Width + ".png"), ImageFormat.Png);
+                    if (gpuMode) SaveGpuSnapshot(assembly, form, bitmap);
+                    bitmap.Save(Path.Combine(output, (gpuMode ? "gpu" : "gdi") + "-fixture-" + size.Width + ".png"), ImageFormat.Png);
                 }
                 if (json == null) throw new Exception("Benchmark exceeded capture window before saving.");
-                File.WriteAllText(Path.Combine(output, "gdi-" + size.Width + "-" + run + ".json"), json);
+                File.WriteAllText(Path.Combine(output, (gpuMode ? "gpu" : "gdi") + "-" + size.Width + "-" + run + ".json"), json);
                 Set(form, "_renderProfile", null);
                 Console.WriteLine("Saved {0}x{1} run {2}", size.Width, size.Height, run);
             }
             settings.Font.Dispose();
+        }
+    }
+
+    static void SaveGpuSnapshot(Assembly assembly, Form form, Bitmap output)
+    {
+        var type = assembly.GetType("MusicBeePlugin.GpuSceneRenderer");
+        using (var renderer = (IDisposable)Activator.CreateInstance(type, Fields, null,
+            new object[] { form.Handle, output.Size, true }, null))
+        {
+            var foreground = (Bitmap)type.GetProperty("Foreground", Fields).GetValue(renderer);
+            using (var g = Graphics.FromImage(foreground)) Call(form, "DrawScene", new PaintEventArgs(g, form.ClientRectangle), true);
+            Call(renderer, "Upload");
+            using (var g = Graphics.FromImage(output)) {
+                var dc = g.GetHdc();
+                try { Call(renderer, "Draw", Get(form, "_palette"), Get(form, "_bars"), true, dc); }
+                finally { g.ReleaseHdc(dc); }
+            }
         }
     }
 }

@@ -21,9 +21,14 @@ internal static class RenderProfileChecks
         for (int i = 0; i < RenderProfile.SampleLimit + 10; i++) capture.Add(RenderMetric.Scene, i);
         var poll = typeof(RenderProfile).GetMethod("Poll", BindingFlags.NonPublic | BindingFlags.Instance);
         for (int i = 0; i < 5; i++) poll.Invoke(capture, new object[] { null });
+        capture.FrameActivity(true, false, true, true, false);
+        capture.FrameActivity(true, true, false, false, true);
         if (callbacks != 1) throw new Exception("Blocked MusicBee must have at most one heartbeat queued.");
         string report = capture.Finish("test");
         var json = JObject.Parse(report);
+        if ((int)json["activity"]["frames"] != 2 || (int)json["activity"]["lyrics"] != 2 ||
+            (int)json["activity"]["gpu"] != 1 || (int)json["activity"]["foreground_redrawn"] != 1)
+            throw new Exception("Activity must record actual measured frames, including fallback.");
         if ((int)json["metrics"]["Scene"]["count"] != RenderProfile.SampleLimit ||
             (int)json["metrics"]["Scene"]["dropped"] != 10 || capture.Stamp != 0 || capture.Finish("again") != null)
             throw new Exception("Capture must be bounded, stop sampling and complete only once.");
