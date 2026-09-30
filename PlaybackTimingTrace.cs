@@ -22,7 +22,7 @@ namespace MusicBeePlugin
         {
             internal long Time, SampleTime, Frequency;
             internal int Raw, Display, State, Seek, Correction;
-            internal bool Playing;
+            internal bool Playing, Settling;
         }
         internal PlaybackTimingTrace(string path) { _path = path; }
         internal void Record(long time, long frequency, PlaybackSnapshotReader.Snapshot sample,
@@ -31,7 +31,7 @@ namespace MusicBeePlugin
             if (_rows.Count == Capacity) _rows.Dequeue();
             _rows.Enqueue(new Row { Time = time, SampleTime = sample.PositionTimestamp, Frequency = frequency,
                 Raw = sample.Position, Display = display, State = (int)sample.State, Playing = playing,
-                Seek = clock.SeekRevision, Correction = clock.PhaseCorrections });
+                Seek = clock.SeekRevision, Correction = clock.PhaseCorrections, Settling = clock.IsSettling });
             if (_revision != clock.SeekRevision)
             {
                 _revision = clock.SeekRevision;
@@ -50,13 +50,13 @@ namespace MusicBeePlugin
                 try
                 {
                     var text = new StringBuilder("DesktopLyrics " + typeof(PlaybackTimingTrace).Assembly.GetName().Version +
-                        "\nwall_ms,sample_age_ms,raw_ms,display_ms,reported_state,display_playing,seek_revision,phase_corrections\n");
+                        "\nwall_ms,sample_age_ms,raw_ms,clock_ms,reported_state,display_playing,seek_revision,phase_corrections,dancer_held\n");
                     var origin = rows[0].Time;
                     foreach (var row in rows)
-                        text.AppendFormat(CultureInfo.InvariantCulture, "{0:0.000},{1:0.000},{2},{3},{4},{5},{6},{7}\n",
+                        text.AppendFormat(CultureInfo.InvariantCulture, "{0:0.000},{1:0.000},{2},{3},{4},{5},{6},{7},{8}\n",
                             (row.Time - origin) * 1000d / row.Frequency,
                             (row.Time - row.SampleTime) * 1000d / row.Frequency,
-                            row.Raw, row.Display, row.State, row.Playing ? 1 : 0, row.Seek, row.Correction);
+                            row.Raw, row.Display, row.State, row.Playing ? 1 : 0, row.Seek, row.Correction, row.Settling ? 1 : 0);
                     lock (FileGate)
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(_path));

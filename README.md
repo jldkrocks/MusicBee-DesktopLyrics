@@ -178,6 +178,12 @@ Playback controls and accent motion (1.15.46):
 - Existing cues load as Bop and are not rewritten until Save. Save writes map version 6; older plugin versions cannot load newly saved maps. New cue styles never change BPM, beat phase, rhythm, speed or lyric timing.
 
 
+Seek settling (1.15.51):
+- While seeking during playback, dancers briefly hold their previous pose until four fresh advancing position readings establish a stable phase. They then show the pose for the current song position and continue at normal speed. This applies to MusicBee and tempo-map seeks. No extra setting is needed. The captured five-seek regression settles in 0.56 to 0.69 seconds; live timing depends on MusicBee's reporting.
+- State and position now come from the same playback snapshot. After settling, phase verification tolerates normal coarse-reporting jitter while still correcting larger confirmed offsets. It does not speed the dance up to catch up.
+- Paused precision seeks still show the selected position immediately. An explicit Pause cancels settling; genuine external paused seeks resolve after a short grace period. Abnormal playing streams have a 1.5-second settling limit. Normal Play smoothing remains available.
+- Reuses the existing bounded sample buffer, adds no dependencies or per-song files, and leaves stored BPM, alignment, tempo maps and lyrics unchanged. The existing single 600-row diagnostic now indicates when the dancer is held. The captured regression fixture is test-only and is not bundled in the plugin.
+
 Post-seek alignment verification (1.15.50):
 - Fixes a case where the first advancing MusicBee readings establish a temporary offset which then stays locked for the song. After seeking, the clock continues checking groups of consistent readings, respecting the uncertainty between coarse position updates. A confirmed offset replaces the estimate directly, without a catch-up speed change. The premature two-reading lock is removed.
 - A small local diagnostic file, `DesktopLyrics-PartyTempo/last-playback-seek.log` in MusicBee's plugin storage, records the latest seek. It replaces the previous trace, keeps at most 600 timing rows and excludes song names, file paths and audio. Formatting and writing run in the background. It is intended to help verify actual player behavior if synchronization problems persist.

@@ -10,6 +10,10 @@ namespace MusicBeePlugin
     // startup poll does not permanently shift a saved beat alignment.
     internal sealed class PartyPlaybackClock
     {
+        private readonly bool _holdSeeks;
+        private long _settlingStarted;
+        internal bool IsSettling { get; private set; }
+        internal PartyPlaybackClock(bool holdSeeks = false) { _holdSeeks = holdSeeks; }
         private bool _initialized, _playing, _anchored;
         private long _lastTimestamp;
         private int _lastRawPosition;
@@ -45,11 +49,20 @@ namespace MusicBeePlugin
             _seekClock = false;
             _lastSampleTimestamp = long.MinValue;
             _phaseRanges.Clear();
+            IsSettling = false;
         }
 
         // Only a known Play command may ease a resume. MusicBee's own seek
         // can briefly report a non-playing state, which is not a normal resume.
         internal void PrepareResume(long timestamp) { _resumeRequestedAt = timestamp; }
+
+        internal void PreparePause()
+        {
+            _seekBeforeResume |= IsSettling;
+            IsSettling = false;
+            _playing = false;
+            _resumeRequestedAt = long.MinValue;
+        }
 
         internal void Seek(int positionMs, long timestamp, long frequency, bool playing)
         {
@@ -57,6 +70,56 @@ namespace MusicBeePlugin
             PositionAt(positionMs, timestamp, frequency, playing);
             _seekBeforeResume = !playing;
             StartSeekClock();
+            if (_holdSeeks && playing) BeginSettling(timestamp);
+        }
+
+        private void BeginSettling(long timestamp)
+        {
+            IsSettling = true;
+            _settlingStarted = timestamp;
+            _resumeBlend = false;
+            _samples.Clear();
+            _phaseRanges.Clear();
+        }
+
+        private void SettleAt(int rawPosition, double reported, long timestamp, long sampledAt,
+            long frequency, bool playing)
+        {
+            _positionMs = reported;
+            var age = (timestamp - _settlingStarted) * 1000d / frequency;
+            if (!playing)
+            {
+                _samples.Clear();
+                // A real paused seek must not leave the drawing held indefinitely.
+                if (age >= 250) { IsSettling = false; _seekBeforeResume = true; }
+            }
+            else
+            {
+                if (rawPosition > _lastRawPosition && sampledAt > _lastSampleTimestamp)
+                {
+                    Observe(rawPosition, sampledAt, frequency);
+                    while (_samples.Count > 4) _samples.Dequeue();
+                    if (_samples.Count == 4 &&
+                        (sampledAt - _samples.Peek().Timestamp) * 1000d / frequency >= 180)
+                    {
+                        double low = double.PositiveInfinity, high = double.NegativeInfinity;
+                        foreach (var sample in _samples)
+                        { low = Math.Min(low, sample.Offset); high = Math.Max(high, sample.Offset); }
+                        // The captured API step is about 60 ms. During seek
+                        // buffering the phase moves by hundreds of milliseconds.
+                        if (high - low <= 60 && (timestamp - sampledAt) * 1000d / frequency <= 200)
+                        {
+                            _positionMs = timestamp * 1000d / frequency + high;
+                            IsSettling = false;
+                            ++PhaseCorrections;
+                        }
+                    }
+                }
+                // A missing or abnormal player stream must not freeze the UI.
+                if (age >= 1500) IsSettling = false;
+            }
+            if (!IsSettling) { _samples.Clear(); _phaseRanges.Clear(); }
+            _playing = playing;
         }
 
         private void StartSeekClock()
@@ -80,8 +143,9 @@ namespace MusicBeePlugin
             while (_phaseRanges.Count >= 3)
             {
                 double lower = double.NegativeInfinity, upper = double.PositiveInfinity;
+                double lowest = double.PositiveInfinity;
                 foreach (var range in _phaseRanges)
-                { lower = Math.Max(lower, range.Lower); upper = Math.Min(upper, range.Upper); }
+                { lower = Math.Max(lower, range.Lower); upper = Math.Min(upper, range.Upper); lowest = Math.Min(lowest, range.Lower); }
                 if (lower > upper)
                 {
                     // Transient buffered readings disagree. Wait for a newer
@@ -90,7 +154,8 @@ namespace MusicBeePlugin
                     continue;
                 }
                 var phase = _positionMs - timestamp * 1000d / frequency;
-                if (phase < lower - 20 || phase > upper + 20)
+                var allowance = Math.Max(40, Math.Min(100, lower - lowest + 20));
+                if (phase < lower - allowance || phase > upper + allowance)
                 {
                     // Re-anchor once when several real readings disprove the
                     // estimate. No ongoing acceleration or slow-down is needed.
@@ -124,7 +189,25 @@ namespace MusicBeePlugin
             // Project from its acquisition time, not the time the UI consumes it.
             var sampledAt = Math.Min(timestamp, positionTimestamp ?? timestamp);
             var reported = rawPositionMs + (playing ? Math.Min(250, (timestamp - sampledAt) * 1000d / frequency) : 0);
-            if (!_initialized || timestamp < _lastTimestamp)
+            var predictedNow = _positionMs + (timestamp - _lastTimestamp) * 1000d / frequency;
+            var discontinuity = rawPositionMs < _lastRawPosition - 100 ||
+                reported > predictedNow + 250 || predictedNow - reported > 750;
+            var wasSettling = IsSettling;
+            if (_holdSeeks && _initialized && !IsSettling && (playing || _playing) &&
+                !_resumeBlend && !(requestedResume && !_seekBeforeResume) && discontinuity)
+            {
+                StartSeekClock(); BeginSettling(timestamp);
+            }
+            if (IsSettling)
+            {
+                // Another seek during the hold supersedes the previous target.
+                // Ordinary buffered steps (120/240 ms in the trace) do not.
+                if (wasSettling && (rawPositionMs < _lastRawPosition - 100 ||
+                    rawPositionMs - _lastRawPosition > Math.Max(1000, (timestamp - _lastTimestamp) * 1000d / frequency + 500)))
+                { StartSeekClock(); BeginSettling(timestamp); }
+                SettleAt(rawPositionMs, reported, timestamp, sampledAt, frequency, playing);
+            }
+            else if (!_initialized || timestamp < _lastTimestamp)
             {
                 _initialized = true;
                 _playing = playing;
@@ -139,6 +222,8 @@ namespace MusicBeePlugin
                 if (Math.Abs(rawPositionMs - _lastRawPosition) > 100)
                 { _seekBeforeResume = true; StartSeekClock(); }
                 _resumeBlend = (smoothResume || requestedResume) && playing && !_playing && !_seekBeforeResume;
+                if (_holdSeeks && playing && !_playing && _seekBeforeResume)
+                    BeginSettling(timestamp);
                 if (_resumeBlend) _seekClock = false;
                 if (playing) _seekBeforeResume = false;
                 _resumeSawAdvance = rawPositionMs > _lastRawPosition;

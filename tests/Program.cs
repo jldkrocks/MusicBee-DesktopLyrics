@@ -22,6 +22,7 @@ namespace MusicBeePlugin
             AccentMotionChecks.Run();
             Editor47Checks.Run();
             SeekClockChecks.Run();
+            SeekSettlingChecks.Run();
             BpmLookupChecks.Run();
             TempoMapChecks.Run();
             RhythmChecks.Run();
