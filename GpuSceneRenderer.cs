@@ -37,6 +37,62 @@ namespace MusicBeePlugin
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int LyricsFn(IntPtr renderer, ref Rect panel, [In] TextCommand[] commands, int count);
         private TextFn _text;
         private LyricsFn _lyrics;
+        [StructLayout(LayoutKind.Sequential)] private struct DancerCommand
+        {
+            public int Slot;
+            public Rect Destination, Clip;
+        }
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int DancerTextureFn(IntPtr renderer, int slot, uint width, uint height, IntPtr pixels, uint stride);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int DancersFn(IntPtr renderer, [In] DancerCommand[] commands, int count);
+        private DancerTextureFn _dancerTexture;
+        private DancersFn _dancers;
+        private readonly DancerCommand[] _dancerCommands = new DancerCommand[2];
+        private readonly Size[] _dancerSizes = new Size[8];
+        private int _dancerBytes;
+        private int _dancerCount;
+        internal void BeginDancers() { _dancerCount = 0; }
+        internal void ClearDancers()
+        {
+            BeginDancers(); CommitDancers();
+            for (int i=0;i<8;i++) if (!_dancerSizes[i].IsEmpty) {
+                Marshal.ThrowExceptionForHR(_dancerTexture(_renderer,i,0,0,IntPtr.Zero,0));
+                _dancerSizes[i]=Size.Empty;
+            }
+            _dancerBytes=0;
+        }
+        internal void CommitDancers() { Marshal.ThrowExceptionForHR(_dancers(_renderer,_dancerCommands,_dancerCount)); }
+        internal void AddDancer(int character, Rectangle bounds, int frame, float impact, float sway, float anticipation)
+        {
+            if (bounds.Width<=0 || bounds.Height<=0) return;
+            if (character<0 || character>1 || frame<0 || frame>9 || frame%3!=0 || _dancerCount>=2)
+                throw new ArgumentOutOfRangeException("dancer");
+            // Bound the complete four-pose cache before allocating any pixels.
+            int bytes=checked(bounds.Width*bounds.Height*4);
+            if (bytes>8*1024*1024) throw new InvalidOperationException("Dancer pose exceeds GPU budget.");
+            int slot=character*4+frame/3;
+            for (int i=character*4;i<character*4+4;i++) if (!_dancerSizes[i].IsEmpty && _dancerSizes[i]!=bounds.Size) {
+                Marshal.ThrowExceptionForHR(_dancerTexture(_renderer,i,0,0,IntPtr.Zero,0));
+                _dancerBytes-=_dancerSizes[i].Width*_dancerSizes[i].Height*4;_dancerSizes[i]=Size.Empty;
+            }
+            if (_dancerSizes[slot].IsEmpty) {
+                var stamp=Profile?.Stamp ?? 0;
+                // Preserve the existing bicubic enlargement. Only the changing
+                // transform moves to the GPU; dispose the staging raster at once.
+                using (var stream=typeof(GpuSceneRenderer).Assembly.GetManifestResourceStream(
+                    character==0?"MusicBeePlugin.PartyRem.png":"MusicBeePlugin.PartyRam.png"))
+                using (var sheet=new Bitmap(stream))
+                using (var pose=PartyDancerWindow.CreatePose(sheet,bounds.Size,frame)) {
+                    var bits=pose.LockBits(new Rectangle(Point.Empty,pose.Size),ImageLockMode.ReadOnly,PixelFormat.Format32bppPArgb);
+                    try { Marshal.ThrowExceptionForHR(_dancerTexture(_renderer,slot,(uint)pose.Width,(uint)pose.Height,bits.Scan0,(uint)bits.Stride)); }
+                    finally { pose.UnlockBits(bits); }
+                }
+                _dancerSizes[slot]=bounds.Size;_dancerBytes+=bytes;
+                Profile?.End(RenderMetric.DancerTextureUpload,stamp);
+            }
+            var destination=PartyDancerWindow.PoseDestination(bounds.Size,impact,sway,anticipation);
+            destination.Offset(bounds.Location);
+            _dancerCommands[_dancerCount++]=new DancerCommand {Slot=slot,Destination=new Rect(destination),Clip=new Rect(bounds)};
+        }
         private readonly Bitmap[] _textImages = new Bitmap[24]; // borrowed raster references, not owned
         private readonly long[] _textUsed = new long[24];
         private readonly int[] _textBytes = new int[24];
@@ -116,6 +172,7 @@ namespace MusicBeePlugin
                 // Resolve the entire ABI before creating resources. An older
                 // helper safely selects GDI instead of reading a mismatched ABI.
                 _text = Export<TextFn>("DL_Text"); _lyrics = Export<LyricsFn>("DL_Lyrics");
+                _dancerTexture = Export<DancerTextureFn>("DL_DancerTexture"); _dancers = Export<DancersFn>("DL_Dancers");
                 Marshal.ThrowExceptionForHR(Export<CreateFn>("DL_Create")(hwnd, (uint)size.Width, (uint)size.Height, diagnosticReadback ? 1 : 0, out _renderer));
                 Resize(size);
             }
@@ -145,6 +202,7 @@ namespace MusicBeePlugin
             colors[4] = (uint)palette.Border.ToArgb(); colors[5] = (uint)palette.Accent.ToArgb();
             _scene.Bars = bars; _scene.Spectrum = spectrum ? 1 : 0;
             if(Profile?.Stamp > 0) Profile.Add(RenderMetric.LyricTextureMiB,_textureBytes/1048576d);
+            if(Profile?.Stamp > 0) Profile.Add(RenderMetric.DancerTextureMiB,_dancerBytes/1048576d);
             Marshal.ThrowExceptionForHR(_draw(_renderer, ref _scene, diagnosticOutput));
         }
         public void Dispose()

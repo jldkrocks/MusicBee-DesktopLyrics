@@ -25,6 +25,37 @@ namespace MusicBeePlugin
         private GpuSceneRenderer _gpu;
         private GpuSceneRenderer _gpuLyrics;
         private bool _gpuLyricsOnly;
+        private bool _partyVisualValid;
+        private int _partyVisualFrame;
+        private float _partyVisualImpact, _partyVisualSway, _partyVisualAnticipation;
+        private bool UseGpuDancers => _gpu != null && GpuEligible &&
+            WindowState == FormWindowState.Maximized && _settings.PartyMode && _partyVisualValid;
+
+        private void ComposeGpuDancers()
+        {
+            if (!UseGpuDancers) { _gpu.ClearDancers(); return; }
+            var stamp = _renderProfile?.Stamp ?? 0;
+            _gpu.BeginDancers();
+            _gpu.AddDancer(0, RectangleToClient(_leftPartyBounds), _partyVisualFrame,
+                _partyVisualImpact, _partyVisualSway, _partyVisualAnticipation);
+            _gpu.AddDancer(1, RectangleToClient(_rightPartyBounds), _partyVisualFrame,
+                _partyVisualImpact, _partyVisualSway, _partyVisualAnticipation);
+            _gpu.CommitDancers();
+            _renderProfile?.End(RenderMetric.DancerCompose, stamp);
+        }
+
+        private void PresentStoredPartyDancers()
+        {
+            if (!_partyVisualValid || !_settings.PartyMode || !Visible ||
+                WindowState == FormWindowState.Minimized || _animationDisposed) return;
+            if (_leftDancer == null) _leftDancer = new PartyDancerWindow("MusicBeePlugin.PartyRem.png");
+            if (_rightDancer == null) _rightDancer = new PartyDancerWindow("MusicBeePlugin.PartyRam.png");
+            _leftDancer.Profile = _rightDancer.Profile = _renderProfile;
+            PlacePartyDancer(_leftDancer, _leftPartyBounds, _partyVisualFrame,
+                _partyVisualImpact, _partyVisualSway, _partyVisualAnticipation);
+            PlacePartyDancer(_rightDancer, _rightPartyBounds, _partyVisualFrame,
+                _partyVisualImpact, _partyVisualSway, _partyVisualAnticipation);
+        }
         private void ComposeGpuLyrics(GpuSceneRenderer renderer, long? diagnosticTimestamp = null)
         {
             // Commands reference the existing text textures. Do not clear,
@@ -88,7 +119,7 @@ namespace MusicBeePlugin
         // target presents directly; WinForms never copies a full CPU backbuffer.
         private bool TryDrawGpu()
         {
-            if (!GpuEligible) { ReleaseGpu(); return false; }
+            if (!GpuEligible) { ReleaseGpu(); PresentStoredPartyDancers(); return false; }
             try
             {
                 if (_gpu == null)
@@ -134,8 +165,11 @@ namespace MusicBeePlugin
                 _foregroundTransition = transitioning;
                 var submitted = _renderProfile?.Stamp ?? 0;
                 _gpu.Profile=_renderProfile;
+                ComposeGpuDancers();
+                submitted = _renderProfile?.Stamp ?? 0;
                 _gpu.Draw(_palette, _bars, _settings.ShowVisualizer);
                 _renderProfile?.End(RenderMetric.GpuSubmit, submitted);
+                if (UseGpuDancers) DisposePartyDancers();
                 _renderProfile?.FrameActivity(!string.IsNullOrWhiteSpace(_line1), !string.IsNullOrWhiteSpace(_line2),
                     !string.IsNullOrWhiteSpace(_nextLine), true, redraw);
                 return true;
@@ -146,6 +180,9 @@ namespace MusicBeePlugin
                 // loop, no change to song state, and no driver reset attempt.
                 _gpuFailure = ex.GetType().Name + " 0x" + ex.HResult.ToString("X8");
                 _gpuFailed = true; ReleaseGpu();
+                // Restore the last computed pose, without reading or advancing
+                // the playback clock a second time on a failed frame.
+                try { PresentStoredPartyDancers(); } catch { /* existing update path handles GDI failures */ }
                 ConfigureFramePacing();
                 return false;
             }
@@ -1389,6 +1426,7 @@ namespace MusicBeePlugin
             if (!_loaded || _animationDisposed) return;
             if (!_settings.PartyMode)
             {
+                _partyVisualValid = false;
                 DisposePartyDancers();
                 _partyClock.Reset();
                 _lastPartyPosition = null;
@@ -1397,17 +1435,13 @@ namespace MusicBeePlugin
             }
             if (!Visible || WindowState == FormWindowState.Minimized)
             {
+                _partyVisualValid = false;
                 _leftDancer?.Hide();
                 _rightDancer?.Hide();
                 return;
             }
             try
             {
-                if (_leftDancer == null)
-                    _leftDancer = new PartyDancerWindow("MusicBeePlugin.PartyRem.png");
-                if (_rightDancer == null)
-                    _rightDancer = new PartyDancerWindow("MusicBeePlugin.PartyRam.png");
-                _leftDancer.Profile = _rightDancer.Profile = _renderProfile;
                 var position = ReadPartyPosition(Stopwatch.GetTimestamp());
                 if (_partyClock.IsSettling && _lastPartyPosition.HasValue)
                     position = _lastPartyPosition.Value;
@@ -1434,10 +1468,10 @@ namespace MusicBeePlugin
                     sway = mapped.Sway; anticipation = mapped.Anticipation;
                 }
                 RefreshPartyLayout();
-                PlacePartyDancer(_leftDancer, _leftPartyBounds, frame, impact,
-                    sway, anticipation);
-                PlacePartyDancer(_rightDancer, _rightPartyBounds, frame, impact,
-                    sway, anticipation);
+                _partyVisualFrame=frame; _partyVisualImpact=impact;
+                _partyVisualSway=sway; _partyVisualAnticipation=anticipation;
+                _partyVisualValid=true;
+                if (!UseGpuDancers) PresentStoredPartyDancers();
             }
             catch (Exception ex)
             {

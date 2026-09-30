@@ -135,14 +135,7 @@ namespace MusicBeePlugin
             var pose = _scaledPoses[frame];
             if (pose == null)
             {
-                pose = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppPArgb);
-                using (var g = Graphics.FromImage(pose))
-                {
-                    g.CompositingMode = CompositingMode.SourceCopy;
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.DrawImage(_sheet, new Rectangle(Point.Empty, bounds.Size),
-                        new Rectangle(frame * FrameWidth, 0, FrameWidth, FrameHeight), GraphicsUnit.Pixel);
-                }
+                pose = CreatePose(_sheet, bounds.Size, frame);
                 _scaledPoses[frame] = pose;
             }
             var stamp = Profile?.Stamp ?? 0;
@@ -175,6 +168,28 @@ namespace MusicBeePlugin
             _lastSquashPixels = squashPixels;
             _lastSwayQuarterPixels = swayQuarterPixels;
             _lastLiftQuarterPixels = liftQuarterPixels;
+        }
+
+        internal static Bitmap CreatePose(Bitmap sheet, Size size, int frame)
+        {
+            var pose = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+            try {
+                using (var g = Graphics.FromImage(pose)) {
+                    g.CompositingMode = CompositingMode.SourceCopy;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(sheet, new Rectangle(Point.Empty,size),
+                        new Rectangle(frame*FrameWidth,0,FrameWidth,FrameHeight),GraphicsUnit.Pixel);
+                }
+                return pose;
+            } catch { pose.Dispose(); throw; }
+        }
+
+        internal static RectangleF PoseDestination(Size size, float impact, float sway, float anticipation)
+        {
+            var squash=(int)Math.Round(size.Height*0.045f*impact);
+            var lift=(int)Math.Round(size.Height*0.009f*anticipation*4);
+            var shift=(int)Math.Round(size.Width*sway*4);
+            return new RectangleF(shift/4f,squash-lift/4f,size.Width,size.Height-squash);
         }
 
         private void CreateBuffer(Size size)

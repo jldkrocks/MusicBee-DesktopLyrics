@@ -12,6 +12,7 @@ struct Scene {
     int spectrum;
 };
 struct TextCommand { int slot; D2D1_RECT_F destination, clip; float opacity; int nearest; };
+struct DancerCommand { int slot; D2D1_RECT_F destination, clip; };
 struct Renderer {
     ComPtr<ID2D1Factory> factory;
     ComPtr<ID2D1HwndRenderTarget> target;
@@ -27,6 +28,10 @@ struct Renderer {
     int commandCount = 0;
     D2D1_RECT_F panel = {};
     ComPtr<ID2D1SolidColorBrush> panelBrush;
+    ComPtr<ID2D1Bitmap> dancers[8];
+    UINT dancerBytes[8] = {};
+    DancerCommand dancerCommands[2] = {};
+    int dancerCount = 0;
 };
 static D2D1_COLOR_F Color(UINT argb, float alpha = 1) {
     return D2D1::ColorF((argb >> 16 & 255) / 255.f, (argb >> 8 & 255) / 255.f, (argb & 255) / 255.f, alpha);
@@ -160,6 +165,14 @@ extern "C" HRESULT __cdecl DL_Draw(Renderer* r, const Scene* s, HDC diagnosticOu
     }
     // UI remains above the lyric layer, preserving queue/menu overlap order.
     if(r->foreground) r->target->DrawBitmap(r->foreground.Get(),bounds,1,D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    // Same z-order as the former owned windows. Clip to each dancer's bounds,
+    // preserving the transparent layered window's edge behavior.
+    for(int i=0;i<r->dancerCount;i++) {
+        const auto& c=r->dancerCommands[i];
+        r->target->PushAxisAlignedClip(c.clip,D2D1_ANTIALIAS_MODE_ALIASED);
+        r->target->DrawBitmap(r->dancers[c.slot].Get(),c.destination,1,D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+        r->target->PopAxisAlignedClip();
+    }
     // Test-only readback for pixel comparisons. Production always passes null
     // and does not create a GDI-compatible target or transfer pixels to the CPU.
     if(diagnosticOutput) {
@@ -175,4 +188,29 @@ extern "C" HRESULT __cdecl DL_Draw(Renderer* r, const Scene* s, HDC diagnosticOu
     }
     if(FAILED(hr)) {r->target->EndDraw();return hr;}
     return r->target->EndDraw(); // Includes submission/present; any device loss returns to GDI.
+}
+
+extern "C" HRESULT __cdecl DL_DancerTexture(Renderer* r,int slot,UINT width,UINT height,const void* pixels,UINT stride) noexcept {
+    if(!r || slot<0 || slot>=8)return E_INVALIDARG;
+    r->dancers[slot].Reset();r->dancerBytes[slot]=0;
+    if(!pixels)return S_OK;
+    if(!width || !height || width>8192 || height>8192 || stride<width*4)return E_INVALIDARG;
+    UINT bytes=width*height*4;
+    if(bytes>8*1024*1024)return E_OUTOFMEMORY; // eight slots, at most 64 MiB
+    HRESULT hr=r->target->CreateBitmap(D2D1::SizeU(width,height),pixels,stride,
+        D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_PREMULTIPLIED),96,96),&r->dancers[slot]);
+    if(SUCCEEDED(hr))r->dancerBytes[slot]=bytes;
+    return hr;
+}
+extern "C" HRESULT __cdecl DL_Dancers(Renderer* r,const DancerCommand* commands,int count) noexcept {
+    if(!r || count<0 || count>2 || (count && !commands))return E_INVALIDARG;
+    for(int i=0;i<count;i++) {
+        const auto& c=commands[i];
+        if(c.slot<0 || c.slot>=8 || !r->dancers[c.slot] ||
+            !std::isfinite(c.destination.left) || !std::isfinite(c.destination.top) ||
+            !std::isfinite(c.destination.right) || !std::isfinite(c.destination.bottom))return E_INVALIDARG;
+    }
+    r->dancerCount=count;
+    if(count)memcpy(r->dancerCommands,commands,sizeof(DancerCommand)*count);
+    return S_OK;
 }

@@ -82,6 +82,7 @@ class GpuCompositionChecks
                 // Inject the actual HRESULT a lost D2D target returns, at the
                 // managed/native boundary. This does not reset the display driver.
                 RetainedForegroundChecks(assembly,form);
+                DancerChecks(assembly,form);
                 gpu=Get(form,"_gpu");var draw=gpu.GetType().GetField("_draw",Flags);
                 var parameters=draw.FieldType.GetMethod("Invoke").GetParameters().Select(p=>Expression.Parameter(p.ParameterType,p.Name)).ToArray();
                 draw.SetValue(gpu,Expression.Lambda(draw.FieldType,Expression.Constant(unchecked((int)0x8899000C)),parameters).Compile());
@@ -194,6 +195,71 @@ class GpuCompositionChecks
             Check(((Bitmap[])Get(renderer,"_textImages")).Count(b=>b!=null)<=6,"Byte-budget eviction failed");
         }
         Console.WriteLine("Lyric texture cache remained bounded through repeated uploads/evictions.");
+    }
+    static void DancerChecks(Assembly assembly,Form form)
+    {
+        var dancerType=assembly.GetType("MusicBeePlugin.PartyDancerWindow");
+        form.WindowState=FormWindowState.Maximized;form.ClientSize=new Size(3840,2160);
+        using(var left=(Form)Activator.CreateInstance(dancerType,new object[]{"MusicBeePlugin.PartyRem.png"}))
+        using(var right=(Form)Activator.CreateInstance(dancerType,new object[]{"MusicBeePlugin.PartyRam.png"}))
+        using(var renderer=(IDisposable)Activator.CreateInstance(assembly.GetType("MusicBeePlugin.GpuSceneRenderer"),Flags,null,
+            new object[]{form.Handle,form.ClientSize,true},null))
+        using(var expected=new Bitmap(3840,2160))
+        using(var actual=new Bitmap(3840,2160)) {
+            Set(form,"_transitionStarted",0L);Set(form,"_paletteStarted",0L);
+            Call(form,"RasterGpuForeground",renderer,null);Call(renderer,"Upload");
+            double worst=0;
+            foreach(int height in new[]{454,1626})
+            foreach(int frame in new[]{0,3,6,9})
+            foreach(float impact in new[]{0f,1f,2.5f}) {
+                int width=(int)Math.Round(height*180d/353);
+                var bounds=new[]{new Rectangle(10,200,width,height),new Rectangle(3830-width,200,width,height)};
+                float sway=impact==0?-.014f:.025f,anticipation=impact==0?.8f:0;
+                using(var g=Graphics.FromImage(expected)) {
+                    Call(form,"DrawScene",new PaintEventArgs(g,form.ClientRectangle),false,null);
+                    foreach(var pair in new[]{new{Dancer=left,Index=0},new{Dancer=right,Index=1}}) {
+                        Call(pair.Dancer,"Present",new Rectangle(-20000,-20000,width,height),frame,impact,sway,anticipation);
+                        g.DrawImageUnscaled((Bitmap)Get(pair.Dancer,"_surface"),bounds[pair.Index].Location);
+                    }
+                }
+                Call(renderer,"BeginDancers");
+                for(int i=0;i<2;i++)Call(renderer,"AddDancer",i,bounds[i],frame,impact,sway,anticipation);
+                Call(renderer,"CommitDancers");
+                using(var g=Graphics.FromImage(actual)) {
+                    var dc=g.GetHdc();try{Call(renderer,"Draw",Get(form,"_palette"),Get(form,"_bars"),true,dc);}finally{g.ReleaseHdc(dc);}
+                }
+                double error=0;int count=0;
+                foreach(var b in bounds)for(int y=b.Top;y<b.Bottom;y+=2)for(int x=b.Left;x<b.Right;x+=2) {
+                    var a=actual.GetPixel(x,y);var e=expected.GetPixel(x,y);
+                    error+=Math.Abs(a.R-e.R)+Math.Abs(a.G-e.G)+Math.Abs(a.B-e.B);count+=3;
+                }
+                worst=Math.Max(worst,error/count);
+                Check(error/count<3,"Dancer region differs from existing GDI transform: "+error/count);
+                Check((int)Get(renderer,"_dancerBytes")<=64*1024*1024,"Dancer texture budget exceeded");
+            }
+            actual.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"gpu-check-images","dancers-gpu.png"));
+            expected.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"gpu-check-images","dancers-gdi.png"));
+            Call(renderer,"ClearDancers");Check((int)Get(renderer,"_dancerBytes")==0,"Restore must release dancer cache");
+            Console.WriteLine("Dancer-region RGB mean error, worst case: "+worst.ToString("F3"));
+        }
+        // Production path: no clock calls and no foreground refresh for a
+        // changing pose. The same stored snapshot is reused after failure.
+        Set(form,"_partyVisualValid",true);Set(form,"_partyVisualFrame",0);
+        Set(form,"_partyVisualImpact",1f);
+        Set(form,"_leftPartyBounds",form.RectangleToScreen(new Rectangle(0,200,829,1626)));
+        Set(form,"_rightPartyBounds",form.RectangleToScreen(new Rectangle(3011,200,829,1626)));
+        form.Invalidate();Check((bool)Call(form,"TryDrawGpu"),"GPU dancers failed");
+        var gpu=Get(form,"_gpu");var generation=Get(gpu,"_capture");
+        for(int i=0;i<12;i++) {
+            Set(form,"_partyVisualFrame",i%4*3);Set(form,"_partyVisualImpact",i*.1f);
+            Check((bool)Call(form,"TryDrawGpu"),"Moving GPU dancer failed");
+            Check(generation.Equals(Get(gpu,"_capture")),"Dancers forced a foreground refresh");
+        }
+        Check((int)Get(gpu,"_dancerCount")==2,"Both dancers must be composed");
+        form.WindowState=FormWindowState.Normal;Call(form,"TryDrawGpu");
+        Check((int)Get(gpu,"_dancerBytes")==0 && (int)Get(gpu,"_dancerCount")==0,"Restored scene retained maximized dancers");
+        Set(form,"_partyVisualValid",false);
+        Console.WriteLine("Dancer poses, strong rebound/sway, resize cache bounds and retained foreground passed.");
     }
     static void PixelCompare(Assembly assembly,Form form,double? progress=null)
     {

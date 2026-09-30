@@ -6,3 +6,5 @@ EXPORTS
  DL_Draw
  DL_Text
  DL_Lyrics
+ DL_DancerTexture
+ DL_Dancers

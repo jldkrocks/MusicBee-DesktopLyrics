@@ -102,6 +102,9 @@ class GdiRenderBenchmark
                 Set(form, "_renderProfile", profile); Set(left, "Profile", profile); Set(right, "Profile", profile);
                 var bars = (float[])Get(form, "_bars");
                 int height = size.Width > 1000 ? 1626 : 454, width = (int)Math.Round(height * 180d / 353);
+                bool gpuDancers = gpuMode && size.Width > 1000 && formType.GetField("_partyVisualValid",Fields)!=null;
+                metadata["gpu_dancers"]=gpuDancers;
+                metadata["workload"]="all layers; fresh lyrics, palette motion; two dancers, identical poses/transforms; GPU composition when supported at 4K";
                 var watch = Stopwatch.StartNew();
                 double nextFrame = 0;
                 int lastVerse = -1;
@@ -139,6 +142,15 @@ class GdiRenderBenchmark
                         if (t % 2 < .3) Set(form, "_transitionStarted", Stopwatch.GetTimestamp() - (long)(t % 2 * Stopwatch.Frequency));
                         Set(form, "_paletteStarted", t % 8 < 1 ? Stopwatch.GetTimestamp() : 0L);
                         long started = (long)profileType.GetProperty("Stamp", Fields).GetValue(profile);
+                        float impact = .5f + .5f * (float)Math.Sin(t * 10);
+                        int pose = (int)(t * 2) % 4 * 3;
+                        if (gpuDancers) {
+                            Set(form,"_partyVisualValid",true);Set(form,"_partyVisualFrame",pose);
+                            Set(form,"_partyVisualImpact",impact);Set(form,"_partyVisualSway",(float)Math.Sin(t)*.02f);
+                            Set(form,"_partyVisualAnticipation",impact);
+                            Set(form,"_leftPartyBounds",form.RectangleToScreen(new Rectangle(0,200,width,height)));
+                            Set(form,"_rightPartyBounds",form.RectangleToScreen(new Rectangle(size.Width-width,200,width,height)));
+                        }
                         if (messageFps != 0 || legacyTimer) Call(profile, "BeginPaint");
                         if (gpuMode) {
                             if (!(bool)Call(form, "TryDrawGpu")) throw new Exception("GPU failed: " + Get(form, "_gpuFailure"));
@@ -147,10 +159,10 @@ class GdiRenderBenchmark
                             g.Flush(FlushIntention.Sync);
                         }
                         long dancers = (long)profileType.GetProperty("Stamp", Fields).GetValue(profile);
-                        float impact = .5f + .5f * (float)Math.Sin(t * 10);
-                        int pose = (int)(t * 2) % 4;
-                        Call(left, "Present", new Rectangle(-20000, -20000, width, height), pose, impact, (float)Math.Sin(t) * .02f, impact);
-                        Call(right, "Present", new Rectangle(-18000, -20000, width, height), pose, impact, (float)Math.Sin(t) * .02f, impact);
+                        if (!gpuDancers) {
+                            Call(left, "Present", new Rectangle(-20000, -20000, width, height), pose, impact, (float)Math.Sin(t) * .02f, impact);
+                            Call(right, "Present", new Rectangle(-18000, -20000, width, height), pose, impact, (float)Math.Sin(t) * .02f, impact);
+                        }
                         Call(profile, "End", Enum.Parse(metricType, "Dancers"), dancers);
                         Call(profile, "End", Enum.Parse(metricType, "FrameWork"), started);
                     };

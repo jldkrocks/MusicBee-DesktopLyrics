@@ -14,7 +14,8 @@ namespace MusicBeePlugin
         Lyrics, Queue, Controls, TickInterval, Tick, Dancers, DancerRaster,
         DancerUpload, MainUiLatency, CpuOneCorePercent, CpuMachinePercent,
         WorkingSetMiB, PrivateMiB, FrameWork, ForegroundRaster, ForegroundUpload, GpuSubmit,
-        LyricTextureUpload, LyricTextureMiB, FrameWakeLateness, SkippedRenderDeadlines, LyricCompose
+        LyricTextureUpload, LyricTextureMiB, FrameWakeLateness, SkippedRenderDeadlines, LyricCompose,
+        DancerTextureUpload, DancerTextureMiB, DancerCompose
     }
 
     internal sealed class RenderProfile : IDisposable
