@@ -1,6 +1,6 @@
 # GPU rendering checkpoint
 
-Current checkpoint: version 1.15.59 integrates the user-approved refined AI-upscaled dancer poses, with four packed source cells per dancer and unchanged choreography. Validation/installation progress is recorded in RESUME.md. Version 57 GPU dancer live captures showed improved 4K frame tails. The reported NVIDIA116FPS cap is unchanged; see RENDERING.md for measurements and limitations.
+Current checkpoint: version 1.15.60 moves maximized dancer preparation off the UI thread and completes an isolated DirectWrite quality investigation. Natural DirectWrite changes spacing and Japanese fallback appearance, so production text stays unchanged; next text experiment should isolate Direct2D drawing of existing shaped outlines. Cold UI preparation falls from204ms to at most4.53ms in the three-run test, while first image readiness stilltakes~0.2s. Await real4K feedback. Details in RENDERING.md and RESUME.md. Version1.15.59 integrates the user-approved refined AI-upscaled dancer poses, with four packed source cells per dancer and unchanged choreography. Validation/installation progress is recorded in RESUME.md. Version 57 GPU dancer live captures showed improved 4K frame tails. The reported NVIDIA116FPS cap is unchanged; see RENDERING.md for measurements and limitations.
 
 User-authorized existing-feature sequence, developed as separate working checkpoints with TV feedback before expanding:
 1. Lyric/foreground separation: completed and user-validated in56. Upcoming-text preparation remains a possible follow-up if new-glyph stalls justify it.
@@ -10,9 +10,9 @@ User-authorized existing-feature sequence, developed as separate working checkpo
 5. Spectrum visual polish, with bounded optional peak indicators/bar styles/glow and measured cost.
 6. Queue expansion and control feedback/fades using retained layers.
 
-Items3-6 remain unimplemented. The upscaled dancer sets have completed separate visual review; actual in-plugin 4K validation remains required after installation. Previously planned accent-beat selection and song-programmed celebratory effects remain later work.
+Item3 has an isolated20-fixture comparison in60; a production text port remains unimplemented. Items4-6 remain unimplemented. The upscaled dancer sets have completed separate visual review; actual in-plugin 4K validation remains required after installation. Previously planned accent-beat selection and song-programmed celebratory effects remain later work.
 
-## Proposed next checkpoint after artwork validation
+## Authorized checkpoint after artwork validation (implemented/investigated in60)
 
 1. Reduce measured first-use and resize preparation stalls. Release59 cold GPU pair preparation was 204 ms initially, then 61-64 ms for uncached poses, while warm preparation is negligible. Investigate bounded source/pose preparation without growing a per-size/per-song cache or creating a new animation clock. Moderate difficulty; expected benefit at transitions rather than steady FPS. Confirm on the user's 4K display before expanding.
 2. Text quality and DirectWrite feasibility. Keep existing layout, wrapping, outlines and English translation behavior; compare glyph quality and new-line preparation cost before deciding what to port. High compatibility risk/difficulty; performance benefit unproven.
