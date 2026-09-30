@@ -157,6 +157,13 @@ namespace MusicBeePlugin
                 }
             }
             else TextRenderer.DrawText(g,WaveformStatus??"Waveform",Font,new Point(MarginX,94),Color.Silver);
+            foreach(var cue in Accents) {
+                var time=_dragAccent!=null && cue.Row==_dragAccent.Row?_dragAccent.Seconds:cue.Seconds;
+                if(time<ViewStart || time>ViewStart+Span)continue;
+                using(var guide=new Pen(Color.FromArgb(cue.Row==SelectedAccent?180:70,247,206,115))) {
+                    guide.DashStyle=DashStyle.Dot;g.DrawLine(guide,X(time),31,X(time),130);
+                }
+            }
             var selectedAccent=_envelope??Accents.Find(c=>c.Row==SelectedAccent);
             if(selectedAccent!=null){
                 var cue=selectedAccent;

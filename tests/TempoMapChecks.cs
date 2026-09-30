@@ -127,6 +127,11 @@ internal static class TempoMapChecks
     internal static void Run()
     {
         var countInMap = CheckCountIn();
+        var heldRamp=new PartyTempoMap {TrackUrl="hold-ramp",Sections={
+            new PartyTempoSection {Bpm=120},new PartyTempoSection {StartSeconds=2,Bpm=90,Style=PartyDanceStyle.Hold},
+            new PartyTempoSection {StartSeconds=10,Bpm=180,RampSeconds=4,CountIn=true,AlignBeat=true}}};
+        heldRamp.Validate();Near(heldRamp.At(9.5).CountInAccent,1,"Hold return ramp uses actual retained tempo, not unused Hold BPM");
+
         var accentMap=new PartyTempoMap {TrackUrl="recovery",Sections={new PartyTempoSection {Bpm=120,Style=PartyDanceStyle.Rest}},Accents={new PartyAccentCue {TimeSeconds=1,RecoverySeconds=.1}}};
         accentMap.Validate();
         Near(accentMap.At(1.1).Impact,0,"Custom recovery ends at selected duration");

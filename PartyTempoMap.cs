@@ -251,12 +251,12 @@ namespace MusicBeePlugin
                             section.RampToNext ? (Sections[i + 1].RampStartBpm ?? Sections[i + 1].Bpm) : section.Bpm) * speed);
                         var incoming = Sections[i + 1];
                         if (incoming.AlignBeat) endBeat = AlignedBeat(endBeat, incoming);
-                        var incomingBpm = incoming.RampToNext ? incoming.Bpm : incoming.RampSeconds > 0 ? incoming.RampStartBpm ?? (section.RampToNext ? incoming.Bpm : section.Bpm) : incoming.Bpm;
+                        var incomingBpm = incoming.RampToNext ? incoming.Bpm : incoming.RampSeconds > 0 ? incoming.RampStartBpm ?? (held ? tempo : section.RampToNext ? incoming.Bpm : section.Bpm) : incoming.Bpm;
                         var cuePhase = endBeat - (end - seconds) * incomingBpm / 60;
-                        ApplyCountIn(ref pose, section, incoming, endBeat, cuePhase);
+                        ApplyCountIn(ref pose, section, incoming, endBeat, cuePhase, incomingBpm);
                     }
                     else if (!held && !rest && section.CountIn && i > 0 && (Sections[i - 1].EffectiveSpeed == 0.5 || Sections[i - 1].Style == PartyDanceStyle.Hold || Sections[i - 1].Style == PartyDanceStyle.Rest))
-                        ApplyCountIn(ref pose, Sections[i - 1], section, sectionStartBeat, beat);
+                        ApplyCountIn(ref pose, Sections[i - 1], section, sectionStartBeat, beat, section.RampToNext ? section.Bpm : section.RampSeconds > 0 ? sectionStartTempo : section.Bpm);
                     return pose;
                 }
             }
@@ -287,11 +287,11 @@ namespace MusicBeePlugin
         // between beats, so it must not become a new beat origin unless Align is on.
         // The cue changes vertical motion only, never the saved phase or poses.
         private static void ApplyCountIn(ref PartyMapPose pose, PartyTempoSection previous,
-            PartyTempoSection next, double endBeat, double phase)
+            PartyTempoSection next, double endBeat, double phase, double? startBpm = null)
         {
             if (next.Style == PartyDanceStyle.Hold || next.EffectiveSpeed != 1) return;
             // A BPM ramp begins at the preceding tempo, not at its final target.
-            var incomingBpm = next.RampToNext ? next.Bpm : next.RampSeconds > 0 ? next.RampStartBpm ?? (previous.RampToNext ? next.Bpm : previous.Bpm) : next.Bpm;
+            var incomingBpm = startBpm ?? (next.RampToNext ? next.Bpm : next.RampSeconds > 0 ? next.RampStartBpm ?? (previous.RampToNext ? next.Bpm : previous.Bpm) : next.Bpm);
             var period = 60 / incomingBpm;
             if (next.StartSeconds - previous.StartSeconds + 1e-9 < period) return;
             var earliestPhase = endBeat - (next.StartSeconds - previous.StartSeconds) / period;
