@@ -13,8 +13,41 @@
 #include <chrono>
 #include <cstdio>
 #include <algorithm>
+#include <cmath>
 using Microsoft::WRL::ComPtr;
 static void Check(HRESULT hr) { if (FAILED(hr)) throw hr; }
+// GDI+ PathData uses Start=0, Line=1, cubic Bezier=3, CloseSubpath=128.
+// Bounded and validated even though these are locally generated test fixtures.
+static ComPtr<ID2D1PathGeometry> ReadGdiOutline(ID2D1Factory* factory,
+    std::filesystem::path file, D2D1_RECT_F& bounds) {
+    std::ifstream input(file,std::ios::binary);
+    auto read=[&](auto& value){if(!input.read(reinterpret_cast<char*>(&value),sizeof value))throw E_INVALIDARG;};
+    int magic,fill,count;read(magic);read(fill);read(count);read(bounds);
+    if(magic!=0x314f4447 || fill<0 || fill>1 || count<1 || count>65536 ||
+        !std::isfinite(bounds.left) || !std::isfinite(bounds.top) || !std::isfinite(bounds.right) ||
+        !std::isfinite(bounds.bottom) || bounds.right<bounds.left || bounds.bottom<bounds.top)throw E_INVALIDARG;
+    std::vector<D2D1_POINT_2F> points(count);std::vector<unsigned char> types(count);
+    for(int i=0;i<count;i++){read(points[i].x);read(points[i].y);read(types[i]);
+        if(!std::isfinite(points[i].x)||!std::isfinite(points[i].y))throw E_INVALIDARG;}
+    if(input.peek()!=std::char_traits<char>::eof())throw E_INVALIDARG;
+    ComPtr<ID2D1PathGeometry> path;Check(factory->CreatePathGeometry(&path));
+    ComPtr<ID2D1GeometrySink> sink;Check(path->Open(&sink));
+    sink->SetFillMode(fill?D2D1_FILL_MODE_WINDING:D2D1_FILL_MODE_ALTERNATE);
+    bool open=false;
+    for(int i=0;i<count;i++){
+        int kind=types[i]&7;
+        if(kind==0){if(open)sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            sink->BeginFigure(points[i],D2D1_FIGURE_BEGIN_FILLED);open=true;}
+        else if(kind==1 && open)sink->AddLine(points[i]);
+        else if(kind==3 && open && i+2<count && (types[i+1]&7)==3 && (types[i+2]&7)==3 &&
+            !(types[i]&128) && !(types[i+1]&128)){
+            sink->AddBezier(D2D1::BezierSegment(points[i],points[i+1],points[i+2]));i+=2;
+        }else throw E_INVALIDARG;
+        if(types[i]&128){sink->EndFigure(D2D1_FIGURE_END_CLOSED);open=false;}
+    }
+    if(open)sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    Check(sink->Close());return path;
+}
 class Outlines final : public IDWriteTextRenderer {
     ULONG refs = 1;
 public:
@@ -57,14 +90,15 @@ public:
     HRESULT STDMETHODCALLTYPE DrawInlineObject(void*,FLOAT,FLOAT,IDWriteInlineObject*,BOOL,BOOL,IUnknown*) override { return E_NOTIMPL; }
 };
 int wmain(int argc, wchar_t** argv) {
-    if (argc != 2) { std::puts("TextQualityProbe <fixture-folder>"); return 2; }
+    if (argc<2 || argc>3 || (argc==3 && wcscmp(argv[2],L"gdi-outlines"))) { std::puts("TextQualityProbe <fixture-folder> [gdi-outlines]"); return 2; }
+    bool original=argc==3;
     HRESULT init = CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED); if (FAILED(init)) return 1;
     int result = 0;
     try {
         ComPtr<ID2D1Factory> factory; Check(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,factory.GetAddressOf()));
         ComPtr<IDWriteFactory> dw; Check(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,__uuidof(IDWriteFactory),reinterpret_cast<IUnknown**>(dw.GetAddressOf())));
         ComPtr<IWICImagingFactory> wic; Check(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&wic)));
-        std::filesystem::path folder(argv[1]); std::ofstream metrics(folder / "directwrite-metrics.csv");
+        std::filesystem::path folder(argv[1]); std::ofstream metrics(folder / (original?"gdi-outline-metrics.csv":"directwrite-metrics.csv"));
         metrics << "id,dwrite_width,dwrite_height,outline_prepare_ms,lines\n";
         int count = 0;
         for (auto const& entry : std::filesystem::directory_iterator(folder)) {
@@ -89,7 +123,13 @@ int wmain(int argc, wchar_t** argv) {
             ComPtr<IDWriteTextLayout> layout;
             Check(dw->CreateTextLayout(text.c_str(),static_cast<UINT32>(text.size()),format.Get(),(float)width,(float)height,&layout));
             ComPtr<Outlines> outlines; outlines.Attach(new Outlines(factory.Get()));
-            Check(layout->Draw(nullptr,outlines.Get(),0,0));
+            if(original){
+                auto source=entry.path();source.replace_extension(L".outline");
+                auto path=ReadGdiOutline(factory.Get(),source,outlines->bounds);
+                ComPtr<ID2D1TransformedGeometry> transformed;
+                Check(factory->CreateTransformedGeometry(path.Get(),D2D1::Matrix3x2F::Identity(),&transformed));
+                outlines->paths.push_back(transformed);
+            }else Check(layout->Draw(nullptr,outlines.Get(),0,0));
             auto ms = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
             DWRITE_TEXT_METRICS tm; Check(layout->GetMetrics(&tm));
             auto b = outlines->bounds; float bw=b.right-b.left,bh=b.bottom-b.top;
@@ -105,8 +145,10 @@ int wmain(int argc, wchar_t** argv) {
             Check(target->CreateSolidColorBrush(D2D1::ColorF(0,0,0,170.f/255),&shadow));
             ComPtr<ID2D1StrokeStyle> stroke; auto props=D2D1::StrokeStyleProperties();props.lineJoin=D2D1_LINE_JOIN_ROUND;
             Check(factory->CreateStrokeStyle(props,nullptr,0,&stroke));
+            float x=(width-bw*scale)/2,y=(height-bh*scale)/2;
+            if(original && scale==1){x=std::round(x);y=std::round(y);}
             auto transform = D2D1::Matrix3x2F::Translation(-b.left,-b.top)*D2D1::Matrix3x2F::Scale(scale,scale)*
-                D2D1::Matrix3x2F::Translation((width-bw*scale)/2,(height-bh*scale)/2);
+                D2D1::Matrix3x2F::Translation(x,y);
             target->BeginDraw();target->Clear(D2D1::ColorF(22.f/255,29.f/255,46.f/255));
             target->SetTransform(transform*D2D1::Matrix3x2F::Translation(scale,2*scale));
             for(auto const& path:outlines->paths)target->FillGeometry(path.Get(),shadow.Get());
@@ -116,7 +158,7 @@ int wmain(int argc, wchar_t** argv) {
                 target->FillGeometry(path.Get(),white.Get());
             }
             Check(target->EndDraw());
-            auto output = folder / (entry.path().stem().wstring()+L"-directwrite.png");
+            auto output = folder / (entry.path().stem().wstring()+(original?L"-gdi-outline.png":L"-directwrite.png"));
             ComPtr<IWICStream> stream;Check(wic->CreateStream(&stream));Check(stream->InitializeFromFilename(output.c_str(),GENERIC_WRITE));
             ComPtr<IWICBitmapEncoder> encoder;Check(wic->CreateEncoder(GUID_ContainerFormatPng,nullptr,&encoder));Check(encoder->Initialize(stream.Get(),WICBitmapEncoderNoCache));
             ComPtr<IWICBitmapFrameEncode> frame;Check(encoder->CreateNewFrame(&frame,nullptr));Check(frame->Initialize(nullptr));Check(frame->SetSize(width,height));

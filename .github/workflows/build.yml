@@ -42,6 +42,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\tools\bin\Release\TextQualityProbe.exe tools/text-quality
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\tools\bin\Release\TextQualityProbe.exe tools/text-quality gdi-outlines
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build isolated rendering benchmarks
         run: |
           msbuild tools/GdiRenderBenchmark.csproj /p:Configuration=Release

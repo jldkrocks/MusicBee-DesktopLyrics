@@ -23,9 +23,9 @@ class TextQualityFixtures {
   string[] texts={"Current lyrics stay readable while the music and dancers move", "An English translation with enough words to test wrapping above the main lyrics", "光の中で踊り続ける　次の歌が聞こえる", "Café, déjà vu: a\u0301 e\u0301 and flowing ffi letters", "مرحبا بالعالم والموسيقى"};
   using(var form=(Form)ctor.Invoke(values)) {
    var log=new StringBuilder("id,gdi_width,gdi_height,gdi_prepare_ms,lines,font,points,scale\n");
-   for(int k=0;k<texts.Length;k++)foreach(int width in new[]{280,1400})foreach(float scale in new[]{1f,1.12f}) {
+   for(int k=0;k<texts.Length;k++)foreach(int width in new[]{280,1400})foreach(float scale in new[]{.63f,.8f,1f,1.12f}) {
     int height=width==280?100:340;float points=width==280?22:68;
-    string id=(width==280?"small":"4k")+"-"+k+"-"+(scale==1?"native":"scaled");
+    string id=(width==280?"small":"4k")+"-"+k+"-"+(scale==1?"native":scale==1.12f?"scaled":scale==.63f?"preview":"moving");
     using(var image=new Bitmap(width,height,PixelFormat.Format32bppPArgb))using(var g=Graphics.FromImage(image)) {
      g.Clear(Color.FromArgb(22,29,46));var area=new RectangleF(0,0,width,height);
      var timer=Stopwatch.StartNew();
@@ -38,6 +38,14 @@ class TextQualityFixtures {
      var c=CultureInfo.InvariantCulture;
      string header=width+"\n"+height+"\n"+fitted.ToString(c)+"\n"+((int)font.Style)+"\n"+font.FontFamily.Name+"\n"+scale.ToString(c)+"\n";
      File.WriteAllText(Path.Combine(folder,id+".fixture"),header+wrapped,Encoding.Unicode);
+     // Export the actual production-shaped path, not independently shaped text.
+     var path=(System.Drawing.Drawing2D.GraphicsPath)Get(geo,"Path");
+     var pathPoints=path.PathPoints;var pathTypes=path.PathTypes;
+     using(var writer=new BinaryWriter(File.Create(Path.Combine(folder,id+".outline")))) {
+      writer.Write(0x314F4447);writer.Write((int)path.FillMode);writer.Write(pathPoints.Length);
+      writer.Write(bounds.Left);writer.Write(bounds.Top);writer.Write(bounds.Right);writer.Write(bounds.Bottom);
+      for(int p=0;p<pathPoints.Length;p++){writer.Write(pathPoints[p].X);writer.Write(pathPoints[p].Y);writer.Write(pathTypes[p]);}
+     }
      log.AppendFormat(c,"{0},{1:F3},{2:F3},{3:F3},{4},{5},{6:F3},{7}\n",id,bounds.Width,bounds.Height,timer.Elapsed.TotalMilliseconds,wrapped.Split('\n').Length,font.FontFamily.Name,fitted,scale);
     }
    }
