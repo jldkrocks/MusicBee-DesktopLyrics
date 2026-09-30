@@ -40,8 +40,10 @@ namespace MusicBeePlugin
                 _priority[character] = frame / 3;
                 if (!_running && HasWork()) {
                     _running = true;
-                    Task.Factory.StartNew(Prepare, System.Threading.CancellationToken.None,
-                        TaskCreationOptions.DenyChildAttach, Scheduler);
+                    try {
+                        Task.Factory.StartNew(Prepare, System.Threading.CancellationToken.None,
+                            TaskCreationOptions.DenyChildAttach, Scheduler);
+                    } catch { _running = false; throw; }
                 }
             }
         }

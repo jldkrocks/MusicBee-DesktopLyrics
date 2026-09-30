@@ -42,8 +42,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\tools\bin\Release\TextQualityProbe.exe tools/text-quality
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build isolated GDI rendering benchmark
-        run: msbuild tools/GdiRenderBenchmark.csproj /p:Configuration=Release
+      - name: Build isolated rendering benchmarks
+        run: |
+          msbuild tools/GdiRenderBenchmark.csproj /p:Configuration=Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          msbuild tools/DancerPreparationBenchmark.csproj /p:Configuration=Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check GPU composition or safe hardware fallback in both architectures
         run: |
           foreach ($arch in @('x86', 'x64')) {
@@ -61,6 +65,7 @@ jobs:
             pkg/*.zip
             tools/bin/Release/GpuRenderProbe.exe
             tools/bin/Release/GdiRenderBenchmark.exe
+            tools/bin/Release/DancerPreparationBenchmark.exe
             tools/bin/Release/TextQuality*.exe
             tools/text-quality/*
           if-no-files-found: error

@@ -83,6 +83,18 @@ class GpuCompositionChecks
                 // managed/native boundary. This does not reset the display driver.
                 RetainedForegroundChecks(assembly,form);
                 DancerChecks(assembly,form);
+                // A raster-worker error must select the same reliable fallback.
+                form.WindowState=FormWindowState.Maximized;Set(form,"_partyVisualValid",true);
+                Check((bool)Call(form,"TryDrawGpu"),"Preparation failure fixture could not start");
+                var failedPreparation=Get(Get(form,"_gpu"),"_dancerPreparation");
+                lock(Get(failedPreparation,"_gate"))Set(failedPreparation,"_failure",new InvalidOperationException("injected raster failure"));
+                Check(!(bool)Call(form,"TryDrawGpu") && Get(form,"_gpu")==null && (bool)Get(form,"_gpuFailed"),"Preparation exception must release GPU and latch GDI fallback");
+                var stopped=Stopwatch.StartNew();
+                while((bool)Get(failedPreparation,"_running") && stopped.ElapsedMilliseconds<5000)System.Threading.Thread.Sleep(1);
+                Check(((Bitmap[])Get(failedPreparation,"_sources")).All(b=>b==null),"In-flight disposal retained source bitmaps");
+                Check(((Bitmap[])Get(failedPreparation,"_ready")).All(b=>b==null),"In-flight disposal retained pose bitmaps");
+                Set(form,"_partyVisualValid",false);Set(form,"_gpuFailed",false);
+                Check((bool)Call(form,"TryDrawGpu"),"Independent device-loss fixture could not restart");
                 gpu=Get(form,"_gpu");var draw=gpu.GetType().GetField("_draw",Flags);
                 var parameters=draw.FieldType.GetMethod("Invoke").GetParameters().Select(p=>Expression.Parameter(p.ParameterType,p.Name)).ToArray();
                 draw.SetValue(gpu,Expression.Lambda(draw.FieldType,Expression.Constant(unchecked((int)0x8899000C)),parameters).Compile());
