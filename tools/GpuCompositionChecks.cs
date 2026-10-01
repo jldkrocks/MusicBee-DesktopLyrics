@@ -84,14 +84,16 @@ class GpuCompositionChecks
                     Call(owner,"OpenPartyTempoMap");editor=(Form)Get(owner,"_tempoMapEditor");
                     Check(editor!=null && (bool)Get(editor,"OwnerPresents"),"Owned editor must share presentation");
                     Check(Get(editor,"_cursorPacer")==null,"Owned editor must not start a competing frame worker");
+                    // Cold GPU/font startup on a hosted runner is not the
+                    // steady-state message-loop interval being measured.
+                    clock.Restart();timer.Start();
                 };
                 timer.Tick+=(s,e)=>{ticks++;if(clock.ElapsedMilliseconds>=2000)owner.Close();};
-                timer.Start();
                 using(var watchdog=new System.Threading.Timer(_=>{
                     try { owner.BeginInvoke(new Action(()=>{timedOut=true;owner.Close();})); }
                     catch(InvalidOperationException) { }
                 },null,6000,System.Threading.Timeout.Infinite)) Application.Run(owner);
-                Check(!timedOut && ticks>=5,"Editor presentation starved the UI timer");
+                Check(!timedOut && ticks>=5,"Editor presentation starved the UI timer: ticks="+ticks+", watchdog="+timedOut);
                 Check(editor!=null && editor.IsDisposed,"Owned editor must dispose when owner closes");
             }
             using(var settingsForm=new FrmSettings(settings)) {
