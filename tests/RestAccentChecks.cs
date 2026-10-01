@@ -80,8 +80,9 @@ internal static class RestAccentChecks
             ((Button)Field(editor, "_add")).PerformClick();
             if (cues.Rows.Count != 2 || grid.Rows.Count != 2) throw new Exception("Add must target the selected tab");
             cues.Rows[1].Cells[4].Value = "Rebound"; cues.Rows[1].Cells[5].Value = "Alternate sides";
+            ((CheckBox)Field(editor, "_flowAccents")).Checked = true;
             Call(editor, "SaveMap");
-            if (saved == null || saved.Version != 7 || saved.Accents.Count != 2 || saved.Accents[1].EffectivePose != PartyAccentPose.Alternate || editor.IsDisposed) throw new Exception("Save must preserve both tabs and keep editor open");
+            if (saved == null || saved.Version != 8 || !saved.FlowAccentSequences || saved.Accents.Count != 2 || saved.Accents[1].EffectivePose != PartyAccentPose.Alternate || editor.IsDisposed) throw new Exception("Save must preserve both tabs and keep editor open");
             Near(saved.Accents[1].TimeSeconds, 5.25, "Capture cue at playhead");
             var timeline = (PartyTimeline)Field(editor, "_timeline");
             if (timeline.Accents.Count != 2 || timeline.Markers[1].Style != PartyDanceStyle.Rest) throw new Exception("Timeline markers missing");

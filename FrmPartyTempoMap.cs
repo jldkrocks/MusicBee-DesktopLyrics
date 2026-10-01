@@ -15,6 +15,7 @@ namespace MusicBeePlugin
         private DataGridView ActiveGrid => _tabs.SelectedIndex == 1 ? _accentGrid : _grid;
         private readonly ContextMenuStrip _rowMenu = new ContextMenuStrip();
         private readonly CheckBox _enabled = new CheckBox();
+        private readonly CheckBox _flowAccents = new CheckBox();
         private readonly PartyTempoMap _source;
         private readonly Func<double?> _position;
         private readonly Action<int> _seek;
@@ -205,11 +206,11 @@ namespace MusicBeePlugin
             AddButton(actions, "Close", () => Close());
             _status.Text = "Diamonds select sections; gold circles select accents. Save applies both tabs and keeps this window open.";
             _status.ForeColor = Color.FromArgb(178, 192, 212);
-            help.Text = "Overview: drag or scroll to pan. Wheel over detail to zoom. Detail: drag gold accents; Shift-drag a loop. Hover for help.";
+            help.Text = "Overview: drag or scroll to pan. Wheel over detail to zoom. Detail: drag empty space to pan, gold accents to edit; Shift-drag a loop. Hover for help.";
             _tips.SetToolTip(_seekStep, "Seconds moved by - step and + step. Pause for precise placement; 0.01 s is the smallest step.");
             _tips.SetToolTip(_seekTime, "Exact song position in seconds. Enter or Seek moves playback without changing your rows.");
             _tips.SetToolTip(_enabled, "Apply this song's saved sections and accent cues. Uncheck to use its ordinary BPM settings.");
-            _tips.SetToolTip(_timeline, "Diamonds select sections; gold circles select accent cues. Both seek to their saved time. Drag the playhead to seek. Blue = Normal, purple = Side to side, grey = Hold, teal = Rest.");
+            _tips.SetToolTip(_timeline, "Diamonds select sections; gold circles select accent cues. Both seek to their saved time. Click empty space to seek; drag empty space to pan at the current zoom. Drag the playhead to seek. Shift-drag selects a loop. Blue = Normal, purple = Side to side, grey = Hold, teal = Rest.");
             _tips.SetToolTip(_add, "Add a section or accent at the playhead, depending on the selected tab. Pause and fine-seek first for exact placement. Save applies the new row.");
             SetupAccentGrid(map);
             SetupRowMenu();
@@ -252,7 +253,12 @@ namespace MusicBeePlugin
             detail.Controls.Add(_overview,0,0);detail.Controls.Add(_timeline,0,1);detail.Controls.Add(editing,0,2);
             layout.Controls.Add(help, 0, 0); layout.Controls.Add(detail, 0, 1);
             layout.Controls.Add(transport, 0, 2); layout.Controls.Add(_tabs, 0, 3);
-            layout.Controls.Add(_enabled, 0, 4); layout.Controls.Add(_status, 0, 5); layout.Controls.Add(actions, 0, 6);
+            var mapOptions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+            _enabled.Dock = DockStyle.None; _enabled.AutoSize = true;
+            _flowAccents.Text = "Flow accent sequences"; _flowAccents.AutoSize = true; _flowAccents.Checked = map.FlowAccentSequences;
+            _tips.SetToolTip(_flowAccents, "During Hold/Rest, the first Alternate hit keeps the starting side, then each Alternate flips from the preceding cue. Current/Left/Right cues also establish the side. On returning to dance with Align off, an opposing release pose uses a short centre bridge. Hit times, BPM and beat phase stay unchanged. Off preserves legacy choreography. Save applies.");
+            mapOptions.Controls.Add(_enabled); mapOptions.Controls.Add(_flowAccents);
+            layout.Controls.Add(mapOptions, 0, 4); layout.Controls.Add(_status, 0, 5); layout.Controls.Add(actions, 0, 6);
             Controls.Add(layout);
             _grid.CellValueChanged += (sender, args) => { RefreshSwingCells(); MarkDirty(); };
             _grid.CellToolTipTextNeeded += (sender, args) =>
@@ -274,6 +280,7 @@ namespace MusicBeePlugin
             _accentGrid.CellDoubleClick += SeekDoubleClickedRow;
             _grid.SelectionChanged += (sender, args) => RefreshMarkers();
             _enabled.CheckedChanged += (sender, args) => MarkDirty();
+            _flowAccents.CheckedChanged += (sender, args) => MarkDirty();
             _timer.Tick += (sender, args) => PollPlayback();
             Shown += (sender, args) => { RefreshMarkers(); PollPlayback(); _timer.Start(); };
             FormClosing += (sender, args) =>
@@ -688,7 +695,7 @@ namespace MusicBeePlugin
         {
             _grid.EndEdit(); _accentGrid.EndEdit();
             NormalizeLastPoint();
-            var map = new PartyTempoMap { Version = 7, TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
+            var map = new PartyTempoMap { Version = 8, FlowAccentSequences = _flowAccents.Checked, TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
             foreach (DataGridViewRow row in _grid.Rows)
                 map.Sections.Add(new PartyTempoSection { StartSeconds = Number(row, 0),
                     Bpm = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? Number(row, 9) : Number(row, 1),

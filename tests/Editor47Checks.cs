@@ -55,7 +55,7 @@ internal static class Editor47Checks
     var sections=(DataGridView)Field(form,"_grid");var cues=(DataGridView)Field(form,"_accentGrid");
     Check(Convert.ToString(cues.Rows[0].Cells[4].Value)=="Rebound" && Convert.ToString(cues.Rows[0].Cells[5].Value)=="Alternate sides","Legacy directional cue must migrate to both independent controls.");
     cues.CurrentCell=cues.Rows[0].Cells[0];Call(form,"CopyTimeToOtherTab",cues);Check(sections.Rows.Count==3 && seeks==0,"Copying accent time must add a section without seeking.");
-    Call(form,"SaveMap");Check(saved!=null&&saved.Version==7,"New map must save.");
+    Call(form,"SaveMap");Check(saved!=null&&saved.Version==8,"New map must save.");
     for(double t=0;t<12;t+=.013)Check(Math.Abs(source.At(t).Bpm-saved.At(t).Bpm)<1e-6 && Math.Abs(source.At(t).Beat-saved.At(t).Beat)<1e-6,"Inserting a section must preserve linked/custom ramp integration.");
     Call(form,"CopyTimeToOtherTab",cues);Check(sections.Rows.Count==3,"Existing section must be selected, not duplicated.");
     sections.CurrentCell=sections.Rows[1].Cells[0];Call(form,"CopyTimeToOtherTab",sections);

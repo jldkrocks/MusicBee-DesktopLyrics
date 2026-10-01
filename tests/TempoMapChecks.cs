@@ -127,6 +127,34 @@ internal static class TempoMapChecks
     internal static void Run()
     {
         var countInMap = CheckCountIn();
+        var flow=new PartyTempoMap {Version=8,TrackUrl="flow",FlowAccentSequences=true,Sections={
+            new PartyTempoSection {Bpm=120,Style=PartyDanceStyle.Rest},
+            new PartyTempoSection {StartSeconds=2.1,Bpm=120}},Accents={
+            new PartyAccentCue {TimeSeconds=1,Pose=PartyAccentPose.Alternate,NewHitPriority=true},
+            new PartyAccentCue {TimeSeconds=1.2,Pose=PartyAccentPose.Alternate,NewHitPriority=true},
+            new PartyAccentCue {TimeSeconds=1.4,Pose=PartyAccentPose.Alternate,NewHitPriority=true},
+            new PartyAccentCue {TimeSeconds=2.05,Pose=PartyAccentPose.Alternate,NewHitPriority=true}}};
+        flow.Validate();
+        if(flow.At(1).Frame!=0 || flow.At(1.2).Frame!=6 || flow.At(1.4).Frame!=0 || flow.At(2.05).Frame!=6)
+            throw new Exception("Flow must start on held side and alternate every landing.");
+        flow.Accents[0].Pose=PartyAccentPose.Current;
+        if(flow.At(1.2).Frame!=6 || flow.At(2.05).Frame!=6)throw new Exception("Current first cue must not flip later alternation.");
+        if(flow.At(2.26).Frame!=6 || flow.At(2.28).Frame!=9 || flow.At(2.51).Frame!=3)
+            throw new Exception("Opposite release must bridge through centre then rejoin the next scheduled pose.");
+        var reproduced=JsonConvert.DeserializeObject<PartyTempoMap>(JsonConvert.SerializeObject(flow));
+        if(!reproduced.FlowAccentSequences || reproduced.At(2.28).Frame!=9)throw new Exception("Flow must persist and work when seeking directly.");
+        flow.FlowAccentSequences=false;
+        if(flow.At(1.2).Frame!=6 || flow.At(1.4).Frame!=0)throw new Exception("Legacy alternate must remain unchanged when disabled.");
+        for(double t=0;t<4;t+=.031)Near(flow.At(t).Beat,reproduced.At(t).Beat,"Flow must never alter phase");
+        reproduced.InitialBeat=2;
+        reproduced.Accents[0].Pose=PartyAccentPose.Alternate;
+        if(reproduced.At(1).Frame!=6 || reproduced.At(1.2).Frame!=0)throw new Exception("Flow must anchor to either starting side, not always left.");
+        reproduced.Sections[0].Style=PartyDanceStyle.Hold;
+        if(reproduced.At(1).Frame!=6 || reproduced.At(1.2).Frame!=0)throw new Exception("Hold entry must support the same alternation.");
+        reproduced.Sections[0].Style=PartyDanceStyle.Rest;reproduced.InitialBeat=0;
+        reproduced.Sections[1].AlignBeat=true;
+        if(reproduced.At(2.28).Frame!=6)throw new Exception("Explicit align must retain its chosen pose");
+
         var overlap=new PartyTempoMap {TrackUrl="priority",Sections={new PartyTempoSection {Bpm=120,Style=PartyDanceStyle.Rest}},Accents={
             new PartyAccentCue {TimeSeconds=1,Strength=2.5,HoldSeconds=1,Pose=PartyAccentPose.Left},
             new PartyAccentCue {TimeSeconds=1.07,Strength=1.7,Pose=PartyAccentPose.Right}}};

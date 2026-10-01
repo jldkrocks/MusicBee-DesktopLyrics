@@ -45,6 +45,13 @@ namespace MusicBeePlugin
         private int _dragX;
         private bool _accentDragging, _panning;
         private double _panStart;
+        private bool _detailPending, _detailPanning;
+        private double _panSpan;
+        private void PanDetail(int x)
+        {
+            ViewStart = Math.Max(0, Math.Min(Duration - _panSpan, _panStart - (x - _panX) * _panSpan / Math.Max(1, Width - MarginX * 2)));
+            ViewPanned?.Invoke(ViewStart); Invalidate();
+        }
         private int _panX;
         internal event Action<double> ViewPanned;
         private void Pan(double start)
@@ -57,7 +64,7 @@ namespace MusicBeePlugin
         }
         internal void ZoomAt(double factor, int x)
         {
-            if (Duration <= 0 || _dragAccent != null || _envelope != null || _selectingLoop) return;
+            if (Duration <= 0 || _dragAccent != null || _envelope != null || _selectingLoop || _detailPending || _detailPanning || _panning) return;
             var fraction = SecondsAt(x, Width, 1);
             var anchor = ViewStart + fraction * Span;
             ViewLength = Math.Min(Duration, Math.Max(.5, Span * factor));
@@ -237,12 +244,22 @@ namespace MusicBeePlugin
                 Position = Math.Max(0, Math.Min(Duration, nearest.Seconds));
                 SeekRequested?.Invoke(Position); Invalidate(); return;
             }
+            if (Math.Abs(X(Position) - e.X) > 6 || e.Y < 29 || e.Y > 62)
+            {
+                _detailPending = true; _panStart = ViewStart; _panSpan = Span; _panX = e.X; Capture = true; return;
+            }
             Scrubbing = true; Capture = true;
             Position = At(e.X); Invalidate();
         }
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            if (_detailPending || _detailPanning)
+            {
+                if (Math.Abs(e.X - _panX) > 3) _detailPanning = true;
+                if (_detailPanning) { _detailPending = false; Cursor = Cursors.Hand; PanDetail(e.X); }
+                return;
+            }
             if (_envelope != null) { MoveEnvelope(e.X); Invalidate(); return; }
             if (_panning) { Pan(_panStart + (e.X - _panX) * Duration / Math.Max(1, Width - MarginX * 2)); return; }
             if(_selectingLoop){LoopStart=Math.Min(_loopAnchor,At(e.X));LoopEnd=Math.Max(_loopAnchor,At(e.X));Invalidate();return;}
@@ -258,6 +275,14 @@ namespace MusicBeePlugin
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if ((_detailPending || _detailPanning) && e.Button == MouseButtons.Left)
+            {
+                bool dragged = _detailPanning;
+                if (dragged) PanDetail(e.X);
+                _detailPending = _detailPanning = false; Capture = false; Cursor = Cursors.Default;
+                if (!dragged) { Position = At(e.X); SeekRequested?.Invoke(Position); Invalidate(); }
+                return;
+            }
             if (_envelope != null && e.Button==MouseButtons.Left) {
                 MoveEnvelope(e.X);var cue=_envelope;_envelope=null;Capture=false;
                 EnvelopeChanged?.Invoke(cue.Row,cue.Prepare,cue.Hold,cue.Recovery);Invalidate();return;
@@ -270,7 +295,7 @@ namespace MusicBeePlugin
             SeekRequested?.Invoke(Position); Invalidate();
         }
         protected override void OnMouseCaptureChanged(EventArgs e)
-        { base.OnMouseCaptureChanged(e); if (!Capture) {_panning=false;_selectingLoop=false;Scrubbing = false;
+        { base.OnMouseCaptureChanged(e); if (!Capture) {_detailPending=_detailPanning=false;Cursor=Cursors.Default;_panning=false;_selectingLoop=false;Scrubbing = false;
             if(_envelope!=null){_envelope.Prepare=_prepareOriginal;_envelope.Hold=_holdOriginal;_envelope.Recovery=_recoveryOriginal;_envelope=null;}if(_dragAccent!=null)_dragAccent.Seconds=_dragOriginal;_dragAccent=null;Invalidate();} }
         protected override void OnMouseWheel(MouseEventArgs e)
         {
@@ -285,7 +310,7 @@ namespace MusicBeePlugin
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e); if (Duration <= 0 || !Enabled) return;
-            if(e.KeyCode==Keys.Escape && (_dragAccent!=null || _envelope!=null)){Capture=false;e.Handled=true;return;}
+            if(e.KeyCode==Keys.Escape && (_dragAccent!=null || _envelope!=null || _detailPending || _detailPanning)){Capture=false;e.Handled=true;return;}
             if(EditAccents && SelectedAccent>=0 && (e.KeyCode==Keys.Left||e.KeyCode==Keys.Right)){
                 var cue=Accents.Find(c=>c.Row==SelectedAccent);if(cue!=null)AccentMoved?.Invoke(cue.Row,Math.Round(Math.Max(0,Math.Min(Duration,cue.Seconds+(e.KeyCode==Keys.Left?-1:1)*(e.Shift?.001:.01))),3));
                 e.Handled=true;e.SuppressKeyPress=true;return;

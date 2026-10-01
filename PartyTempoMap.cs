@@ -46,6 +46,7 @@ namespace MusicBeePlugin
     {
         public int Version = 1;
         public bool Enabled = true;
+        public bool FlowAccentSequences;
         public string TrackUrl;
         public double InitialBeat;
         public List<PartyAccentCue> Accents = new List<PartyAccentCue>();
@@ -53,7 +54,7 @@ namespace MusicBeePlugin
 
         internal void Validate()
         {
-            if ((Version != 1 && Version != 2 && Version != 3 && Version != 4 && Version != 5 && Version != 6 && Version != 7) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
+            if ((Version != 1 && Version != 2 && Version != 3 && Version != 4 && Version != 5 && Version != 6 && Version != 7 && Version != 8) || string.IsNullOrWhiteSpace(TrackUrl) || Sections == null ||
                 Sections.Count == 0 || Sections.Count > 500 || !Finite(InitialBeat))
                 throw new ArgumentException("The map needs a song and 1-500 sections.");
             if (Accents == null || Accents.Count > 1000)
@@ -115,6 +116,11 @@ namespace MusicBeePlugin
             PartyAccentCue strongest = null;
             double weight = 0, amount = 0;
             int alternateIndex = 0, chosenSide = 0;
+            int sectionIndex = -1, sequenceFrame = 0, sequenceCount = 0;
+            bool inSequence = false;
+            PartyAccentCue lastSequenceCue = null;
+            int lastSequenceFrame = 0;
+            double sequenceEnd = -1;
             var heldStart = -1d;
             if (pose.Held)
                 foreach (var section in Sections)
@@ -132,6 +138,41 @@ namespace MusicBeePlugin
             {
                 var side = cue.EffectivePose == PartyAccentPose.Left ? -1 : cue.EffectivePose == PartyAccentPose.Right ? 1 :
                     cue.EffectivePose == PartyAccentPose.Alternate ? ((alternateIndex++ % 2 == 0) ? -1 : 1) : 0;
+                if (FlowAccentSequences)
+                {
+                    while (sectionIndex + 1 < Sections.Count && Sections[sectionIndex + 1].StartSeconds <= cue.TimeSeconds)
+                    {
+                        var s = Sections[++sectionIndex];
+                        bool held = s.Style == PartyDanceStyle.Hold || s.Style == PartyDanceStyle.Rest;
+                        if (held && !inSequence)
+                        {
+                            sequenceFrame = CoreAt(s.StartSeconds).Frame;
+                            sequenceCount = 0;
+                        }
+                        inSequence = held;
+                    }
+                    if (inSequence)
+                    {
+                        if (cue.EffectivePose == PartyAccentPose.Alternate)
+                        {
+                            // First landing keeps the entry side. Current/explicit cues also
+                            // participate, so replacing the first cue does not flip the rest.
+                            if (sequenceFrame != 0 && sequenceFrame != 6) sequenceFrame = 0;
+                            if (sequenceCount > 0) sequenceFrame = (sequenceFrame + 6) % 12;
+                            side = sequenceFrame == 6 ? -1 : 1;
+                        }
+                        else if (side != 0) sequenceFrame = side < 0 ? 6 : 0;
+                        sequenceCount++;
+                        if (cue.TimeSeconds <= seconds)
+                        {
+                            lastSequenceCue = cue; lastSequenceFrame = sequenceFrame;
+                            int next = sectionIndex + 1;
+                            while (next < Sections.Count && (Sections[next].Style == PartyDanceStyle.Hold || Sections[next].Style == PartyDanceStyle.Rest)) next++;
+                            sequenceEnd = next < Sections.Count && !Sections[next].AlignBeat ? Sections[next].StartSeconds : -1;
+                        }
+                    }
+                    else if (cue.TimeSeconds <= seconds) lastSequenceCue = null;
+                }
                 if (pose.Held && side != 0 && cue.TimeSeconds >= heldStart && cue.TimeSeconds <= seconds)
                     pose.Frame = side < 0 ? 6 : 0;
                 if(cue.TimeSeconds<cutoff)continue;
@@ -142,6 +183,20 @@ namespace MusicBeePlugin
                     relative <= cue.HoldSeconds ? 1 : 1 - SmoothStep((relative - cue.HoldSeconds) / release);
                 if (envelope * cue.Strength <= amount) continue;
                 strongest = cue; weight = envelope; amount = envelope * cue.Strength; chosenSide = side;
+            }
+            if (FlowAccentSequences && !pose.Held && lastSequenceCue != null && sequenceEnd >= 0 && seconds >= sequenceEnd)
+            {
+                // Bridge only the release slot, never change the beat clock or later poses.
+                double release = Math.Max(sequenceEnd, lastSequenceCue.TimeSeconds + lastSequenceCue.HoldSeconds + lastSequenceCue.EffectiveRecovery);
+                if (seconds >= release && seconds < release + 2)
+                {
+                    var start = CoreAt(release);
+                    bool sameSection = true;
+                    foreach (var s in Sections) if (s.StartSeconds > sequenceEnd && s.StartSeconds <= seconds) { sameSection = false; break; }
+                    if (sameSection && pose.Frame == start.Frame && pose.Beat - start.Beat < 1 &&
+                        (start.Frame == 0 || start.Frame == 6) && start.Frame != lastSequenceFrame)
+                        pose.Frame = lastSequenceFrame == 6 ? 9 : 3;
+                }
             }
             if (strongest != null)
             {
@@ -175,7 +230,7 @@ namespace MusicBeePlugin
                     seconds < strongest.TimeSeconds + strongest.HoldSeconds)
                     pose.Frame = CoreAt(strongest.TimeSeconds).Frame;
             }
-            if (strongest == null && !pose.Held) EaseRestExit(ref pose, seconds);
+            if (!FlowAccentSequences && strongest == null && !pose.Held) EaseRestExit(ref pose, seconds);
             return pose;
         }
 

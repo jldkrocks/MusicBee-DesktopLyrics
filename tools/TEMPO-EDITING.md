@@ -32,3 +32,14 @@ The blue waveform now shows an average-energy body inside thin peak outlines. Th
 In Accent cues, enable **New hit wins** on a hit that should interrupt earlier accents. The interruption occurs at that hit's exact timestamp. Its preparation before the hit retains existing overlap behavior; after the interruption, older holds/recoveries do not return. Future cues still follow their own settings. The setting defaults off and never changes beat integration or song data by itself. Use Save to persist it, or Loop preview to audition without saving.
 
 For the recorded 99.9 opening, the first two saved accents are 70ms apart. Try New hit wins on the second accent so the stronger first recovery cannot suppress it. A shorter first recovery may still give a clearer movement; this option does not invent an extra upward bounce between closely spaced hits.
+
+
+## Accent continuity and drag navigation (1.15.68)
+
+Enable **Flow accent sequences** beside Use this map, then Save (or audition with Loop preview). It is saved per song and defaults off for existing maps. During a continuous Hold/Rest passage, the first Alternate cue lands on the starting side; later Alternate cues switch from the preceding cue. Current and explicit Left/Right cues participate too, so changing the first cue to Current does not reverse the remaining alternation. If the entry pose is central, Alternate starts on the right-hit pose. A new Hold/Rest passage starts a new sequence. Accents outside Hold/Rest retain their original behavior.
+
+When dancing resumes with Align off, an accent recovery that would jump directly to the opposite side uses a centre pose for that release slot, then rejoins the scheduled dance. This is a pose bridge, not a fade or a BPM/beat-phase adjustment. Explicit Align takes precedence. Existing recovery durations and New hit wins still control overlapping accents.
+
+For the 99.9 opening, try Flow accent sequences ON, Alternate sides on all opening hits, New hit wins on each subsequent closely spaced hit, and Align OFF on the returning dance section. Keep your carefully placed times. First-current/rest-alternate also works. Save keeps the editor open; turning Flow off restores the old choreography.
+
+Drag empty space in the detailed timeline or waveform to move the visible range, like dragging a sheet of paper. Drag right to reveal earlier time, left for later time. The same pixel distance moves fewer seconds when zoomed in. A click without dragging still seeks. Dragging the playhead still seeks; gold markers move accents; white handles edit durations; Shift-drag selects a loop. Wheel zoom remains centred under the pointer. Panning never edits song data or seeks playback. Waveform decoding refreshes after navigation settles.

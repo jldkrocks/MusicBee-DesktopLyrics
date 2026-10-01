@@ -23,11 +23,30 @@ internal static class TimelineChecks
             timeline.SeekRequested += time => { seeks++; seek = time; };
             Call(timeline, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, 118, 39, 0));
             if (selected != 7 || seek != 50 || timeline.Scrubbing) throw new Exception("Marker clicks must select and seek, not drag a section.");
-            Call(timeline, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, 28, 60, 0));
+            Call(timeline, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, 118, 60, 0));
             Call(timeline, "OnMouseMove", new MouseEventArgs(MouseButtons.Left, 0, 218, 60, 0));
             if (seeks != 1) throw new Exception("Scrubbing must not flood the player with seek calls.");
             Call(timeline, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, 218, 60, 0));
             if (seek != 100 || seeks != 2 || timeline.Markers[0].Seconds != 50) throw new Exception("Release seeks without moving markers.");
+        }
+        using(var t=new PartyTimeline {Width=236,Duration=100,ViewStart=20,ViewLength=10}) {
+            int seeks=0;t.SeekRequested+=v=>seeks++;
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,118,110,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,158,110,0));
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,158,110,0));
+            if(t.ViewStart!=18 || t.ViewLength!=10 || seeks!=0)throw new Exception("Detail pan must move with content at current zoom and never seek.");
+            t.ViewLength=1;
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,118,110,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,158,110,0));
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,158,110,0));
+            if(Math.Abs(t.ViewStart-17.8)>1e-8)throw new Exception("Pan speed must follow zoom.");
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,118,110,0));
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,118,110,0));
+            if(seeks!=1 || Math.Abs(t.Position-18.3)>1e-8)throw new Exception("Empty click still seeks.");
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,118,110,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,99999,110,0));
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,99999,110,0));
+            if(t.ViewStart!=0 || seeks!=1)throw new Exception("Pan must clamp without seeking.");
         }
         using(var timeline=new PartyTimeline {Width=236,Duration=100,Position=50,EditAccents=true}) {
             timeline.Zoom(.1);
@@ -105,7 +124,7 @@ internal static class TimelineChecks
                 throw new Exception("Save must apply without closing the editor.");
             var grid = (DataGridView)Field(editor, "_grid");
             if (Convert.ToString(grid.Rows[0].Cells[3].Value) != "Normal" || Convert.ToString(grid.Rows[0].Cells[8].Value) != "Half (0.5x)" ||
-                last.Sections[0].Style != PartyDanceStyle.Normal || last.Sections[0].Speed != 0.5 || last.Version != 7)
+                last.Sections[0].Style != PartyDanceStyle.Normal || last.Sections[0].Speed != 0.5 || last.Version != 8)
                 throw new Exception("Editor must preserve legacy Half speed as an independent speed choice.");
             if (!Convert.ToBoolean(grid.Rows[1].Cells[5].Value) || !last.Sections[1].CountIn)
                 throw new Exception("Editor must load and save the count-in checkbox.");
