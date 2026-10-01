@@ -1,3 +1,13 @@
+## KoreKara, 1.15.72
+
+Starting BPM edits only the first point and enables the map. Save applies it. Tap BPM estimates that value. Align beat now marks the clicked moment for a single Normal section without row alignment; Save applies. Multi-section maps retain row Align and start timestamps. Both Shift-click and Ctrl-click PARTY open the map. The separate Party BPM dialog is removed.
+
+The timeline uses the existing bounded presentation pacer at120Hz, with timer fallback. After seeking, its provisional target is protected until three fresh near-target player readings arrive, with a1.5second bound. Dancer timing and BPM integration are unchanged.
+
+Settings groups Display, Lyrics and Performance. FPS target, GPU and outline preferences are saved. Font, text/gradient/outline colours and visibility remain. Legacy alignment/background opacity controls are omitted because the current window does not use them. Existing storage and DLL identity remain compatible under the KoreKara display name.
+
+BG mode installs its transparency key before border changes and releases the opaque GPU target. Selected frame pacing now applies to BG's CPU renderer too. This is not a transparent GPU compositor: synthetic drawing at960x540 averaged2.53ms,p992.81; at3840x2160 averaged8.60ms,p9910.61. Steady4K120FPS remains unproven and exceeds the budget in that fixture. Actual flash/smoothness feedback is necessary.
+
 ## Timeline editor, 1.15.71
 
 The left panel groups playback, exact seeking, stepping and loop preview. Sections and Accent cues use dark tabs. Add at playhead stays below the table; **Row actions** contains Delete, Seek to row, Ramp from previous, and copying the selected timestamp to the other tab. Save applies both tabs without closing.

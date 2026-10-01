@@ -105,6 +105,8 @@ namespace MusicBeePlugin
             !_settings.TransparentCanvas && !SystemInformation.TerminalServerSession &&
             ClientSize.Width > 0 && ClientSize.Height > 0;
 
+        private bool HighRatePresentation => GpuEligible || (_settings!=null && _settings.TransparentCanvas &&
+            !_gpuDisabled && !_gpuFailed && !SystemInformation.TerminalServerSession);
         protected override void OnInvalidated(InvalidateEventArgs e)
         {
             if (!_animationInvalidating) _foregroundDirty = true;
@@ -258,9 +260,6 @@ namespace MusicBeePlugin
         private double _partyBpm, _partyTagBpm;
         private int _partyOriginMs;
         // A dialog preview overrides drawing only; saved/live tempo stays intact.
-        private string _partyPreviewTrackUrl;
-        private double _partyPreviewBpm;
-        private int _partyPreviewOriginMs;
         private PartyTempoSource _partyTempoSource;
         private string _partyApiKey, _songAlbum = "", _lastOnlineAttemptTrack,
             _partyLookupError, _partyLookupDetail;
@@ -339,6 +338,7 @@ namespace MusicBeePlugin
             Action<string> englishSaved, PartyTempoStore partyTempoStore, Action<Action> dispatchPlayerCommand = null)
         {
             _settings = settings;
+            _renderTargetFps=settings.RenderTargetFps==60?60:120;_gpuDisabled=settings.DisableGpuRendering;_gpuOutlineText=!settings.UseBitmapLyrics;
             _musicBee = musicBee;
             _playback = new PlaybackSnapshotReader(musicBee);
             _dispatchPlayerCommand = dispatchPlayerCommand ?? (action => System.Threading.ThreadPool.QueueUserWorkItem(_ => action()));
@@ -355,7 +355,7 @@ namespace MusicBeePlugin
             _partyApiKey = _partyTempoStore.LoadApiKey();
             _englishSaved = englishSaved;
             _useArtworkColors = settings.UseArtworkColors;
-            Text = "Desktop Lyrics";
+            Text = "KoreKara";
             FormBorderStyle = FormBorderStyle.Sizable;
             BackColor = Color.FromArgb(13, 18, 32);
             ShowInTaskbar = true;
@@ -432,11 +432,12 @@ namespace MusicBeePlugin
             // The visible cards must be fully opaque so their edges do not
             // blend with the key colour and acquire purple fringes.
             var clientSize = ClientSize;
-            FormBorderStyle = _settings.TransparentCanvas ? FormBorderStyle.None :
-                FormBorderStyle.Sizable;
+            StopAnimation();ReleaseGpu();
+            // Install the key before border/handle changes can expose a colour-key frame.
+            if(_settings.TransparentCanvas){TransparencyKey=ClearKey;BackColor=ClearKey;}
+            else{BackColor=Color.FromArgb(13,18,32);TransparencyKey=Color.Empty;}
+            FormBorderStyle = _settings.TransparentCanvas ? FormBorderStyle.None : FormBorderStyle.Sizable;
             ClientSize = clientSize;
-            TransparencyKey = _settings.TransparentCanvas ? ClearKey : Color.Empty;
-            BackColor = _settings.TransparentCanvas ? ClearKey : Color.FromArgb(13, 18, 32);
             _backgroundCache?.Dispose();
             _backgroundCache = null;
             _spectrumCache?.Dispose(); _spectrumCache = null;
@@ -480,7 +481,7 @@ namespace MusicBeePlugin
         {
             if (!_loaded || _animationDisposed || !Visible || WindowState == FormWindowState.Minimized)
             { StopAnimation(); return; }
-            if (GpuEligible && _framePacerFailure == null)
+            if (HighRatePresentation && _framePacerFailure == null)
             {
                 if (_framePacer == null && IsHandleCreated)
                 {
@@ -519,7 +520,7 @@ namespace MusicBeePlugin
                 }
                 // Re-check remote/transparent mode on the UI thread. Switching
                 // to fallback must also lower the presentation request rate.
-                if (!GpuEligible) ConfigureFramePacing();
+                if (!HighRatePresentation) ConfigureFramePacing();
                 AnimationClockTick(this, EventArgs.Empty);
                 // Flush this invalidation before acknowledging the wakeup.
                 // Posted messages cannot starve WM_PAINT or queue old frames.
@@ -597,6 +598,9 @@ namespace MusicBeePlugin
             var transparentChanged = _settings.TransparentCanvas != settings.TransparentCanvas ||
                 TransparencyKey != (settings.TransparentCanvas ? ClearKey : Color.Empty);
             _settings = settings;
+            var fps=settings.RenderTargetFps==60?60:120;
+            if(_gpuDisabled!=settings.DisableGpuRendering || _gpuOutlineText==settings.UseBitmapLyrics){_gpuDisabled=settings.DisableGpuRendering;_gpuOutlineText=!settings.UseBitmapLyrics;ReleaseGpu();}
+            _renderTargetFps=fps;ConfigureFramePacing();
             ClearTextGeometries();
             if (transparentChanged) ApplyTransparency();
             UpdatePartyDancers();
@@ -618,56 +622,6 @@ namespace MusicBeePlugin
                 ShowCheckMargin = true,
                 Renderer = new DarkMenuRenderer()
             };
-            AddToggle(menu, "Show song title", () => _settings.ShowSongTitle,
-                value => _settings.ShowSongTitle = value);
-            AddToggle(menu, "Show album artwork", () => _settings.ShowAlbumArt,
-                value => _settings.ShowAlbumArt = value);
-            AddToggle(menu, "Show playback controls", () => _settings.ShowTransportControls,
-                value => _settings.ShowTransportControls = value);
-            AddToggle(menu, "Show visualizer", () => _settings.ShowVisualizer,
-                value => _settings.ShowVisualizer = value);
-            AddToggle(menu, "Show queue and history", () => _settings.ShowSongQueue,
-                value => _settings.ShowSongQueue = value);
-            AddToggle(menu, "Match album artwork colours", () => _settings.UseArtworkColors,
-                value => _settings.UseArtworkColors = value);
-            AddToggle(menu, "Preview next lyric", () => _settings.NextLineWhenNoTranslation,
-                value => _settings.NextLineWhenNoTranslation = value);
-            AddToggle(menu, "Show English / translation", () => _settings.ShowTranslation,
-                value => _settings.ShowTranslation = value);
-            menu.Items.Add(new ToolStripSeparator());
-            var outlineToggle = (ToolStripMenuItem)menu.Items.Add("Sharper lyric outlines (experimental)", null, (sender, args) => {
-                _renderProfile?.Finish("text renderer changed; repeat capture"); _gpuOutlineText=!_gpuOutlineText; ReleaseGpu(); Invalidate();
-            });
-            outlineToggle.ToolTipText="Compare vector edges with the existing lyric images. Layout and timing are unchanged. Applies to this window only.";
-            menu.Opening += (sender,args) => { outlineToggle.Checked=_gpuOutlineText; outlineToggle.Enabled=!_gpuDisabled; };
-            var gpuToggle = menu.Items.Add("GPU rendering", null, (sender, args) => {
-                _renderProfile?.Finish("renderer changed; repeat capture");
-                _gpuDisabled = !_gpuDisabled; ReleaseGpu(); ConfigureFramePacing(); Invalidate();
-            }) as ToolStripMenuItem;
-            gpuToggle.ToolTipText = "GPU background, spectrum and lyric composition. Switch off to compare with GDI. Applies to this window only. Transparent canvas and remote desktop use GDI automatically.";
-            menu.Opening += (sender, args) => {
-                gpuToggle.Checked = !_gpuDisabled;
-                gpuToggle.Text = _gpuFailed ? "GPU unavailable: using GDI (" + _gpuFailure + ")" : "GPU rendering";
-            };
-            var frameRate = new ToolStripMenuItem("Animation frame rate");
-            frameRate.DropDown.BackColor = menu.BackColor;
-            frameRate.DropDown.ForeColor = menu.ForeColor;
-            frameRate.DropDown.Renderer = menu.Renderer;
-            foreach (var target in new[] { 60, 120 })
-            {
-                int fps = target;
-                var item = new ToolStripMenuItem(fps + " FPS target");
-                item.ToolTipText = "Applies to this window only. Higher targets use more CPU/GPU. Actual smoothness depends on drawing cost and display refresh. GDI and unsupported systems use the original timer.";
-                item.Click += (sender, args) => {
-                    _renderProfile?.Finish("frame target changed; repeat capture");
-                    _renderTargetFps = fps; ConfigureFramePacing();
-                };
-                menu.Opening += (sender, args) => item.Checked = _renderTargetFps == fps;
-                frameRate.DropDownItems.Add(item);
-            }
-            menu.Opening += (sender, args) => frameRate.Text = _animationTimer != null && _animationTimer.Enabled
-                ? "Animation frame rate (compatibility timer)" : "Animation frame rate";
-            menu.Items.Add(frameRate);
             menu.Items.Add("Add English meaning from Genius…", null, (sender, args) =>
                 BeginInvoke(new Action(OpenEnglishImporter)));
             var timingAction = menu.Items.Add("Edit lyric timing…", null, (sender, args) =>
@@ -679,8 +633,6 @@ namespace MusicBeePlugin
             partyBpm.DropDown.BackColor = menu.BackColor;
             partyBpm.DropDown.ForeColor = menu.ForeColor;
             partyBpm.DropDown.Renderer = menu.Renderer;
-            var tempoAction = partyBpm.DropDownItems.Add("Adjust BPM and alignment…", null, (sender, args) =>
-                BeginInvoke(new Action(OpenPartyTempoEditor)));
             var mapAction = partyBpm.DropDownItems.Add("Edit tempo map…", null,
                 (sender, args) => BeginInvoke(new Action(OpenPartyTempoMap)));
             var browserBpm = partyBpm.DropDownItems.Add("Search Google…", null,
@@ -697,8 +649,6 @@ namespace MusicBeePlugin
                 timingAction.Visible = _timingButton.IsEmpty;
                 lrcAction.Visible = _lrcButton.IsEmpty;
                 mapAction.Enabled = !string.IsNullOrWhiteSpace(_artworkTrackUrl);
-                tempoAction.Enabled = mapAction.Enabled;
-                tempoAction.ToolTipText = "Shift-click PARTY. While a map is enabled, single-BPM settings are read-only.";
                 mapAction.ToolTipText = "Ctrl-click PARTY to edit the tempo map.";
                 browserBpm.Enabled = copySong.Enabled = !string.IsNullOrWhiteSpace(_songTitle);
                 var savedTempo = !string.IsNullOrWhiteSpace(_artworkTrackUrl) ?
@@ -1229,239 +1179,6 @@ namespace MusicBeePlugin
             editor.Show(this);
         }
 
-        private void OpenPartyTempoEditor()
-        {
-            var trackUrl = _artworkTrackUrl;
-            if (string.IsNullOrWhiteSpace(trackUrl)) return;
-            var saved = _partyTempoStore.Load(trackUrl);
-            var currentBpm = _partyBpm > 0 ? _partyBpm :
-                _partyBeat.Bpm > 0 ? _partyBeat.Bpm : 120;
-            int? tappedBeat = null;
-            var tapTempo = new PartyTapTempo();
-            using (var dialog = new Form
-            {
-                Text = "Party BPM for this song", ClientSize = new Size(360, 324),
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                StartPosition = FormStartPosition.CenterParent,
-                ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false,
-                TopMost = true
-            })
-            {
-                var title = new Label
-                {
-                    Text = string.IsNullOrWhiteSpace(_songTitle) ? "Current song" : _songTitle,
-                    AutoEllipsis = true, Bounds = new Rectangle(16, 12, 328, 24)
-                };
-                var bpmLabel = new Label
-                {
-                    Text = "BPM", Bounds = new Rectangle(16, 48, 64, 22)
-                };
-                var bpmInput = new NumericUpDown
-                {
-                    Minimum = 40, Maximum = 240, DecimalPlaces = 2,
-                    Increment = 0.1m, Value = (decimal)Math.Round(
-                        Math.Max(40, Math.Min(240, currentBpm)), 2),
-                    Bounds = new Rectangle(82, 43, 100, 26)
-                };
-                var syncBeat = new Button
-                {
-                    Text = "Align to this beat",
-                    Bounds = new Rectangle(190, 43, 154, 28)
-                };
-                var tapButton = new Button
-                {
-                    Text = "Tap beat", Bounds = new Rectangle(16, 83, 328, 44)
-                };
-                var half = new Button
-                {
-                    Text = "½ speed", Bounds = new Rectangle(16, 133, 158, 28)
-                };
-                var twice = new Button
-                {
-                    Text = "2× speed", Bounds = new Rectangle(186, 133, 158, 28)
-                };
-                Action updateSpeedButtons = () =>
-                {
-                    half.Enabled = bpmInput.Value / 2 >= bpmInput.Minimum;
-                    twice.Enabled = bpmInput.Value * 2 <= bpmInput.Maximum;
-                };
-                half.Click += (sender, args) => bpmInput.Value /= 2;
-                twice.Click += (sender, args) => bpmInput.Value *= 2;
-                bpmInput.ValueChanged += (sender, args) => updateSpeedButtons();
-                updateSpeedButtons();
-                var sourceLabel = new LinkLabel
-                {
-                    Text = saved?.Source == null ? "Timing is stored for this song only." :
-                        "Original lookup: " + saved.Source,
-                    Bounds = new Rectangle(16, 249, 328, 24)
-                };
-                if (saved?.SourceUrl == null) sourceLabel.LinkArea = new LinkArea(0, 0);
-                sourceLabel.LinkClicked += (sender, args) =>
-                {
-                    Uri uri;
-                    if (Uri.TryCreate(saved?.SourceUrl, UriKind.Absolute, out uri) &&
-                        uri.Scheme == "https" && (uri.Host == "www.deezer.com" ||
-                        uri.Host == "getsongbpm.com"))
-                        try { Process.Start(uri.AbsoluteUri); } catch (Exception) { }
-                };
-                var tapStatus = new Label
-                {
-                    Text = "Tap along with the song at least twice.",
-                    Bounds = new Rectangle(16, 171, 328, 24)
-                };
-                var explanation = new Label
-                {
-                    Text = "Click Align as you hear a beat to preview the raised-arm pose timing. Save keeps it for this song; Cancel discards the preview.",
-                    Bounds = new Rectangle(16, 201, 328, 46)
-                };
-                var forget = new Button
-                {
-                    Text = "Forget saved BPM", Enabled = saved != null,
-                    Bounds = new Rectangle(16, 286, 140, 28)
-                };
-                var cancel = new Button
-                {
-                    Text = "Cancel", DialogResult = DialogResult.Cancel,
-                    Bounds = new Rectangle(188, 286, 74, 28)
-                };
-                var save = new Button
-                {
-                    Text = "Save", DialogResult = DialogResult.OK,
-                    Bounds = new Rectangle(270, 286, 74, 28)
-                };
-                Action previewBeat = () =>
-                {
-                    if (!tappedBeat.HasValue || _artworkTrackUrl != trackUrl) return;
-                    _partyPreviewBpm = (double)bpmInput.Value;
-                    _partyPreviewOriginMs = PartyAnimation.OriginForBeat(
-                        tappedBeat.Value, _partyPreviewBpm);
-                    _partyPreviewTrackUrl = trackUrl;
-                    tapStatus.Text = "Previewing alignment — Save to keep";
-                    _lastPartyUpdate = 0;
-                    UpdatePartyDancers();
-                };
-                bpmInput.ValueChanged += (sender, args) => previewBeat();
-                tapButton.Click += (sender, args) =>
-                {
-                    // Record the clock before calling MusicBee so the spacing
-                    // between clicks is independent of its UI response time.
-                    var timestamp = Stopwatch.GetTimestamp();
-                    try
-                    {
-                        if (_musicBee.NowPlaying_GetFileUrl() != trackUrl)
-                            throw new InvalidOperationException("The song changed.");
-                        var position = ReadPartyPosition(timestamp);
-                        double estimatedBpm;
-                        if (!tapTempo.Tap(timestamp, Stopwatch.Frequency,
-                                out estimatedBpm)) return;
-                        tappedBeat = position;
-                        if (estimatedBpm > 0)
-                        {
-                            bpmInput.Value = (decimal)Math.Round(estimatedBpm, 1);
-                            tapStatus.Text = tapTempo.TapCount + " taps · " +
-                                estimatedBpm.ToString("0.0", CultureInfo.InvariantCulture) +
-                                " BPM — Save to keep preview";
-                        }
-                        else tapStatus.Text = "Previewing first tap. Keep tapping...";
-                        var status = tapStatus.Text;
-                        previewBeat();
-                        tapStatus.Text = status;
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show(dialog, "Could not tap the beat: " + ex.Message,
-                            "Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-                };
-                syncBeat.Click += (sender, args) =>
-                {
-                    try
-                    {
-                        if (_musicBee.NowPlaying_GetFileUrl() != trackUrl)
-                            throw new InvalidOperationException("The song changed.");
-                        tappedBeat = ReadPartyPosition(Stopwatch.GetTimestamp());
-                        previewBeat();
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show(dialog, "Could not mark the beat: " + ex.Message,
-                            "Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-                };
-                forget.Click += (sender, args) => { dialog.DialogResult = DialogResult.No; dialog.Close(); };
-                dialog.Controls.AddRange(new Control[]
-                    { title, bpmLabel, bpmInput, syncBeat, tapButton, half, twice, sourceLabel, tapStatus,
-                        explanation, forget, cancel, save });
-                dialog.AcceptButton = save;
-                dialog.CancelButton = cancel;
-                var mapActive = _partyMap?.Enabled ?? false;
-                if (mapActive)
-                {
-                    bpmInput.Enabled = syncBeat.Enabled = tapButton.Enabled = half.Enabled = twice.Enabled =
-                        forget.Enabled = save.Enabled = false;
-                    tapStatus.Text = "Tempo map active - single BPM is read-only.";
-                    explanation.Text = "To edit these settings, open the tempo map (Ctrl-click PARTY) and uncheck Use this map for this song, then Save.";
-                    cancel.Text = "Close";
-                }
-                DialogResult result;
-                try { result = dialog.ShowDialog(this); }
-                finally
-                {
-                    _partyPreviewTrackUrl = null;
-                    _lastPartyUpdate = 0;
-                    UpdatePartyDancers();
-                }
-                if (mapActive || (result != DialogResult.OK && result != DialogResult.No)) return;
-                try
-                {
-                    if (_musicBee.NowPlaying_GetFileUrl() != trackUrl)
-                    {
-                        MessageBox.Show(this, "The song changed. Open Party BPM again for the current song.",
-                            "Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        return;
-                    }
-                    if (result == DialogResult.No)
-                    {
-                        _partyTempoStore.Delete(trackUrl);
-                        _partyBeat.Reset();
-                        LoadPartyTempo(trackUrl);
-                        _lastOnlineAttemptTrack = null;
-                        StartPartyOnlineLookup();
-                    }
-                    else
-                    {
-                        var bpm = (double)bpmInput.Value;
-                        int origin;
-                        if (tappedBeat.HasValue)
-                            origin = PartyAnimation.OriginForBeat(tappedBeat.Value, bpm);
-                        else
-                        {
-                            var position = ReadPartyPosition(Stopwatch.GetTimestamp());
-                            var oldBpm = _partyBpm > 0 ? _partyBpm : _partyBeat.Bpm;
-                            var oldOrigin = _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs;
-                            origin = PartyAnimation.OriginForPhase(position,
-                                oldBpm, oldOrigin, bpm);
-                        }
-                        _partyTempoStore.Save(trackUrl, bpm, origin, true, false,
-                            saved?.Source, saved?.SourceUrl);
-                        CancelPartyLookup();
-                        _partyBpm = bpm;
-                        _partyOriginMs = origin;
-                        _partyTempoSource = PartyTempoSource.Manual;
-                        _partyBeat.Reset();
-                    }
-                    _partySpectrumMisses = 0;
-                    _lastPartyUpdate = 0;
-                    UpdatePartyDancers();
-                    Invalidate();
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(this, "Could not save Party BPM: " + ex.Message,
-                        "Party BPM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            }
-        }
 
         private void UpdatePartyDancers()
         {
@@ -1491,19 +1208,13 @@ namespace MusicBeePlugin
                 var detectedBpm = _partyBpm == 0 ? _partyBeat.Bpm : 0;
                 var bpm = _partyBpm > 0 ? _partyBpm : detectedBpm;
                 var origin = _partyBpm > 0 ? _partyOriginMs : _partyBeat.OriginMs;
-                if (_partyPreviewTrackUrl != null &&
-                    _partyPreviewTrackUrl == _artworkTrackUrl)
-                {
-                    bpm = _partyPreviewBpm;
-                    origin = _partyPreviewOriginMs;
-                }
                 var phasePosition = PartyAnimation.DisplayPhaseAt(position, origin, bpm);
                 var frame = PartyAnimation.FrameAt(phasePosition, bpm);
                 var impact = PartyAnimation.SideImpactAt(phasePosition, bpm) +
                     PartyAnimation.CentreImpactAt(phasePosition, bpm);
                 var sway = PartyAnimation.SwayAt(phasePosition, bpm);
                 var anticipation = PartyAnimation.AnticipationAt(phasePosition, bpm);
-                if ((_partyMap?.Enabled ?? false) && _partyPreviewTrackUrl == null)
+                if ((_partyMap?.Enabled ?? false))
                 {
                     var mapped = _partyMap.At((position + PartyAnimation.VisualLeadMs) / 1000d);
                     frame = mapped.Frame; impact = mapped.Impact;
@@ -1648,7 +1359,6 @@ namespace MusicBeePlugin
                 _partyBeat.Reset();
                 _partyClock.Reset();
                 _lastPartyPosition = null;
-                _partyPreviewTrackUrl = null;
                 LoadPartyTempo(trackUrl);
                 _partySpectrumMisses = 0;
                 _lastPartyUpdate = 0;
@@ -3055,7 +2765,7 @@ namespace MusicBeePlugin
                 queueHit == null ? (_songTitleHit.Contains(e.Location) ? "song-title" : null) : "queue";
             if (hit == _hoverButton && queueHit == _hoverQueue) return;
             _partyShortcutTip.SetToolTip(this, hit == "party" ?
-                "Click: Party on/off\r\nShift-click: BPM and alignment\r\nCtrl-click: tempo map" : hit == "song-title" ? "Shift-click: copy artist and song title" : null);
+                "Click: Party on/off\r\nShift-click: tempo map and alignment\r\nCtrl-click: tempo map" : hit == "song-title" ? "Shift-click: copy artist and song title" : null);
             _hoverButton = hit;
             _hoverQueue = queueHit;
             Cursor = hit == null ? Cursors.Default : Cursors.Hand;
@@ -3176,7 +2886,7 @@ namespace MusicBeePlugin
             {
                 _partyShortcutTip.SetToolTip(this, null);
                 if ((ModifierKeys & Keys.Control) != 0) { OpenPartyTempoMap(); return; }
-                if ((ModifierKeys & Keys.Shift) != 0) { OpenPartyTempoEditor(); return; }
+                if ((ModifierKeys & Keys.Shift) != 0) { OpenPartyTempoMap(); return; }
                 _settings.PartyMode = !_settings.PartyMode;
                 if (_settings.PartyMode) StartPartyOnlineLookup(true);
                 else CancelPartyLookup();

@@ -49,7 +49,7 @@ namespace MusicBeePlugin
             _mbApiInterface = new MusicBeeApiInterface();
             _mbApiInterface.Initialise(apiInterfacePtr);
             _about.PluginInfoVersion = PluginInfoVersion;
-            _about.Name = "Desktop Lyrics";
+            _about.Name = "KoreKara";
             _about.Description = "Display lyrics on your desktop!";
             _about.Author = "Charlie Jiang";
             _about.TargetApplication = "";   // current only applies to artwork, lyrics or instant messenger name that appears in the provider drop down selector or target Instant Messenger
@@ -301,7 +301,7 @@ namespace MusicBeePlugin
         private void StartupMenuItem()
         {
             var menuItem = (ToolStripMenuItem) _mbApiInterface.MB_AddMenuItem(
-                "mnuView/Desktop Lyrics", "Toggle Desktop Lyrics visibility.",
+                "mnuView/KoreKara", "Toggle KoreKara visibility.",
                 ToggleLyrics);
             _visibilityMenuItem = menuItem;
             menuItem.Checked = !_settings.HideOnStartup;
@@ -309,7 +309,7 @@ namespace MusicBeePlugin
             // Registered commands appear in MusicBee's Hotkeys and toolbar
             // command chooser, including the dialog in the user's screenshot.
             _mbApiInterface.MB_RegisterCommand?.Invoke(
-                "View: Toggle Desktop Lyrics Window", ToggleLyrics);
+                "View: Toggle KoreKara Window", ToggleLyrics);
 
             void ToggleLyrics(object sender, EventArgs args)
             {
@@ -390,7 +390,7 @@ namespace MusicBeePlugin
             }, ex =>
             {
                 if (ReferenceEquals(_windowThread, host)) _frmLyrics = null;
-                if (!_closing) _mbApiInterface.MB_Trace("Desktop Lyrics UI: " + ex);
+                if (!_closing) _mbApiInterface.MB_Trace("KoreKara UI: " + ex);
             });
         }
 

@@ -1,4 +1,4 @@
-# Desktop Lyrics
+# KoreKara
 Show the lyrics on your desktop from MusicBee!
 
 # Description
@@ -9,11 +9,11 @@ The lyrics must in LRC format, synchronized. Offset label is supported.
 It can work with NeteaseLyrics plugin [https://github.com/cqjjjzr/MusicBee-NeteaseLyrics](https://github.com/cqjjjzr/MusicBee-NeteaseLyrics "(GitHub Repo)") [https://getmusicbee.com/forum/index.php?topic=24313.0](https://getmusicbee.com/forum/index.php?topic=24313.0 "(Forum Topic)") in order to display double-line lyrics, if you can provide lrc splitted with slash "/" it can also correctly handled.
 
 # Download & Installation
-Open the latest successful run of **Build Desktop Lyrics** on this repository's **Actions** tab. Download its `DesktopLyrics-<version>` artifact, then use the DLL or packaged ZIP inside it.
+Open the latest successful run of **Build KoreKara** on this repository's **Actions** tab. Download its `KoreKara-<version>` artifact, then use the DLL or packaged ZIP inside it.
 
 Just install this plugin in the Plugins tab in the Settings or put the DLL file into the Plugins of your MusicBee installation, and then enable it, set the lyrics style in the settings, and you're ready to rock!
 
-Also, lyrics style can be modified in the Plugins tab. And you can hide or show the desktop lyrics in the MusicBee Menu(View->Desktop Lyrics).
+Also, lyrics style can be modified in the Plugins tab. And you can hide or show the desktop lyrics in the MusicBee Menu(View->KoreKara).
 
 ## Lyrics window
 
@@ -116,7 +116,7 @@ MusicBee 中歌曲关联的歌词必须为 LRC 格式的同步歌词。支持 `o
 双行歌词的两行之间用正斜杠“/”分割。
 
 ## 下载 & 安装
-在本仓库的 **Actions** 页面打开最新成功的 **Build Desktop Lyrics** 运行，下载 `DesktopLyrics-<version>` 构建产物，其中包含 DLL 和 ZIP 压缩包。
+在本仓库的 **Actions** 页面打开最新成功的 **Build KoreKara** 运行，下载 `KoreKara-<version>` 构建产物，其中包含 DLL 和 ZIP 压缩包。
 
 下载后从 MusicBee 设置的“插件”标签页安装或直接将DLL文件复制到 MusicBee 安装目录下的 “`Plugins`” 目录，启动之，在设置中设置好歌词外观，就 OK。
 

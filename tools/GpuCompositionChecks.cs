@@ -184,6 +184,11 @@ class GpuCompositionChecks
             Check((bool)Get(pacer,"_active"),"Showing the window must resume frame requests");
             Set(form,"_renderTargetFps",60);Call(form,"ConfigureFramePacing");Pump(40);
             Check((int)Get(pacer,"_fps")==60,"Target change must update presentation scheduling");
+            settings.TransparentCanvas=true;Call(form,"ApplyTransparency");Pump(60);
+            Check(form.TransparencyKey==Color.Fuchsia && Get(form,"_gpu")==null,"BG switch must install key and release opaque GPU target");
+            Check(!timer.Enabled && Get(form,"_framePacer")!=null,"BG mode must retain precise frame pacing");
+            settings.TransparentCanvas=false;Call(form,"ApplyTransparency");Pump(60);
+            Check(form.TransparencyKey.IsEmpty,"Opaque mode must clear transparency key");
             Call(form,"RecreateHandle");Pump(60);
             Check(!ReferenceEquals(pacer,Get(form,"_framePacer")),"Recreated HWND must have a new destination/pacer");
             pacer=Get(form,"_framePacer");

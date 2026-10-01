@@ -295,6 +295,25 @@ internal static class TimelineChecks
             cursorPosition=(double?)editor.GetType().GetMethod("EditingPosition",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(editor,null);
             if(cursorPosition.HasValue)throw new Exception("Editor cursor must stop when its song sample disappears.");
         }
+
+        var seekSample=new PlaybackSnapshotReader.Snapshot {Position=0,PositionTimestamp=System.Diagnostics.Stopwatch.GetTimestamp()};
+        PartyTempoMap quickSaved=null;
+        using(var editor=new FrmPartyTempoMap(followMap,"Seek confirmation",()=>seekSample.Position/1000d,
+            ms=>{seekSample=new PlaybackSnapshotReader.Snapshot {Position=ms,PositionTimestamp=System.Diagnostics.Stopwatch.GetTimestamp()};},
+            m=>quickSaved=m,30,()=>{},()=>true,positionSample:()=>seekSample)){
+            Call(editor,"SeekTo",10d);
+            Func<double> read=()=>((double?)editor.GetType().GetMethod("EditingPosition",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(editor,null)).Value;
+            if(Math.Abs(read()-10)>.1)throw new Exception("Explicit seek cursor must appear at target immediately.");
+            seekSample=new PlaybackSnapshotReader.Snapshot {Position=500,PositionTimestamp=System.Diagnostics.Stopwatch.GetTimestamp()};
+            if(Math.Abs(read()-10)>.1)throw new Exception("Stale player read after provisional seek must not bounce the cursor back.");
+            for(int i=0;i<3;i++){
+                seekSample=new PlaybackSnapshotReader.Snapshot {Position=10000,PositionTimestamp=System.Diagnostics.Stopwatch.GetTimestamp()};
+                read();
+            }
+            if(Math.Abs(read()-10)>.1)throw new Exception("Seek confirmation must not jump away from target.");
+            ((NumericUpDown)Field(editor,"_startingBpm")).Value=134.5m;Call(editor,"SaveMap");
+            if(quickSaved.Sections[0].Bpm!=134.5 || quickSaved.Sections[1].Bpm!=150)throw new Exception("Quick BPM must edit first point only.");
+        }
         Console.WriteLine("Timeline seek, section selection, repeat-save and track-change checks passed.");
     }
 }

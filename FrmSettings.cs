@@ -1,173 +1,92 @@
 using System;
-using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Windows.Forms;
-using Cyotek.Windows.Forms;
 using Newtonsoft.Json;
-
 namespace MusicBeePlugin
 {
-    [SuppressMessage("ReSharper", "LocalizableElement")]
     public partial class FrmSettings : Form
     {
-        private Font _font = DefaultFont;
         private readonly SettingsObj _settings;
-        private readonly ColorPickerDialog _colorDialog = new ColorPickerDialog();
-        private readonly CheckBox _checkBoxArtworkColors = new CheckBox
-        {
-            AutoSize = true,
-            Text = "Match window colours to album artwork",
-            Margin = new Padding(5)
-        };
-        private readonly Button _showWindowButton = new Button
-        {
-            AutoSize = true,
-            Text = "Show lyrics window",
-            Margin = new Padding(5)
-        };
-
         public event EventHandler<SettingsObj> SettingsChanged;
         public event EventHandler ShowWindowRequested;
-
-        public FrmSettings(SettingsObj settings)
-        {
-            _settings = settings;
-            InitializeComponent();
-            comboBoxGradientType.SelectedIndex = 0;
-            var layout = (TableLayoutPanel)Controls[0];
-            layout.SuspendLayout();
-            layout.RowCount += 2;
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            foreach (Control control in layout.Controls)
-                layout.SetRow(control, layout.GetRow(control) + 2);
-            layout.Controls.Add(_checkBoxArtworkColors, 0, 0);
-            layout.SetColumnSpan(_checkBoxArtworkColors, 2);
-            layout.Controls.Add(_showWindowButton, 0, 1);
-            layout.SetColumnSpan(_showWindowButton, 2);
-            layout.ResumeLayout(true);
-            _checkBoxArtworkColors.CheckedChanged += (sender, args) =>
-            {
-                _settings.UseArtworkColors = _checkBoxArtworkColors.Checked;
-                _settings.ArtworkColorsPreferenceSet = true;
-                SettingsChanged?.Invoke(this, _settings);
-            };
-            _showWindowButton.Click += (sender, args) => ShowWindowRequested?.Invoke(this, EventArgs.Empty);
-            ClientSize = new Size(ClientSize.Width, ClientSize.Height + 76);
-            Text = "Desktop Lyrics Settings (v" + GetType().Assembly.GetName().Version + ")";
+        private void Changed(){SettingsChanged?.Invoke(this,_settings);}
+        public FrmSettings(SettingsObj settings){
+            _settings=settings;
+            Text="KoreKara settings (v"+GetType().Assembly.GetName().Version+")";
+            Font=SystemFonts.MessageBoxFont;BackColor=Color.FromArgb(23,27,38);ForeColor=Color.FromArgb(232,236,245);
+            ClientSize=new Size(620,630);MinimumSize=new Size(570,550);StartPosition=FormStartPosition.CenterParent;
+            var tabs=new SettingsTabs {Dock=DockStyle.Fill};
+            Controls.Add(tabs);
+            var display=Page(tabs,"Display");var lyrics=Page(tabs,"Lyrics");var performance=Page(tabs,"Performance");
+            Check(display,"Show song title",settings.ShowSongTitle,v=>settings.ShowSongTitle=v);
+            Check(display,"Show album artwork",settings.ShowAlbumArt,v=>settings.ShowAlbumArt=v);
+            Check(display,"Show playback controls",settings.ShowTransportControls,v=>settings.ShowTransportControls=v);
+            Check(display,"Show visualizer",settings.ShowVisualizer,v=>settings.ShowVisualizer=v);
+            Check(display,"Show queue and history",settings.ShowSongQueue,v=>settings.ShowSongQueue=v);
+            Check(display,"Match album artwork colours",settings.UseArtworkColors,v=>{settings.UseArtworkColors=v;settings.ArtworkColorsPreferenceSet=true;});
+            Check(display,"Transparent canvas (BG)",settings.TransparentCanvas,v=>settings.TransparentCanvas=v);
+            Check(display,"Hide lyrics when stopped",settings.AutoHide,v=>settings.AutoHide=v);
+            Check(display,"Hide window when no lyrics are available",settings.HideWhenUnavailable,v=>settings.HideWhenUnavailable=v);
+            Button(display,"Show lyrics window",()=>ShowWindowRequested?.Invoke(this,EventArgs.Empty));
+            Check(lyrics,"Show English / translation",settings.ShowTranslation,v=>settings.ShowTranslation=v);
+            Check(lyrics,"Preview next lyric",settings.NextLineWhenNoTranslation,v=>settings.NextLineWhenNoTranslation=v);
+            Check(lyrics,"Leave / characters as written",settings.PreserveSlash,v=>settings.PreserveSlash=v);
+            Button(lyrics,"Choose lyric font...",()=>{
+                using(var dialog=new FontDialog {Font=settings.Font??SystemFonts.DefaultFont})
+                    if(dialog.ShowDialog(this)==DialogResult.OK){settings.Font=(Font)dialog.Font.Clone();Changed();}
+            });
+            ColorButton(lyrics,"Text colour",()=>settings.Color1,c=>settings.Color1=c);
+            ColorButton(lyrics,"Second gradient colour",()=>settings.Color2,c=>settings.Color2=c);
+            ColorButton(lyrics,"Outline colour",()=>settings.BorderColor,c=>settings.BorderColor=c);
+            Label(lyrics,"Text gradient");
+            var gradient=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList,Width=250,BackColor=BackColor,ForeColor=ForeColor};
+            gradient.Items.AddRange(new object[]{"No gradient","Two colours","Three colours"});
+            gradient.SelectedIndex=Math.Max(0,Math.Min(2,settings.GradientType));gradient.SelectedIndexChanged+=(a,b)=>{settings.GradientType=gradient.SelectedIndex;Changed();};lyrics.Controls.Add(gradient);
+            Check(performance,"GPU rendering",!settings.DisableGpuRendering,v=>settings.DisableGpuRendering=!v);
+            Check(performance,"Sharper lyric outlines",!settings.UseBitmapLyrics,v=>settings.UseBitmapLyrics=!v);
+            Label(performance,"Animation target");
+            var fps=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList,Width=250,BackColor=BackColor,ForeColor=ForeColor};
+            fps.Items.AddRange(new object[]{"60 FPS","120 FPS"});fps.SelectedIndex=settings.RenderTargetFps==60?0:1;
+            fps.SelectedIndexChanged+=(a,b)=>{settings.RenderTargetFps=fps.SelectedIndex==0?60:120;Changed();};performance.Controls.Add(fps);
+            Label(performance,"Targets are saved. Actual frame rate depends on display and drawing cost. Transparent BG mode uses CPU drawing with the selected pacing; unsupported systems retain the compatibility timer.");
+            Label(performance,"Turn off GPU rendering for troubleshooting. Sharper outlines apply to the GPU lyric renderer.");
+            var footer=new Panel {Dock=DockStyle.Bottom,Height=48,Padding=new Padding(8)};
+            var close=new Button {Text="Close",Dock=DockStyle.Right,Width=90,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(43,53,73),ForeColor=ForeColor};
+            close.Click+=(sender,args)=>Close();footer.Controls.Add(close);Controls.Add(footer);tabs.BringToFront();
         }
-
-        private void Settings_Load(object sender, EventArgs e)
-        {
-            _font = _settings.Font;
-            _checkBoxArtworkColors.Checked = _settings.UseArtworkColors;
-            try
-            {
-                btnFont.Text = _font.Name + " "+ _font.Size;
-                comboBoxGradientType.SelectedIndex = _settings.GradientType;
-                comboBoxAlignment.SelectedIndex = _settings.AlignmentType;
-                btnColor1.BackColor = _settings.Color1;
-                btnColor2.BackColor = _settings.Color2;
-                btnBorderColor.BackColor = _settings.BorderColor;
-                barBackgroundOpacity.Value = _settings.BackgroundOpacity;
-                checkBoxPreserveSlash.Checked = _settings.PreserveSlash;
-                checkBoxAutoHide.Checked = _settings.AutoHide;
-                checkBoxNextLineWhenNoTranslation.Checked = _settings.NextLineWhenNoTranslation;
-                checkBoxHideWhenUnavailable.Checked = _settings.HideWhenUnavailable;
+        private FlowLayoutPanel Page(TabControl tabs,string name){
+            var page=new TabPage(name){BackColor=BackColor,ForeColor=ForeColor,Padding=new Padding(18)};
+            var flow=new FlowLayoutPanel {Dock=DockStyle.Fill,AutoScroll=true,FlowDirection=FlowDirection.TopDown,WrapContents=false};
+            page.Controls.Add(flow);tabs.TabPages.Add(page);return flow;
+        }
+        private void Check(FlowLayoutPanel panel,string text,bool value,Action<bool> set){
+            var c=new CheckBox {Text=text,Checked=value,AutoSize=true,Margin=new Padding(4,10,4,8)};
+            c.CheckedChanged+=(a,b)=>{set(c.Checked);Changed();};panel.Controls.Add(c);
+        }
+        private void Label(FlowLayoutPanel panel,string text){panel.Controls.Add(new Label {Text=text,AutoSize=true,MaximumSize=new Size(480,0),Margin=new Padding(4,16,4,8)});}
+        private void Button(FlowLayoutPanel panel,string text,Action action){
+            var b=new Button {Text=text,AutoSize=true,Height=30,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(43,53,73),ForeColor=ForeColor,Margin=new Padding(4,8,4,6)};
+            b.Click+=(a,c)=>action();panel.Controls.Add(b);
+        }
+        private void ColorButton(FlowLayoutPanel panel,string text,Func<Color> get,Action<Color> set){
+            Button(panel,text+"...",()=>{using(var d=new ColorDialog {Color=get(),FullOpen=true})if(d.ShowDialog(this)==DialogResult.OK){set(d.Color);Changed();}});
+        }
+        private sealed class SettingsTabs:TabControl{
+            internal SettingsTabs(){SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);SizeMode=TabSizeMode.Fixed;ItemSize=new Size(170,36);}
+            protected override void OnPaint(PaintEventArgs e){
+                e.Graphics.Clear(Color.FromArgb(23,27,38));
+                for(int i=0;i<TabCount;i++){var r=GetTabRect(i);using(var b=new SolidBrush(i==SelectedIndex?Color.FromArgb(60,87,118):Color.FromArgb(30,35,48)))e.Graphics.FillRectangle(b,r);
+                    TextRenderer.DrawText(e.Graphics,TabPages[i].Text,Font,r,Color.FromArgb(232,236,245),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);}
             }
-            catch (Exception)
-            {
-                // ignored
-            }
-        }
-
-        private void btnFont_Click(object sender, EventArgs e)
-        {
-            dlgFont.Font = _font;
-            var res = dlgFont.ShowDialog();
-            if (res != DialogResult.OK && res != DialogResult.Yes) return;
-            var font = dlgFont.Font;
-            // Force point unit
-            _font = new Font(font.FontFamily, font.Size, font.Style, GraphicsUnit.Point, font.GdiCharSet);
-            btnFont.Text = _font.Name + " " + _font.Size;
-            _settings.Font = _font;
-            SettingsChanged?.Invoke(this, _settings);
-        }
-
-        private void btnColors_Click(object sender, EventArgs e)
-        {
-            var button = (Button) sender;
-            _colorDialog.Color = button.BackColor;
-            var res = _colorDialog.ShowDialog();
-            if (res == DialogResult.OK || res == DialogResult.Yes)
-                button.BackColor = _colorDialog.Color;
-            _settings.Color1 = btnColor1.BackColor;
-            _settings.Color2 = btnColor2.BackColor;
-            _settings.BorderColor = btnBorderColor.BackColor;
-            SettingsChanged?.Invoke(this, _settings);
-        }
-
-        private void checkBoxPreserveSlash_CheckedChanged(object sender, EventArgs e)
-        {
-            _settings.PreserveSlash = checkBoxPreserveSlash.Checked;
-            SettingsChanged?.Invoke(this, _settings);
-        }
-
-        private void checkBoxAutoHide_CheckedChanged(object sender, EventArgs e)
-        {
-            _settings.AutoHide = checkBoxAutoHide.Checked;
-            SettingsChanged?.Invoke(this, _settings);
-        }
-
-        private void checkBoxNextLineWhenNoTranslation_CheckedChanged(object sender, EventArgs e)
-        {
-            _settings.NextLineWhenNoTranslation = checkBoxNextLineWhenNoTranslation.Checked;
-            SettingsChanged?.Invoke(this, _settings);
-        }
-
-        private void barBackgroundOpacity_Scroll(object sender, EventArgs e)
-        {
-            _settings.BackgroundOpacity = barBackgroundOpacity.Value;
-            SettingsChanged?.Invoke(this, _settings);
-        }
-
-        private void comboBoxGradientType_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            _settings.GradientType = comboBoxGradientType.SelectedIndex;
-            SettingsChanged?.Invoke(this, _settings);
-        }
-
-        private void comboBoxAlignment_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            _settings.AlignmentType = comboBoxAlignment.SelectedIndex;
-            SettingsChanged?.Invoke(this, _settings);
-        }
-
-        private void checkBoxHideWhenUnavailable_CheckedChanged(object sender, EventArgs e)
-        {
-            _settings.HideWhenUnavailable = checkBoxHideWhenUnavailable.Checked;
-            SettingsChanged?.Invoke(this, _settings);
-        }
-
-        private void Settings_FormClosed(object sender, FormClosedEventArgs e)
-        {
-            _settings.Font = _font;
-            _settings.Color1 = btnColor1.BackColor;
-            _settings.Color2 = btnColor2.BackColor;
-            _settings.BorderColor = btnBorderColor.BackColor;
-            _settings.GradientType = comboBoxGradientType.SelectedIndex;
-            _settings.AlignmentType = comboBoxAlignment.SelectedIndex;
-            _settings.BackgroundOpacity = barBackgroundOpacity.Value;
-            _settings.PreserveSlash = checkBoxPreserveSlash.Checked;
-            _settings.AutoHide = checkBoxAutoHide.Checked;
-            _settings.HideWhenUnavailable = checkBoxHideWhenUnavailable.Checked;
-            _settings.UseArtworkColors = _checkBoxArtworkColors.Checked;
-            _settings.ArtworkColorsPreferenceSet = true;
+            protected override void OnSelectedIndexChanged(EventArgs e){base.OnSelectedIndexChanged(e);Invalidate();}
         }
     }
 
     public class SettingsObj
     {
+        public int RenderTargetFps = 120;
+        public bool DisableGpuRendering;
+        public bool UseBitmapLyrics;
         public Color Color1;
         public Color Color2;
         public Color BorderColor;

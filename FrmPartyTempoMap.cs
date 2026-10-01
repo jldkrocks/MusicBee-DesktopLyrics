@@ -47,6 +47,14 @@ namespace MusicBeePlugin
         private readonly NumericUpDown _seekTime = new NumericUpDown();
         private readonly System.Diagnostics.Stopwatch _seekAge = new System.Diagnostics.Stopwatch();
         private double? _pendingSeek;
+        private long _seekIssuedAt, _ackSample;
+        private int _seekAcks;
+        private RenderFramePacer _cursorPacer;
+        private const int CursorMessage=0x8000+93;
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd,int msg,IntPtr w,IntPtr l);
+        private double _initialBeat;
+        private NumericUpDown _startingBpm;
+        private bool _syncingBpm;
         private bool _dirty, _trackWasAvailable = true;
         internal Func<bool> FollowCurrentSong;
         internal bool CanFollow => !_dirty && !_preview.Active;
@@ -64,7 +72,7 @@ namespace MusicBeePlugin
             Action<bool, Action<bool>> setPlaying = null, Func<bool> playbackBusy = null, Func<bool> displayPlaying = null,
             Action<PartyTempoMap> previewMap = null, Func<PlaybackSnapshotReader.Snapshot> positionSample = null)
         {
-            _positionSample=positionSample;
+            _initialBeat=map.InitialBeat;_positionSample=positionSample;
             _source = map; _position = position; _seek = seek; _save = save;
             _previewMap=previewMap;
             _togglePlayback = togglePlayback; _playing = playing; _displayPlaying = displayPlaying ?? playing;
@@ -286,14 +294,15 @@ namespace MusicBeePlugin
             _enabled.CheckedChanged += (sender, args) => MarkDirty();
             _flowAccents.CheckedChanged += (sender, args) => MarkDirty();
             _timer.Tick += (sender, args) => PollPlayback();
-            _cursorTimer.Tick += (sender,args) => {
-                if(!Visible || WindowState==FormWindowState.Minimized || _timeline.Scrubbing)return;
-                try{
-                    var positionNow=EditingPosition();
-                    if(positionNow.HasValue && Math.Abs(_timeline.Position-positionNow.Value)>.0005){_timeline.Position=positionNow.Value;_timeline.Invalidate();}
-                }catch(Exception ex){_status.Text=ex.Message;}
+            _cursorTimer.Tick += (sender,args)=>UpdateCursor();
+            Shown += (sender,args)=>{
+                RefreshMarkers();PollPlayback();_timer.Start();
+                var handle=Handle;string failure;
+                _cursorPacer=RenderFramePacer.TryCreate(token=>PostMessage(handle,CursorMessage,new IntPtr(token),IntPtr.Zero),out failure);
+                if(_cursorPacer!=null)_cursorPacer.Start(120);else _cursorTimer.Start();
             };
-            Shown += (sender, args) => { RefreshMarkers(); PollPlayback(); _timer.Start(); _cursorTimer.Start(); };
+            VisibleChanged+=(sender,args)=>{if(_cursorPacer!=null){if(Visible)_cursorPacer.Start(120);else _cursorPacer.Stop();}};
+            Resize+=(sender,args)=>{if(_cursorPacer!=null){if(WindowState==FormWindowState.Minimized)_cursorPacer.Stop();else if(Visible)_cursorPacer.Start(120);}};
             FormClosing += (sender, args) =>
             {
                 if (_preview.Active) { args.Cancel = true; _closeAfterPreview = true; _preview.Stop(); return; }
@@ -305,6 +314,23 @@ namespace MusicBeePlugin
             FormClosed += (sender,args)=>RestorePreview();
         }
 
+        private void UpdateCursor(){
+            if(!Visible || WindowState==FormWindowState.Minimized || _timeline.Scrubbing)return;
+            try{var now=EditingPosition();if(now.HasValue && Math.Abs(_timeline.Position-now.Value)>.0005){_timeline.Position=now.Value;_timeline.Invalidate();}}
+            catch(Exception ex){_status.Text=ex.Message;}
+        }
+        protected override void WndProc(ref Message m){
+            if(m.Msg==CursorMessage){
+                var pacer=_cursorPacer;if(pacer==null)return;
+                if(pacer.Failure!=null){pacer.Stop();_cursorTimer.Start();return;}
+                double late;long skipped;
+                try{if(pacer.BeginFrame(m.WParam.ToInt32(),out late,out skipped)){UpdateCursor();_timeline.Update();}}
+                finally{pacer.EndFrame(m.WParam.ToInt32());}
+                return;
+            }
+            base.WndProc(ref m);
+        }
+        protected override void OnHandleDestroyed(EventArgs e){_cursorPacer?.Dispose();_cursorPacer=null;base.OnHandleDestroyed(e);}
         private sealed class DarkTabs : TabControl
         {
             internal DarkTabs(){
@@ -326,10 +352,27 @@ namespace MusicBeePlugin
         {
             SuspendLayout();ClientSize=new Size(1440,800);MinimumSize=new Size(1180,740);
             var root=new TableLayoutPanel {Dock=DockStyle.Fill,Padding=new Padding(14),ColumnCount=2,RowCount=3};
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,200));root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute,30));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,44));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,220));root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute,42));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,44));
             var heading=new Label {Text=Text.Substring("Tempo map - ".Length),Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft,AutoEllipsis=true};
-            root.Controls.Add(heading,0,0);root.SetColumnSpan(heading,2);
+            root.Controls.Add(heading,0,0);
+            var tempoHeader=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
+            tempoHeader.Controls.Add(new Label {Text="Starting BPM",AutoSize=true,Margin=new Padding(3,6,5,0)});
+            _startingBpm=new NumericUpDown {Minimum=40,Maximum=240,DecimalPlaces=2,Increment=.1m,Width=85,BackColor=BackColor,ForeColor=ForeColor};
+            _startingBpm.Value=(decimal)Math.Max(40,Math.Min(240,_grid.Rows.Count>0?Number(_grid.Rows[0],1):120));
+            tempoHeader.Controls.Add(_startingBpm);
+            _startingBpm.ValueChanged+=(sender,args)=>{if(!_syncingBpm && _grid.Rows.Count>0){_grid.EndEdit();_grid.Rows[0].Cells[1].Value=_startingBpm.Value.ToString(CultureInfo.CurrentCulture);_enabled.Checked=true;}};
+            _tips.SetToolTip(_startingBpm,"BPM of the first point only. Later points remain unchanged. Save applies; enable Use this map to use it.");
+            var tap=new PartyTapTempo();
+            AddButton(tempoHeader,"Tap BPM",()=>{double bpm;if(tap.Tap(System.Diagnostics.Stopwatch.GetTimestamp(),System.Diagnostics.Stopwatch.Frequency,out bpm)&&bpm>=40&&bpm<=240)_startingBpm.Value=(decimal)Math.Round(bpm,2);});
+            AddButton(tempoHeader,"Align beat now",()=>{
+                if(_grid.Rows.Count!=1 || StyleAt(_grid.Rows[0])!=PartyDanceStyle.Normal || Convert.ToBoolean(_grid.Rows[0].Cells[4].Value)){
+                    _status.Text="For multi-section maps use Align on the section row. Align beat now is for one Normal section without row alignment.";return;}
+                var pos=EditingPosition();if(!pos.HasValue)return;
+                _initialBeat=-pos.Value*(double)_startingBpm.Value/60;MarkDirty();
+                _status.Text="Starting beat marked at "+pos.Value.ToString("0.000")+" s. Save to apply.";
+            });
+            root.Controls.Add(tempoHeader,1,0);
             var side=new FlowLayoutPanel {Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true,BackColor=Color.FromArgb(30,35,48),Padding=new Padding(8)};
             Action<string> label=text=>side.Controls.Add(new Label {Text=text,Width=170,Height=26,TextAlign=ContentAlignment.BottomLeft,Margin=new Padding(3,8,3,5)});
             Action<Control> wide=c=>{c.Dock=DockStyle.None;c.AutoSize=false;c.Width=166;c.Height=30;c.Margin=new Padding(3,3,3,3);side.Controls.Add(c);};
@@ -567,13 +610,19 @@ namespace MusicBeePlugin
             var sample=_positionSample?.Invoke();
             var reported = _positionSample==null ? _position() : sample==null ? (double?)null : sample.Position/1000d;
             if (!reported.HasValue) { _pendingSeek = null; _cursorClock.Reset(); return null; }
-            if (_pendingSeek.HasValue && _seekAge.ElapsedMilliseconds < 1000)
+            if (_pendingSeek.HasValue && _seekAge.ElapsedMilliseconds < 1500)
             {
-                var expected = _pendingSeek.Value + (_playing() ? _seekAge.Elapsed.TotalSeconds : 0);
-                // Release the temporary cursor as soon as the player acknowledges
-                // it. While playing it must advance, not freeze for a full second.
-                if (Math.Abs(reported.Value - expected) <= (_playing() ? .075 : .001)) _pendingSeek = null;
-                else return Math.Min(_timeline.Duration, expected);
+                bool playing=_displayPlaying();
+                var expected=_pendingSeek.Value+(playing?_seekAge.Elapsed.TotalSeconds:0);
+                if(sample==null){
+                    if(Math.Abs(reported.Value-expected)<=(playing?.075:.001))_seekAcks=3;
+                }else if(sample.PositionTimestamp>_seekIssuedAt && sample.PositionTimestamp!=_ackSample){
+                    _ackSample=sample.PositionTimestamp;
+                    var atSample=_pendingSeek.Value+(playing?(sample.PositionTimestamp-_seekIssuedAt)/(double)System.Diagnostics.Stopwatch.Frequency:0);
+                    _seekAcks=Math.Abs(reported.Value-atSample)<=(playing?.10:.001)?_seekAcks+1:0;
+                }
+                if(_seekAcks<3)return Math.Min(_timeline.Duration,expected);
+                _cursorClock.Seek((int)Math.Round(expected*1000),System.Diagnostics.Stopwatch.GetTimestamp(),System.Diagnostics.Stopwatch.Frequency,playing);
             }
             _pendingSeek = null;
             return Math.Min(_timeline.Duration, _cursorClock.PositionAt((int)Math.Round(reported.Value * 1000),
@@ -637,6 +686,11 @@ namespace MusicBeePlugin
 
         private void RefreshMarkers()
         {
+            if(_startingBpm!=null && _grid.Rows.Count>0){
+                double bpm;if(double.TryParse(Convert.ToString(_grid.Rows[0].Cells[1].Value),out bpm)&&bpm>=40&&bpm<=240){
+                    _syncingBpm=true;_startingBpm.Value=(decimal)bpm;_syncingBpm=false;
+                }
+            }
             _timeline.Markers.Clear();
             foreach (DataGridViewRow row in _grid.Rows)
             {
@@ -725,7 +779,7 @@ namespace MusicBeePlugin
                 var milliseconds = checked((int)Math.Round(clamped * 1000));
                 _seek(milliseconds);
                 clamped = milliseconds / 1000d;
-                _pendingSeek = clamped; _seekAge.Restart(); _cursorClock.Reset();
+                _pendingSeek = clamped; _seekAge.Restart(); _seekIssuedAt=System.Diagnostics.Stopwatch.GetTimestamp();_ackSample=0;_seekAcks=0;_cursorClock.Reset();
                 _seekTime.Value = Math.Max(_seekTime.Minimum, Math.Min(_seekTime.Maximum, (decimal)clamped));
                 _timeline.Position = clamped; _timeline.Invalidate();
             }
@@ -734,7 +788,7 @@ namespace MusicBeePlugin
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _waveform.Dispose(); _preview.Cancel();RestorePreview(); _rowMenu.Dispose(); _timer.Dispose(); _cursorTimer.Dispose(); _tips.Dispose(); _editorFont.Dispose(); }
+            if (disposing) { _cursorPacer?.Dispose();_cursorPacer=null;_waveform.Dispose(); _preview.Cancel();RestorePreview(); _rowMenu.Dispose(); _timer.Dispose(); _cursorTimer.Dispose(); _tips.Dispose(); _editorFont.Dispose(); }
             base.Dispose(disposing);
         }
 
@@ -786,7 +840,7 @@ namespace MusicBeePlugin
         {
             _grid.EndEdit(); _accentGrid.EndEdit();
             NormalizeLastPoint();
-            var map = new PartyTempoMap { Version = 8, FlowAccentSequences = _flowAccents.Checked, TrackUrl = _source.TrackUrl, InitialBeat = _source.InitialBeat, Enabled = _enabled.Checked };
+            var map = new PartyTempoMap { Version = 8, FlowAccentSequences = _flowAccents.Checked, TrackUrl = _source.TrackUrl, InitialBeat = _initialBeat, Enabled = _enabled.Checked };
             foreach (DataGridViewRow row in _grid.Rows)
                 map.Sections.Add(new PartyTempoSection { StartSeconds = Number(row, 0),
                     Bpm = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? Number(row, 9) : Number(row, 1),

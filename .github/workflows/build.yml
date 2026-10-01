@@ -1,4 +1,4 @@
-name: Build Desktop Lyrics
+name: Build KoreKara
 
 on:
   push:
@@ -60,7 +60,7 @@ jobs:
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: DesktopLyrics-1.15.71.0
+          name: KoreKara-1.15.72.0
           path: |
             bin/Release/mb_DesktopLyrics.dll
             bin/Release/DesktopLyricsGpu.*.dll
