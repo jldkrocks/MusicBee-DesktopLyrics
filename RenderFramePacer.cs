@@ -29,6 +29,7 @@ namespace MusicBeePlugin
         private bool _active, _disposed, _executing;
         private int _generation, _fps, _pending;
         private long _pendingDeadline, _skipped;
+        private long _notBefore;
         private string _failure;
 
         internal static RenderFramePacer TryCreate(Func<int, bool> post, out string failure)
@@ -91,6 +92,11 @@ namespace MusicBeePlugin
             {
                 if (_pending != token) return;
                 _pending = 0; _executing = false;
+                // Leave the UI queue empty briefly even when drawing overruns.
+                // Otherwise posted frames can indefinitely outrank WM_TIMER
+                // and child WM_PAINT messages. Healthy frames already have a
+                // larger gap before their normal presentation deadline.
+                _notBefore = Stopwatch.GetTimestamp() + Stopwatch.Frequency / 1000;
                 if (!_disposed) _changed.Set();
             }
         }
@@ -117,7 +123,8 @@ namespace MusicBeePlugin
                     if (!active) { _changed.WaitOne(); continue; }
                     long period = Stopwatch.Frequency / fps;
                     if (generation != current) { generation = current; deadline = Stopwatch.GetTimestamp() + period; drawingOverran = false; }
-                    long due = -Math.Max(1, (long)Math.Ceiling((deadline - Stopwatch.GetTimestamp()) * 10000000d / Stopwatch.Frequency));
+                    long dueAt; lock (_gate) dueAt = Math.Max(deadline, _notBefore);
+                    long due = -Math.Max(1, (long)Math.Ceiling((dueAt - Stopwatch.GetTimestamp()) * 10000000d / Stopwatch.Frequency));
                     if (!SetWaitableTimer(_timer.SafeWaitHandle, ref due, 0, IntPtr.Zero, IntPtr.Zero, false))
                         throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
                     if (WaitHandle.WaitAny(waits) == 0) continue;

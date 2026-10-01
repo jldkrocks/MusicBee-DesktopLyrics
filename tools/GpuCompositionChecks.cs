@@ -79,7 +79,7 @@ class GpuCompositionChecks
                 owner.StartPosition=FormStartPosition.Manual;owner.Location=new Point(-20000,-20000);
                 owner.Size=new Size(1440,800);owner.ShowInTaskbar=false;
                 Set(owner,"_artworkTrackUrl","editor-presentation-test");
-                int ticks=0;bool timedOut=false;Form editor=null;
+                int ticks=0;bool timedOut=false,warmed=false;Form editor=null;
                 owner.Shown+=(s,e)=>{
                     Call(owner,"OpenPartyTempoMap");editor=(Form)Get(owner,"_tempoMapEditor");
                     Check(editor!=null && (bool)Get(editor,"OwnerPresents"),"Owned editor must share presentation");
@@ -88,11 +88,16 @@ class GpuCompositionChecks
                     // steady-state message-loop interval being measured.
                     clock.Restart();timer.Start();
                 };
-                timer.Tick+=(s,e)=>{ticks++;if(clock.ElapsedMilliseconds>=2000)owner.Close();};
+                timer.Tick+=(s,e)=>{
+                    // The first paint can compile driver shaders lazily after
+                    // Shown. Measure steady state after that first UI turn.
+                    if(!warmed){warmed=true;clock.Restart();return;}
+                    ticks++;if(clock.ElapsedMilliseconds>=2000)owner.Close();
+                };
                 using(var watchdog=new System.Threading.Timer(_=>{
                     try { owner.BeginInvoke(new Action(()=>{timedOut=true;owner.Close();})); }
                     catch(InvalidOperationException) { }
-                },null,6000,System.Threading.Timeout.Infinite)) Application.Run(owner);
+                },null,10000,System.Threading.Timeout.Infinite)) Application.Run(owner);
                 Check(!timedOut && ticks>=5,"Editor presentation starved the UI timer: ticks="+ticks+", watchdog="+timedOut);
                 Check(editor!=null && editor.IsDisposed,"Owned editor must dispose when owner closes");
             }
