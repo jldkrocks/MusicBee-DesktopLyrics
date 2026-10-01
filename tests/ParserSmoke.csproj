@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ParserSmoke</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.Windows.Forms" />
+    <PackageReference Include="Newtonsoft.Json">
+      <Version>13.0.1</Version>
+    </PackageReference>
+    <Compile Include="..\ArtworkPalette.cs"><Link>ArtworkPalette.cs</Link></Compile>
+    <Compile Include="..\LyricCardLayout.cs"><Link>LyricCardLayout.cs</Link></Compile>
+    <Compile Include="..\LyricTextLayout.cs"><Link>LyricTextLayout.cs</Link></Compile>
+    <Compile Include="..\PartyTempoMap.cs"><Link>PartyTempoMap.cs</Link></Compile>
+    <Compile Include="..\TimelineWaveform.cs" />
+    <Compile Include="..\PartyTimeline.cs"><Link>PartyTimeline.cs</Link></Compile>
+    <Compile Include="..\FrmPartyTempoMap.cs"><Link>FrmPartyTempoMap.cs</Link></Compile>
+    <Compile Include="..\PartyPreviewSession.cs" />
+    <Compile Include="..\PartyAnimation.cs"><Link>PartyAnimation.cs</Link></Compile>
+    <Compile Include="..\PartyPlaybackClock.cs"><Link>PartyPlaybackClock.cs</Link></Compile>
+    <Compile Include="..\PartyTapTempo.cs"><Link>PartyTapTempo.cs</Link></Compile>
+    <Compile Include="..\PartyBeatTracker.cs"><Link>PartyBeatTracker.cs</Link></Compile>
+    <Compile Include="..\PartyTempoStore.cs"><Link>PartyTempoStore.cs</Link></Compile>
+    <Compile Include="..\GetSongBpmClient.cs"><Link>GetSongBpmClient.cs</Link></Compile>
+    <Compile Include="..\DeezerBpmClient.cs"><Link>DeezerBpmClient.cs</Link></Compile>
+    <Compile Include="..\PartyOnlineLookup.cs"><Link>PartyOnlineLookup.cs</Link></Compile>
+    <Compile Include="..\PartyLayout.cs"><Link>PartyLayout.cs</Link></Compile>
+    <Compile Include="..\LyricParser.cs"><Link>LyricParser.cs</Link></Compile>
+    <Compile Include="..\LrcTimingDocument.cs"><Link>LrcTimingDocument.cs</Link></Compile>
+    <Compile Include="..\UntimedTimingDocument.cs"><Link>UntimedTimingDocument.cs</Link></Compile>
+    <Compile Include="..\TimingTagStore.cs"><Link>TimingTagStore.cs</Link></Compile>
+    <Compile Include="..\FrmTimingEditor.cs"><Link>FrmTimingEditor.cs</Link></Compile>
+    <Compile Include="..\FrmTimingCreator.cs"><Link>FrmTimingCreator.cs</Link></Compile>
+    <Compile Include="..\LyricsController.cs"><Link>LyricsController.cs</Link></Compile>
+    <Compile Include="..\EnglishImportDocument.cs"><Link>EnglishImportDocument.cs</Link></Compile>
+    <Compile Include="..\EnglishTranslationStore.cs"><Link>EnglishTranslationStore.cs</Link></Compile>
+    <Compile Include="..\FrmEnglishImport.cs"><Link>FrmEnglishImport.cs</Link></Compile>
+    <Compile Include="..\MusicBeeInterface.cs"><Link>MusicBeeInterface.cs</Link></Compile>
+    <Compile Include="..\QueueNavigation.cs"><Link>QueueNavigation.cs</Link></Compile>
+    <Compile Include="..\UpcomingQueue.cs"><Link>UpcomingQueue.cs</Link></Compile>
+    <Compile Include="..\PlaybackHistory.cs"><Link>PlaybackHistory.cs</Link></Compile>
+    <Compile Include="..\LrcLibClient.cs"><Link>LrcLibClient.cs</Link></Compile>
+    <Compile Include="..\ImportedLyricsTagStore.cs"><Link>ImportedLyricsTagStore.cs</Link></Compile>
+    <Compile Include="..\FrmLrcLibPicker.cs"><Link>FrmLrcLibPicker.cs</Link></Compile>
+    <Compile Include="..\PlaybackSnapshotReader.cs" />
+    <Compile Include="..\PlaybackTimingTrace.cs" />
+    <Compile Include="..\LyricsWindowThread.cs" />
+    <Compile Include="AsyncPlaybackChecks.cs" />
+    <Compile Include="RestAccentChecks.cs" />
+    <Compile Include="RampShortcutChecks.cs" />
+    <Compile Include="PreviewChecks.cs" />
+    <Compile Include="AccentMotionChecks.cs" />
+    <Compile Include="Editor47Checks.cs" />
+    <Compile Include="SeekClockChecks.cs" />
+    <Compile Include="SeekSettlingChecks.cs" />
+    <Compile Include="..\RenderProfile.cs" />
+    <Compile Include="RenderProfileChecks.cs" />
+    <Compile Include="..\RenderFramePacer.cs" />
+    <Compile Include="RenderFramePacerChecks.cs" />
+    <Compile Include="BpmLookupChecks.cs" />
+    <Compile Include="TempoMapChecks.cs" />
+    <Compile Include="RhythmChecks.cs" />
+    <Compile Include="TimelineChecks.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Fixtures\seek-buffering.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

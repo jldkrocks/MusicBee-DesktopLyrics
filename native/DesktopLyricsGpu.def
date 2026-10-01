@@ -1,0 +1,18 @@
+EXPORTS
+ DL_Create
+ DL_Destroy
+ DL_Resize
+ DL_Upload
+ DL_Draw
+ DL_Text
+ DL_Lyrics
+ DL_DancerTexture
+ DL_Dancers
+ DL_Outline
+ DL_OutlineLyrics
+ DL_ArtTexture
+ DL_Artwork
+
+ DL_Waveform
+
+ DL_WaveformDetail

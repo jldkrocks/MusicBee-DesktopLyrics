@@ -1,0 +1,933 @@
+using System;
+using System.Drawing;
+using System.Globalization;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace MusicBeePlugin
+{
+    internal sealed class FrmPartyTempoMap : Form
+    {
+        private readonly DataGridView _grid = new DataGridView();
+        private readonly DataGridView _accentGrid = new DataGridView();
+        private readonly TabControl _tabs = new DarkTabs { Dock = DockStyle.Fill };
+        private readonly ToolTip _tips = new ToolTip { InitialDelay = 350, AutoPopDelay = 20000, ShowAlways = true };
+        private DataGridView ActiveGrid => _tabs.SelectedIndex == 1 ? _accentGrid : _grid;
+        private readonly ContextMenuStrip _rowMenu = new ContextMenuStrip();
+        private readonly CheckBox _enabled = new CheckBox();
+        private readonly CheckBox _flowAccents = new CheckBox();
+        private readonly PartyTempoMap _source;
+        private readonly Func<double?> _position;
+        private readonly Action<int> _seek;
+        private readonly Action<PartyTempoMap> _save;
+        private readonly Action _togglePlayback;
+        private readonly Func<bool> _playing;
+        private readonly Func<bool> _displayPlaying;
+        private readonly PartyPlaybackClock _cursorClock = new PartyPlaybackClock();
+        private readonly Func<double> _duration;
+        private readonly Func<bool> _playbackBusy;
+        private readonly PartyPreviewSession _preview;
+        private Button _previewButton;
+        private bool _closeAfterPreview;
+        private readonly PartyTimeline _timeline = new PartyTimeline();
+        private readonly TimelineWaveform _waveform = new TimelineWaveform();
+        private readonly CheckBox _snapHits = new CheckBox { Text="Snap hits", AutoSize=true };
+        private readonly PartyTimeline _overview = new PartyTimeline { Overview=true };
+        private readonly NumericUpDown _loopStart=new NumericUpDown(),_loopEnd=new NumericUpDown();
+        private Button _loopButton;
+        private readonly Action<PartyTempoMap> _previewMap;
+        private bool _previewApplied,_previewDirty;
+        private readonly Timer _timer = new Timer { Interval = 120 };
+        private readonly Timer _cursorTimer = new Timer { Interval = 15 };
+        private readonly Func<PlaybackSnapshotReader.Snapshot> _positionSample;
+        private readonly Label _status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+        private readonly Font _editorFont = new Font("Segoe UI", 9f);
+        private Button _play, _back, _forward, _add, _seekRow, _seekExact;
+        private readonly NumericUpDown _seekStep = new NumericUpDown();
+        private readonly NumericUpDown _seekTime = new NumericUpDown();
+        private readonly System.Diagnostics.Stopwatch _seekAge = new System.Diagnostics.Stopwatch();
+        private double? _pendingSeek;
+        private long _seekIssuedAt, _ackSample;
+        private int _seekAcks;
+        private RenderFramePacer _cursorPacer;
+        internal bool OwnerPresents;
+        private long _lastOwnerPresentation;
+        private bool _ownerPresentationFailed;
+        private readonly System.Diagnostics.Stopwatch _presentationPoll = System.Diagnostics.Stopwatch.StartNew();
+        private const int CursorMessage=0x8000+93;
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd,int msg,IntPtr w,IntPtr l);
+        private double _initialBeat;
+        private NumericUpDown _startingBpm;
+        private bool _syncingBpm;
+        private bool _dirty, _trackWasAvailable = true;
+        internal Func<bool> FollowCurrentSong;
+        internal bool CanFollow => !_dirty && !_preview.Active;
+        private static readonly string[] AccentMotions = { "Bop (original)", "Rebound" };
+        private static readonly string[] AccentPoses = { "Current pose", "Left hit", "Right hit", "Alternate sides" };
+        private static readonly string[] Styles = { "Normal", "Side to side", "Hold pose", "Rest (keep counting)" };
+
+        private static readonly string[] Speeds = { "Half (0.5x)", "Normal (1x)", "Double (2x)" };
+
+        private static readonly string[] Rhythms = { "Straight", "Waltz (3/4)", "Swing", "4/4 - accent on 4" };
+
+        internal FrmPartyTempoMap(PartyTempoMap map, string title, Func<double?> position,
+            Action<int> seek, Action<PartyTempoMap> save, double duration,
+            Action togglePlayback, Func<bool> playing, Func<double> durationProvider = null,
+            Action<bool, Action<bool>> setPlaying = null, Func<bool> playbackBusy = null, Func<bool> displayPlaying = null,
+            Action<PartyTempoMap> previewMap = null, Func<PlaybackSnapshotReader.Snapshot> positionSample = null)
+        {
+            _initialBeat=map.InitialBeat;_positionSample=positionSample;
+            _source = map; _position = position; _seek = seek; _save = save;
+            _previewMap=previewMap;
+            _togglePlayback = togglePlayback; _playing = playing; _displayPlaying = displayPlaying ?? playing;
+            DoubleBuffered = true;
+            _duration = durationProvider ?? (() => duration); _playbackBusy = playbackBusy ?? (() => false);
+            _preview = new PartyPreviewSession(setPlaying ?? ((wanted, complete) => { if (_playing() != wanted) _togglePlayback(); complete(true); }),
+                seconds => SeekCore(seconds, true), () => !IsDisposed && _position().HasValue,
+                message => { if (!IsDisposed) _status.Text = message; });
+            Font = _editorFont; BackColor = Color.FromArgb(23, 27, 38); ForeColor = Color.FromArgb(232, 236, 245);
+            Text = "Tempo map — " + title;
+            Size = new Size(1200, 730); MinimumSize = new Size(1080, 690);
+            StartPosition = FormStartPosition.CenterParent; ShowInTaskbar = false;
+            MinimizeBox = false; TopMost = true;
+            var help = new Label { Dock = DockStyle.Fill };
+            _enabled.Text = "Use this map for this song"; _enabled.Checked = map.Enabled;
+            _enabled.Dock = DockStyle.Top; _enabled.Height = 28; _enabled.Padding = new Padding(10, 0, 0, 0);
+            _grid.Dock = DockStyle.Fill; _grid.AllowUserToAddRows = false;
+            _grid.AllowUserToDeleteRows = false; _grid.RowHeadersVisible = false;
+            _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect; _grid.MultiSelect = false;
+            _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            _grid.Columns.Add("start", "Start (s)"); _grid.Columns.Add("bpm", "BPM");
+            _grid.Columns.Add("ramp", "BPM ramp (s)");
+            _grid.Columns.Add(new DataGridViewComboBoxColumn { Name = "style", HeaderText = "Dance", DataSource = Styles });
+            _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "align", HeaderText = "Align" });
+            _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "countIn", HeaderText = "Bob count-in" });
+            _grid.Columns.Add(new DataGridViewComboBoxColumn { Name = "rhythm", HeaderText = "Rhythm", DataSource = Rhythms });
+            _grid.Columns.Add("swing", "Swing %");
+            _grid.Columns.Add(new DataGridViewComboBoxColumn { Name = "speed", HeaderText = "Speed", DataSource = Speeds });
+            _grid.Columns.Add("fromBpm", "From BPM");
+            _grid.Columns.Add(new DataGridViewComboBoxColumn { Name = "toNext", HeaderText = "To next point", DataSource = new[] { "Keep BPM", "Ramp to next", "Custom (saved)" } });
+            _grid.Columns[2].Visible = _grid.Columns[9].Visible = false;
+            _grid.Columns[10].DisplayIndex = 2;
+            _grid.Columns[10].ToolTipText = "Keep BPM: stay at this BPM until the next point. Ramp to next: gradually reach the next point's BPM at its time. Moving or deleting points recalculates the ramp. Custom (saved) preserves an imported ramp that ends between points; choose Ramp to next to replace it.";
+            _grid.Columns[1].HeaderText = "BPM";
+            _grid.Columns[9].ToolTipText = "Optional starting BPM for this row's forward ramp. Blank uses the preceding tempo. Ramp to row fills this on the preceding row.";
+            _grid.Columns[8].FillWeight = 120;
+            _grid.Columns[8].ToolTipText = "Half, normal or double dance speed, independent of Dance and Rhythm. Does not change the song BPM. Hold stops all motion.";
+            _grid.Columns[6].DisplayIndex = 4;
+            _grid.Columns[7].DisplayIndex = 5;
+            _grid.Columns[8].DisplayIndex = 4;
+            _grid.Columns[7].FillWeight = 80;
+            _grid.Columns[7].ToolTipText = "Swing only: percentage of each beat spent in the side pose. 50 = even, 60 = light swing, 66.67 = about 2:1, 75 = strong swing. BPM does not change.";
+            _grid.Columns[6].FillWeight = 185;
+            _grid.Columns[6].ToolTipText = "4/4 accent on 4: three small centre bops, then a strong side landing on FOUR; opposite side next bar. BPM counts all four beats. Straight: existing motion. Waltz: side, centre bop, second centre bop, then the opposite side. Swing: longer side pose, short middle pose, opposite side. Swing % controls the long-short split. Half speed slows the chosen pattern; Hold stops it.";
+            _grid.Columns[2].ToolTipText = "Seconds after this row starts to reach its BPM; starts from From BPM if set, otherwise the preceding tempo. Example: 120 to 150 over 4 seconds. Equal BPM values do not ramp; dance styles switch at the start.";
+            _grid.Columns[4].ToolTipText = "Restart on a side pose at this row's start (beat 1 for Waltz; strong FOUR for 4/4 accent on 4). Uses the row Start time, NOT when you click Align or Save. Save applies the setting. Leave off to preserve the ongoing beat phase.";
+            _grid.Columns[5].ToolTipText = "Check on the returning Normal-speed dancing row after Half speed, Hold pose or Rest (keep counting): up to four lead-in bobs, then one final bop on the first beat at or after the return. Uses saved alignment, or this row's start when Align is checked.";
+            _grid.Columns[0].ToolTipText = "Double-click a row to seek. Press F2 or type to edit. Song position in seconds. A section lasts until the next start; the first starts at 0. Save applies edits without closing.";
+            _grid.Columns[1].ToolTipText = "Musical BPM at this time, 40-240. Ramp to next connects this BPM to the next point automatically. Speed changes the dance rate separately.";
+            _grid.Columns[3].ToolTipText = "Normal or Side to side chooses the dance. Hold pose freezes movement AND the beat counter. Rest freezes movement but keeps counting at this row's BPM and Speed. End either with a new dancing row; leave Align off after Rest to keep phase.";
+            _grid.Columns[4].ToolTipText += " For a smooth slowdown leave Align off. Use an accent cue for emphasis without restarting the side poses.";
+            _grid.Columns[3].FillWeight = 205;
+            _grid.Columns[4].FillWeight = 65;
+            _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            var weights = new float[] { 85, 85, 95, 185, 50, 95, 170, 65, 110, 80, 150 };
+            for (int c = 0; c < weights.Length; c++) _grid.Columns[c].FillWeight = weights[c];
+            _grid.Columns[3].MinimumWidth = 180;
+            _grid.Columns[6].MinimumWidth = 155;
+            _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            _grid.RowTemplate.Height = 29;
+            foreach (DataGridViewColumn column in _grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
+            for (int i = 0; i < map.Sections.Count; i++)
+            {
+                var section = map.Sections[i];
+                var custom = section.RampSeconds > 0;
+                var startBpm = custom ? map.At(section.StartSeconds).Bpm : section.Bpm;
+                var link = section.RampToNext || (custom && i + 1 < map.Sections.Count &&
+                    Math.Abs(section.StartSeconds + section.RampSeconds - map.Sections[i + 1].StartSeconds) < 1e-7 &&
+                    Math.Abs(section.Bpm - (map.Sections[i + 1].RampSeconds > 0 ? map.At(map.Sections[i + 1].StartSeconds).Bpm : map.Sections[i + 1].Bpm)) < 1e-7);
+                AddRow(section.StartSeconds, startBpm, custom ? section.RampSeconds : 0, section.Style, section.AlignBeat, section.CountIn, section.Rhythm, section.SwingPercent, section.EffectiveSpeed, custom ? (double?)section.Bpm : null);
+                _grid.Rows[_grid.Rows.Count - 1].Cells[10].Value = link ? "Ramp to next" : custom ? "Custom (saved)" : "Keep BPM";
+            }
+            _grid.BackgroundColor = Color.FromArgb(30, 35, 48);
+            _grid.BorderStyle = BorderStyle.None; _grid.GridColor = Color.FromArgb(54, 62, 79);
+            _grid.EnableHeadersVisualStyles = false; _grid.ColumnHeadersHeight = 32; _grid.RowTemplate.Height = 29;
+            _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(43, 50, 67),
+                ForeColor = ForeColor, SelectionBackColor = Color.FromArgb(43, 50, 67) };
+            _grid.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(30, 35, 48),
+                ForeColor = ForeColor, SelectionBackColor = Color.FromArgb(60, 87, 118), SelectionForeColor = Color.White,
+                Padding = new Padding(4, 2, 4, 2) };
+            _grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(34, 40, 54);
+            var transport = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+            transport.Controls.Add(new Label { Text = "Step (s)", AutoSize = true, Margin = new Padding(3, 9, 3, 0) });
+            ConfigureSeekNumber(_seekStep, 0.01m, 5, 0.01m, 0.1m, 2);
+            transport.Controls.Add(_seekStep);
+            _back = AddButton(transport, "- step", () => SeekRelative(-(double)_seekStep.Value));
+            _play = AddButton(transport, "Play / pause", () => { try { if (_playbackBusy()) return; _togglePlayback(); PollPlayback(); } catch (Exception ex) { _status.Text = ex.Message; } });
+            _play.AutoSize = false; _play.Width = 90;
+            _forward = AddButton(transport, "+ step", () => SeekRelative((double)_seekStep.Value));
+            transport.Controls.Add(new Label { Text = "Seek to (s)", AutoSize = true, Margin = new Padding(15, 9, 3, 0) });
+            ConfigureSeekNumber(_seekTime, 0, (decimal)Math.Max(0, duration), 0.001m,
+                (decimal)Math.Max(0, Math.Min(duration, _position() ?? 0)), 3);
+            _seekTime.Width = 105;
+            transport.Controls.Add(_seekTime);
+            _seekExact = AddButton(transport, "Seek", () => SeekTo((double)_seekTime.Value));
+            _previewButton = AddButton(transport, "Preview 2 s", () => BeginPreview(false));
+            _tips.SetToolTip(_previewButton, "Hear 0.5 s before and 1.5 s after the Seek to time, using valid unsaved edits. Stop returns paused. Save commits edits; stopping restores the last saved map.");
+            _seekTime.KeyDown += (sender, args) =>
+            {
+                if (args.KeyCode != Keys.Enter) return;
+                SeekTo((double)_seekTime.Value); args.SuppressKeyPress = true;
+            };
+            _timeline.Duration = Math.Max(0, duration); _timeline.Dock = DockStyle.Fill;
+            _timeline.SeekRequested += SeekTo;
+            _timeline.EditAccents=true;_timeline.EditSections=true;
+            _timeline.SectionMoved += MoveSection;
+            _timeline.AccentMoved += MoveAccent;
+            _timeline.LoopRangeSelected += (start,end)=>{if(!_preview.Active){_loopStart.Value=(decimal)Math.Round(start,3);_loopEnd.Value=(decimal)Math.Round(end,3);}};
+            _overview.Duration=_timeline.Duration;_overview.Dock=DockStyle.Fill;
+            _overview.ViewPanned += start => { _timeline.ViewStart=start; _timeline.Invalidate(); };
+            _timeline.MarkerSelected += row => { _tabs.SelectedIndex = 0; if (row >= 0 && row < _grid.Rows.Count) _grid.CurrentCell = _grid.Rows[row].Cells[0]; };
+            var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+            _add = AddButton(actions, "Add at playhead", () =>
+            {
+                var now = EditingPosition();
+                if (!now.HasValue) { _status.Text = "Play the original song to capture its position."; return; }
+                if (_tabs.SelectedIndex == 1)
+                {
+                    _accentGrid.Rows.Add(Math.Round(now.Value, 3).ToString(CultureInfo.CurrentCulture), 1.7.ToString(CultureInfo.CurrentCulture), 0.1.ToString(CultureInfo.CurrentCulture), "0", AccentMotions[0], AccentPoses[0]);
+                    _accentGrid.CurrentCell = _accentGrid.Rows[_accentGrid.Rows.Count - 1].Cells[0];
+                    MarkDirty(); return;
+                }
+                var selected = _grid.CurrentRow;
+                double bpm = 120;
+                if (selected != null) double.TryParse(Convert.ToString(selected.Cells[1].Value), out bpm);
+                var rhythm = selected == null ? PartyRhythm.Straight :
+                    (PartyRhythm)Math.Max(0, Array.IndexOf(Rhythms, Convert.ToString(selected.Cells[6].Value)));
+                double swingPercent;
+                if (selected == null || !double.TryParse(Convert.ToString(selected.Cells[7].Value), out swingPercent)) swingPercent = 66.67;
+                AddRow(Math.Round(now.Value, 3), bpm >= 40 && bpm <= 240 ? bpm : 120, 0, PartyDanceStyle.Normal, false, false, rhythm, swingPercent, selected == null ? 1 : SpeedAt(selected));
+                _grid.CurrentCell = _grid.Rows[_grid.Rows.Count - 1].Cells[0];
+                MarkDirty();
+            });
+            AddButton(actions, "Delete row", DeleteSelectedRow);
+            _seekRow = AddButton(actions, "Seek to row", () =>
+            {
+                if (ActiveGrid.CurrentRow == null) return;
+                try { SeekTo(Number(ActiveGrid.CurrentRow, 0)); }
+                catch (Exception ex) { _status.Text = ex.Message; }
+            });
+            var rampButton = AddButton(actions, "Ramp from previous", RampToRow);
+            _tips.SetToolTip(rampButton, "Shortcut: set the previous point to Ramp to next. Both BPM values stay at their own points. Moving or deleting either point reconnects the curve. Save applies.");
+            AddButton(actions, "Save", SaveMap);
+            AddButton(actions, "Close", () => Close());
+            _status.Text = "Diamonds select sections; gold circles select accents. Save applies both tabs and keeps this window open.";
+            _status.ForeColor = Color.FromArgb(178, 192, 212);
+            help.Text = "Overview: drag or scroll to pan. Wheel over detail to zoom. Detail: drag empty space to pan, gold accents or section diamonds to edit; Shift-drag a loop. Hover here for timeline help.";
+            _tips.SetToolTip(_seekStep, "Seconds moved by - step and + step. Pause for precise placement; 0.01 s is the smallest step.");
+            _tips.SetToolTip(_seekTime, "Exact song position in seconds. Enter or Seek moves playback without changing your rows.");
+            _tips.SetToolTip(_enabled, "Apply this song's saved sections and accent cues. Uncheck to use its ordinary BPM settings.");
+            _tips.SetToolTip(_add, "Add a section or accent at the playhead, depending on the selected tab. Pause and fine-seek first for exact placement. Save applies the new row.");
+            SetupAccentGrid(map);
+            SetupRowMenu();
+            var sectionsTab = new TabPage("Sections") { BackColor = BackColor, Padding = new Padding(3) };
+            var accentsTab = new TabPage("Accent cues") { BackColor = BackColor, Padding = new Padding(3) };
+            sectionsTab.Controls.Add(_grid); accentsTab.Controls.Add(_accentGrid);
+            _tabs.TabPages.Add(sectionsTab); _tabs.TabPages.Add(accentsTab);
+            _tabs.SelectedIndexChanged += (sender, args) => { rampButton.Enabled = _tabs.SelectedIndex == 0; RefreshMarkers(); };
+            _timeline.AccentSelected += row => { _tabs.SelectedIndex = 1; if (row >= 0 && row < _accentGrid.Rows.Count) _accentGrid.CurrentCell = _accentGrid.Rows[row].Cells[0]; };
+            _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 292));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+            var detail=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Margin=Padding.Empty};
+            detail.RowStyles.Add(new RowStyle(SizeType.Absolute,32));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,220));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,40));
+            var editing=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
+            AddButton(editing,"Whole song",()=>{_timeline.ViewStart=_timeline.ViewLength=0;_timeline.Invalidate();});
+            editing.Controls.Add(new Label {Text="Loop (s)",AutoSize=true,Margin=new Padding(6,9,3,0)});
+            ConfigureSeekNumber(_loopStart,0,(decimal)Math.Max(0,duration),.001m,0,3);
+            ConfigureSeekNumber(_loopEnd,0,(decimal)Math.Max(0,duration),.001m,(decimal)Math.Min(5,Math.Max(0,duration)),3);
+            _loopStart.Width=_loopEnd.Width=85;editing.Controls.Add(_loopStart);editing.Controls.Add(_loopEnd);
+            AddButton(editing,"Use view",()=>{_loopStart.Value=(decimal)_timeline.ViewStart;_loopEnd.Value=(decimal)Math.Min(_timeline.Duration,_timeline.ViewStart+(_timeline.ViewLength>0?_timeline.ViewLength:_timeline.Duration));});
+            _loopButton=AddButton(editing,"Loop preview",()=>BeginPreview(true));
+            editing.Controls.Add(_snapHits);
+            _tips.SetToolTip(_snapHits,"Optional: snap dragged hit times to a nearby attack-strength peak within 40 ms. These are candidate attacks, not verified beats. Arrow nudges always remain exact.");
+            _timeline.SnapTime = time => _snapHits.Checked ? _waveform.Data?.Snap(time) ?? time : time;
+            _timeline.EnvelopeChanged += (row,prepare,hold,recovery) => {
+                if(row<0 || row>=_accentGrid.Rows.Count)return;
+                _accentGrid.Rows[row].Cells[2].Value=prepare.ToString("0.000",CultureInfo.CurrentCulture);
+                _accentGrid.Rows[row].Cells[3].Value=hold.ToString("0.000",CultureInfo.CurrentCulture);
+                _accentGrid.Rows[row].Cells[6].Value=recovery.ToString("0.000",CultureInfo.CurrentCulture);
+            };
+            _tips.SetToolTip(help, "Wheel zooms under the pointer. Drag empty detail space or the overview to pan; click detail to seek. Drag the playhead to seek, gold accents to edit time, and white handles to edit durations. Shift-drag selects a loop. Selected accent: arrows nudge 10 ms, Shift-arrows 1 ms. Blue waveform shows RMS and peaks; orange shows relative attacks, not confirmed beats. Nearby panning reuses a buffered waveform; moving beyond the buffer loads another range in the background.");
+            _tips.SetToolTip(_loopButton,"Audition the range repeatedly with 0.5 s lead-in. Valid edits preview without saving. Loop boundaries pause/seek/resume MusicBee and are not gapless. Stop restores the saved map.");
+            detail.Controls.Add(_overview,0,0);detail.Controls.Add(_timeline,0,1);detail.Controls.Add(editing,0,2);
+            layout.Controls.Add(help, 0, 0); layout.Controls.Add(detail, 0, 1);
+            layout.Controls.Add(transport, 0, 2); layout.Controls.Add(_tabs, 0, 3);
+            var mapOptions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+            _enabled.Dock = DockStyle.None; _enabled.AutoSize = true;
+            _flowAccents.Text = "Flow accent sequences"; _flowAccents.AutoSize = true; _flowAccents.Checked = map.FlowAccentSequences;
+            _tips.SetToolTip(_flowAccents, "During Hold/Rest, the first Alternate hit keeps the starting side, then each Alternate flips from the preceding cue. Current/Left/Right cues also establish the side. On returning to dance with Align off, recover through centre, then land on the opposite side from the final accent. The dance keeps that handedness until a new rest, Align or dance/rhythm change. Hit times, BPM and beat phase stay unchanged. Off preserves legacy choreography. Save applies.");
+            mapOptions.Controls.Add(_enabled); mapOptions.Controls.Add(_flowAccents);
+            layout.Controls.Add(mapOptions, 0, 4); layout.Controls.Add(_status, 0, 5); layout.Controls.Add(actions, 0, 6);
+            BuildSidebarLayout(transport,editing,actions,help,layout);
+            _grid.CellValueChanged += (sender, args) => { RefreshSwingCells(); MarkDirty(); };
+            _grid.CellToolTipTextNeeded += (sender, args) =>
+            {
+                if (args.ColumnIndex >= 0) args.ToolTipText = _grid.Columns[args.ColumnIndex].ToolTipText;
+                if (args.RowIndex >= 0 && args.ColumnIndex == 10 && Convert.ToString(_grid.Rows[args.RowIndex].Cells[10].Value) == "Custom (saved)")
+                    args.ToolTipText = "Preserved saved ramp: reaches " + _grid.Rows[args.RowIndex].Cells[9].Value +
+                        " BPM over " + _grid.Rows[args.RowIndex].Cells[2].Value + " seconds from this point. Choose Ramp to next to link it to the next point instead.";
+            };
+            _grid.CurrentCellDirtyStateChanged += (sender, args) =>
+            {
+                if (_grid.IsCurrentCellDirty && (_grid.CurrentCell is DataGridViewCheckBoxCell ||
+                    _grid.CurrentCell is DataGridViewComboBoxCell)) _grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            };
+            // Open combo cells after the grid has finished its selection/click handling.
+            // Opening during MouseDown can let the same click close them again.
+            _grid.CellClick += OpenComboOnClick;
+            _grid.CellDoubleClick += SeekDoubleClickedRow;
+            _accentGrid.CellDoubleClick += SeekDoubleClickedRow;
+            _grid.SelectionChanged += (sender, args) => RefreshMarkers();
+            _enabled.CheckedChanged += (sender, args) => MarkDirty();
+            _flowAccents.CheckedChanged += (sender, args) => MarkDirty();
+            _timer.Tick += (sender, args) => PollPlayback();
+            _cursorTimer.Tick += (sender,args)=>{
+                if(!OwnerPresents || _ownerPresentationFailed || System.Diagnostics.Stopwatch.GetTimestamp()-_lastOwnerPresentation>System.Diagnostics.Stopwatch.Frequency/20)PresentEditorSafely();
+            };
+            Shown += (sender,args)=>{
+                RefreshMarkers();PollPlayback();
+                if(IsDisposed)return; // Song following may replace this editor during the poll.
+                _timer.Start();
+                if(OwnerPresents){_cursorTimer.Start();return;}
+                var handle=Handle;string failure;
+                _cursorPacer=RenderFramePacer.TryCreate(token=>PostMessage(handle,CursorMessage,new IntPtr(token),IntPtr.Zero),out failure);
+                if(_cursorPacer!=null)_cursorPacer.Start(120);else _cursorTimer.Start();
+            };
+            VisibleChanged+=(sender,args)=>{if(_cursorPacer!=null){if(Visible)_cursorPacer.Start(120);else _cursorPacer.Stop();}};
+            Resize+=(sender,args)=>{if(_cursorPacer!=null){if(WindowState==FormWindowState.Minimized)_cursorPacer.Stop();else if(Visible)_cursorPacer.Start(120);}};
+            FormClosing += (sender, args) =>
+            {
+                if (_preview.Active) { args.Cancel = true; _closeAfterPreview = true; _preview.Stop(); return; }
+                if (_dirty && MessageBox.Show(this, "Close without saving your latest edits? Earlier saves will stay applied.",
+                    "Unsaved tempo-map edits", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                    args.Cancel = true;
+            };
+            _grid.DataError += (sender, args) => { args.ThrowException = false; };
+            FormClosed += (sender,args)=>RestorePreview();
+        }
+
+        internal void PresentFromOwner()
+        {
+            if(_ownerPresentationFailed)return;
+            _lastOwnerPresentation=System.Diagnostics.Stopwatch.GetTimestamp();
+            PresentEditorSafely();
+        }
+        private void PresentEditorSafely()
+        {
+            try { PresentEditor(); }
+            catch(Exception ex) {
+                _ownerPresentationFailed=true;
+                if(!IsDisposed)_status.Text="Timeline switched to timer rendering: "+ex.Message;
+            }
+        }
+        private void PresentEditor()
+        {
+            if(IsDisposed || !Visible || WindowState==FormWindowState.Minimized)return;
+            if(_presentationPoll.ElapsedMilliseconds>=120){_presentationPoll.Restart();PollPlayback();}
+            if(!IsDisposed){UpdateCursor();UpdateEditorControls(this);}
+        }
+        private static void UpdateEditorControls(Control control)
+        {
+            if(control.IsDisposed || !control.Visible)return;
+            control.Update();
+            foreach(Control child in control.Controls)UpdateEditorControls(child);
+        }
+
+        private void UpdateCursor(){
+            if(!Visible || WindowState==FormWindowState.Minimized || _timeline.Scrubbing)return;
+            try{var now=EditingPosition();if(now.HasValue && Math.Abs(_timeline.Position-now.Value)>.0005){_timeline.Position=now.Value;_timeline.Invalidate();}}
+            catch(Exception ex){_status.Text=ex.Message;}
+        }
+        protected override void WndProc(ref Message m){
+            if(m.Msg==CursorMessage){
+                var pacer=_cursorPacer;if(pacer==null)return;
+                if(pacer.Failure!=null){pacer.Stop();_cursorTimer.Start();return;}
+                double late;long skipped;
+                try{
+                    if(pacer.BeginFrame(m.WParam.ToInt32(),out late,out skipped)){
+                        // WM_TIMER/WM_PAINT are lower priority than posted frames.
+                        // Service the editor, not just its timeline, before acking.
+                        PresentEditor();
+                    }
+                }
+                catch(Exception ex){
+                    pacer.Stop();_cursorTimer.Start();
+                    if(!IsDisposed)_status.Text="Timeline switched to timer rendering: "+ex.Message;
+                }
+                finally{pacer.EndFrame(m.WParam.ToInt32());}
+                return;
+            }
+            base.WndProc(ref m);
+        }
+        protected override void OnHandleDestroyed(EventArgs e){_cursorPacer?.Dispose();_cursorPacer=null;base.OnHandleDestroyed(e);}
+        private sealed class DarkTabs : TabControl
+        {
+            internal DarkTabs(){
+                SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);
+                SizeMode=TabSizeMode.Fixed;ItemSize=new Size(130,32);Padding=new Point(12,6);
+            }
+            protected override void OnPaint(PaintEventArgs e){
+                e.Graphics.Clear(Color.FromArgb(23,27,38));
+                for(int i=0;i<TabCount;i++){
+                    var r=GetTabRect(i);
+                    using(var brush=new SolidBrush(i==SelectedIndex?Color.FromArgb(60,87,118):Color.FromArgb(30,35,48)))e.Graphics.FillRectangle(brush,r);
+                    TextRenderer.DrawText(e.Graphics,TabPages[i].Text,Font,r,ForeColor,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
+                    if(i==SelectedIndex)using(var pen=new Pen(Color.FromArgb(98,178,221),2))e.Graphics.DrawLine(pen,r.Left,r.Bottom-2,r.Right,r.Bottom-2);
+                }
+            }
+            protected override void OnSelectedIndexChanged(EventArgs e){base.OnSelectedIndexChanged(e);Invalidate();}
+        }
+        private void BuildSidebarLayout(FlowLayoutPanel transport,FlowLayoutPanel editing,FlowLayoutPanel actions,Label help,TableLayoutPanel old)
+        {
+            SuspendLayout();ClientSize=new Size(1440,800);MinimumSize=new Size(1180,740);
+            var root=new TableLayoutPanel {Dock=DockStyle.Fill,Padding=new Padding(14),ColumnCount=2,RowCount=3};
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,220));root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute,42));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,44));
+            var heading=new Label {Text=Text.Substring("Tempo map - ".Length),Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft,AutoEllipsis=true};
+            root.Controls.Add(heading,0,0);
+            var tempoHeader=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
+            tempoHeader.Controls.Add(new Label {Text="Starting BPM",AutoSize=true,Margin=new Padding(3,6,5,0)});
+            _startingBpm=new NumericUpDown {Minimum=40,Maximum=240,DecimalPlaces=2,Increment=.1m,Width=85,BackColor=BackColor,ForeColor=ForeColor};
+            _startingBpm.Value=(decimal)Math.Max(40,Math.Min(240,_grid.Rows.Count>0?Number(_grid.Rows[0],1):120));
+            tempoHeader.Controls.Add(_startingBpm);
+            _startingBpm.ValueChanged+=(sender,args)=>{if(!_syncingBpm && _grid.Rows.Count>0){_grid.EndEdit();_grid.Rows[0].Cells[1].Value=_startingBpm.Value.ToString(CultureInfo.CurrentCulture);_enabled.Checked=true;}};
+            _tips.SetToolTip(_startingBpm,"BPM of the first point only. Later points remain unchanged. Save applies; enable Use this map to use it.");
+            var tap=new PartyTapTempo();
+            AddButton(tempoHeader,"Tap BPM",()=>{double bpm;if(tap.Tap(System.Diagnostics.Stopwatch.GetTimestamp(),System.Diagnostics.Stopwatch.Frequency,out bpm)&&bpm>=40&&bpm<=240)_startingBpm.Value=(decimal)Math.Round(bpm,2);});
+            AddButton(tempoHeader,"Align beat now",AlignStartingBeat);
+            root.Controls.Add(tempoHeader,1,0);
+            var side=new FlowLayoutPanel {Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true,BackColor=Color.FromArgb(30,35,48),Padding=new Padding(8)};
+            Action<string> label=text=>side.Controls.Add(new Label {Text=text,Width=170,Height=26,TextAlign=ContentAlignment.BottomLeft,Margin=new Padding(3,8,3,5)});
+            Action<Control> wide=c=>{c.Dock=DockStyle.None;c.AutoSize=false;c.Width=166;c.Height=30;c.Margin=new Padding(3,3,3,3);side.Controls.Add(c);};
+            Func<Control[],FlowLayoutPanel> row=items=>{
+                var panel=new FlowLayoutPanel {Width=176,Height=34,WrapContents=false,Margin=Padding.Empty};
+                foreach(var item in items){item.Dock=DockStyle.None;item.AutoSize=false;item.Margin=new Padding(3);panel.Controls.Add(item);}side.Controls.Add(panel);return panel;
+            };
+            label("PLAYBACK");wide(_play);wide(_previewButton);
+            _seekTime.Width=108;_seekExact.Width=52;row(new Control[]{_seekTime,_seekExact});
+            label("NUDGE PLAYHEAD");_back.Text="-";_forward.Text="+";_back.Width=_forward.Width=32;_seekStep.Width=84;row(new Control[]{_back,_seekStep,_forward});
+            label("LOOP RANGE (seconds)");_loopStart.Width=_loopEnd.Width=78;row(new Control[]{_loopStart,_loopEnd});
+            var useView=editing.Controls.OfType<Button>().First(b=>b.Text=="Use view");useView.Text="Use visible range";wide(useView);wide(_loopButton);
+            wide(editing.Controls.OfType<Button>().First(b=>b.Text=="Whole song"));wide(_snapHits);
+            label("SONG OPTIONS");_enabled.Text="Use this map";wide(_enabled);wide(_flowAccents);
+            var helpButton=AddButton(side,"Timeline help",()=>MessageBox.Show(this,
+                "Wheel: zoom under pointer. Drag empty space: pan. Click: seek.\n"+
+                "Drag diamonds or gold dots: edit time. Section and accent markers snap together within 8 pixels; hold Shift for free movement.\n"+
+                "Shift-drag empty space: select loop. White handles: accent durations. Arrow keys: nudge selected accent 10 ms; Shift-arrows: 1 ms.\n"+
+                "Pointer time is shown to milliseconds. Major ticks use round times with five minor divisions. The gold playhead crosses the waveform.\n"+
+                "Snap hits optionally snaps accents to candidate audio attacks. Save applies both tabs. Preview auditions valid unsaved edits. Saved editors follow song changes; unsaved edits stay with their song.",
+                "Timeline help",MessageBoxButtons.OK,MessageBoxIcon.Information));wide(helpButton);
+            _tips.SetToolTip(_snapHits,"Snap accents to audio attacks within 40 ms. Marker alignment takes priority; Shift bypasses both. Peaks are candidates, not confirmed beats.");
+            var content=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Margin=new Padding(8,0,0,0)};
+            content.RowStyles.Add(new RowStyle(SizeType.Absolute,30));content.RowStyles.Add(new RowStyle(SizeType.Absolute,220));content.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            content.Controls.Add(_overview,0,0);content.Controls.Add(_timeline,0,1);content.Controls.Add(_tabs,0,2);
+            var footer=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=3,RowCount=1};footer.RowStyles.Add(new RowStyle(SizeType.Percent,100));footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,250));footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,170));
+            var left=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};left.Controls.Add(_add);
+            var menu=new ContextMenuStrip {BackColor=Color.FromArgb(30,35,48),ForeColor=ForeColor,Renderer=new RowMenuRenderer(),ShowImageMargin=false};
+            menu.Items.Add("Delete row",null,(sender,args)=>DeleteSelectedRow());
+            var seek=menu.Items.Add("Seek to row",null,(sender,args)=>{try{if(ActiveGrid.CurrentRow!=null)SeekTo(Number(ActiveGrid.CurrentRow,0));}catch(Exception ex){_status.Text=ex.Message;}});
+            var ramp=menu.Items.Add("Ramp from previous",null,(sender,args)=>RampToRow());
+            var copy=menu.Items.Add("Add accent at this time",null,(sender,args)=>CopyTimeToOtherTab(ActiveGrid));
+            menu.Opening+=(sender,args)=>{seek.Enabled=_seekRow.Enabled&&ActiveGrid.CurrentRow!=null;ramp.Enabled=_tabs.SelectedIndex==0;copy.Text=_tabs.SelectedIndex==0?"Add accent at this time":"Add section at this time";};
+            var rowButton=AddButton(left,"Row actions",()=>{});rowButton.Click+=(sender,args)=>menu.Show(rowButton,new Point(0,rowButton.Height));rowButton.Disposed+=(sender,args)=>menu.Dispose();
+            var right=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false,FlowDirection=FlowDirection.RightToLeft};
+            var close=actions.Controls.OfType<Button>().First(b=>b.Text=="Close");var save=actions.Controls.OfType<Button>().First(b=>b.Text=="Save");right.Controls.Add(close);right.Controls.Add(save);
+            footer.Controls.Add(left,0,0);footer.Controls.Add(_status,1,0);footer.Controls.Add(right,2,0);
+            root.Controls.Add(side,0,1);root.Controls.Add(content,1,1);root.Controls.Add(footer,0,2);root.SetColumnSpan(footer,2);
+            // Keep the existing command controls owned for their enabled-state bindings.
+            old.Visible=false;Controls.Add(old);Controls.Add(root);root.BringToFront();ResumeLayout(true);
+        }
+
+        private void AlignStartingBeat()
+        {
+            try{
+                if(_grid.Rows.Count!=1 || StyleAt(_grid.Rows[0])!=PartyDanceStyle.Normal || Convert.ToBoolean(_grid.Rows[0].Cells[4].Value)){
+                    _status.Text="For multi-section maps use Align on the section row. Align beat now is for one Normal section without row alignment.";return;}
+                _grid.EndEdit();var pos=EditingPosition();if(!pos.HasValue)return;
+                var map=ReadMap();
+                _initialBeat+=(map.Sections[0].Rhythm==PartyRhythm.AccentFour?3:0)-map.At(pos.Value).Beat;
+                _enabled.Checked=true;MarkDirty();
+                _status.Text="Starting beat marked at "+pos.Value.ToString("0.000")+" s. Save to apply.";
+            }catch(Exception ex){_status.Text=ex.Message;}
+        }
+
+        private void MoveSection(int row,double seconds)
+        {
+            if(row<=0||row>=_grid.Rows.Count)return;
+            _grid.EndEdit();var old=_grid.Rows[row].Cells[0].Value;
+            try{_grid.Rows[row].Cells[0].Value=seconds.ToString("0.000",CultureInfo.CurrentCulture);ReadMap();}
+            catch(Exception ex){_grid.Rows[row].Cells[0].Value=old;_status.Text="Section not moved: "+ex.Message;}
+            _timeline.Focus();
+        }
+        private void MoveAccent(int row,double seconds){
+            if(row<0||row>=_accentGrid.Rows.Count)return;
+            _accentGrid.EndEdit();_accentGrid.Rows[row].Cells[0].Value=seconds.ToString("0.000",CultureInfo.CurrentCulture);
+            _timeline.Focus();
+        }
+        private void RestorePreview(){if(_previewApplied){_previewApplied=false;_previewMap?.Invoke(null);}}
+        private bool ApplyPreview(){
+            try{var map=ReadMap();_previewMap?.Invoke(map);_previewApplied=_previewMap!=null;_previewDirty=false;return true;}
+            catch(Exception ex){_previewDirty=false;_status.Text="Preview not updated: "+ex.Message;return false;}
+        }
+        private void BeginPreview(bool loop){
+            if(_preview.Active){_preview.Stop();return;}
+            if(_playbackBusy() || !_position().HasValue)return;
+            if(loop && _loopEnd.Value<=_loopStart.Value){_status.Text="Loop end must be after its start.";return;}
+            if(!ApplyPreview())return;
+            if(loop)_preview.StartLoop((double)_loopStart.Value,(double)_loopEnd.Value,_timeline.Duration);
+            else _preview.Start((double)_seekTime.Value,_timeline.Duration);
+            if(!_preview.Active)RestorePreview();
+        }
+
+        private sealed class RowMenuRenderer : ToolStripProfessionalRenderer
+        {
+            protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+            {
+                using (var brush = new SolidBrush(e.Item.Selected ? Color.FromArgb(60, 87, 118) : Color.FromArgb(30, 35, 48)))
+                    e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.Item.Size));
+            }
+            protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+            {
+                e.TextColor = e.Item.Enabled ? Color.FromArgb(238, 241, 248) : Color.FromArgb(135, 148, 168);
+                base.OnRenderItemText(e);
+            }
+        }
+
+        private void SetupRowMenu()
+        {
+            _rowMenu.BackColor = Color.FromArgb(30, 35, 48); _rowMenu.ForeColor = ForeColor;
+            _rowMenu.Renderer = new RowMenuRenderer(); _rowMenu.ShowImageMargin = false;
+            var copy = new ToolStripMenuItem(); _rowMenu.Items.Add(copy);
+            _rowMenu.Opening += (sender, args) => {
+                var grid = _rowMenu.SourceControl as DataGridView;
+                args.Cancel = grid?.CurrentRow == null;
+                copy.Text = grid == _grid ? "Add accent at this time" : "Add section at this time";
+            };
+            copy.Click += (sender, args) => CopyTimeToOtherTab(_rowMenu.SourceControl as DataGridView);
+            foreach (var grid in new[] { _grid, _accentGrid })
+            {
+                grid.ContextMenuStrip = _rowMenu;
+                grid.MouseDown += (sender, args) => {
+                    if (args.Button != MouseButtons.Right) return;
+                    var hit = grid.HitTest(args.X, args.Y);
+                    if (hit.RowIndex >= 0) grid.CurrentCell = grid.Rows[hit.RowIndex].Cells[0];
+                    else grid.CurrentCell = null;
+                };
+            }
+        }
+
+        private void CopyTimeToOtherTab(DataGridView source)
+        {
+            if (source?.CurrentRow == null) return;
+            try
+            {
+                source.EndEdit();
+                var seconds = Number(source.CurrentRow, 0);
+                if (seconds < 0 || seconds > 604800) throw new ArgumentException("Use a time between 0 and 604800 seconds.");
+                var destination = source == _grid ? _accentGrid : _grid;
+                foreach (DataGridViewRow row in destination.Rows)
+                    if (Math.Abs(Number(row, 0) - seconds) < .0000001)
+                    {
+                        _tabs.SelectedIndex = destination == _grid ? 0 : 1;
+                        destination.CurrentCell = row.Cells[0];
+                        _status.Text = "A row already exists at this time; selected it without adding a duplicate.";
+                        return;
+                    }
+                if (destination == _accentGrid)
+                {
+                    var template = _accentGrid.CurrentRow;
+                    _accentGrid.Rows.Add(seconds.ToString("0.#########", CultureInfo.CurrentCulture),
+                        template?.Cells[1].Value ?? 1.7d, template?.Cells[2].Value ?? .1d, template?.Cells[3].Value ?? 0d,
+                        template?.Cells[4].Value ?? AccentMotions[0], template?.Cells[5].Value ?? AccentPoses[0], template?.Cells[6].Value,template?.Cells[7].Value ?? false);
+                }
+                else
+                {
+                    var map = ReadMap();
+                    var section = map.Sections.Last(s => s.StartSeconds <= seconds);
+                    var bpm = map.At(seconds).Bpm;
+                    var preceding = _grid.Rows.Cast<DataGridViewRow>().Single(r => Number(r, 0) == section.StartSeconds);
+                    var remaining = section.StartSeconds + section.RampSeconds - seconds;
+                    AddRow(seconds, bpm, Math.Max(0, remaining), section.Style, false, false,
+                        section.Rhythm, section.SwingPercent, section.EffectiveSpeed, remaining > 0 ? (double?)section.Bpm : null);
+                    var added = _grid.Rows[_grid.Rows.Count - 1];
+                    if (section.RampToNext) added.Cells[10].Value = "Ramp to next";
+                    else if (remaining > 0)
+                    {
+                        // Split a legacy custom curve without changing its slope or endpoint.
+                        preceding.Cells[2].Value = (seconds - section.StartSeconds).ToString("0.#########", CultureInfo.CurrentCulture);
+                        preceding.Cells[9].Value = bpm.ToString("0.#########", CultureInfo.CurrentCulture);
+                        added.Cells[10].Value = "Custom (saved)";
+                    }
+                }
+                _tabs.SelectedIndex = destination == _grid ? 0 : 1;
+                destination.CurrentCell = destination.Rows[destination.Rows.Count - 1].Cells[0];
+                MarkDirty();
+                _status.Text = destination == _grid ? "Section added at the accent time, preserving the tempo curve. Edit its dance if needed, then Save." :
+                    "Accent added at the section time using the selected accent's settings. Save applies it. Playback has not moved.";
+            }
+            catch (Exception ex) { _status.Text = ex.Message; }
+        }
+
+        private void SetupAccentGrid(PartyTempoMap map)
+        {
+            _accentGrid.Dock = DockStyle.Fill; _accentGrid.AllowUserToAddRows = false;
+            _accentGrid.AllowUserToDeleteRows = false; _accentGrid.RowHeadersVisible = false;
+            _accentGrid.MultiSelect = false; _accentGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            _accentGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            _accentGrid.BackgroundColor = _grid.BackgroundColor; _accentGrid.GridColor = _grid.GridColor;
+            _accentGrid.BorderStyle = BorderStyle.None; _accentGrid.EnableHeadersVisualStyles = false;
+            _accentGrid.ColumnHeadersHeight = 32; _accentGrid.RowTemplate.Height = 29;
+            _accentGrid.DefaultCellStyle = _grid.DefaultCellStyle.Clone();
+            _accentGrid.AlternatingRowsDefaultCellStyle = _grid.AlternatingRowsDefaultCellStyle.Clone();
+            _accentGrid.ColumnHeadersDefaultCellStyle = _grid.ColumnHeadersDefaultCellStyle.Clone();
+            _accentGrid.Columns.Add("time", "Hit time (s)");
+            _accentGrid.Columns.Add("strength", "Strength");
+            _accentGrid.Columns.Add("prepare", "Lead-in (s)");
+            _accentGrid.Columns.Add("hold", "Hold after hit (s)");
+            _accentGrid.Columns.Add(new DataGridViewComboBoxColumn { Name = "motion", HeaderText = "Motion", DataSource = AccentMotions, FillWeight = 155 });
+            _accentGrid.Columns.Add(new DataGridViewComboBoxColumn { Name = "pose", HeaderText = "Pose", DataSource = AccentPoses, FillWeight = 155 });
+            _accentGrid.Columns.Add("recovery", "Recovery (s)");
+            _accentGrid.Columns.Add(new DataGridViewCheckBoxColumn {Name="priority",HeaderText="New hit wins",FillWeight=100});
+            _accentGrid.Columns[7].ToolTipText="Optional: at this hit time, interrupt older accents even if their remaining dip is stronger. Older holds/recoveries do not return afterwards. Preparation before this hit still follows normal overlap rules. Off preserves the existing strongest-accent behavior. This does not change beat timing.";
+            _accentGrid.Columns[6].ToolTipText = "Time to recover after the hit/hold, 0.02-2 s. Blank keeps the original default: Bop 0.22 s, Rebound 0.42 s. Shorten for tightly spaced hits. Drag the selected accent's rightmost duration handle for the same adjustment.";
+            _accentGrid.Columns[5].ToolTipText = "Independent of Motion: keep the current pose, choose a left/right hit, or alternate across cues using Alternate sides. Use Rebound + Alternate sides for stronger side hits. Left/right names the blue dancer's raised-hand side; pink mirrors it. Landings persist through a continuous rest. Seeking preserves the sequence.";
+            _accentGrid.Columns[4].ToolTipText = "Bop is the original dip. Rebound is a deeper landing and recovery bounce. Combine either with any Pose, including Alternate sides. Strength and lead-in are independent.";
+            _accentGrid.CellClick += OpenComboOnClick;
+            _accentGrid.CurrentCellDirtyStateChanged += (sender, args) => { if (_accentGrid.IsCurrentCellDirty && (_accentGrid.CurrentCell is DataGridViewComboBoxCell || _accentGrid.CurrentCell is DataGridViewCheckBoxCell)) _accentGrid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+            _accentGrid.Columns[0].ToolTipText = "Double-click a row to seek. Exact song time of the deepest downward bop. Not when you click Save. Cues do not change BPM, rhythm or beat alignment. They can also add a hit during Rest or Hold.";
+            _accentGrid.Columns[1].ToolTipText = "Bop strength: 0.5 = light, 1 = regular, 1.7 = strong (default), 2.5 = maximum. An accent emphasizes the current pose without forcing another side landing.";
+            _accentGrid.Columns[2].ToolTipText = "Seconds to crouch into the hit, 0-1. Default 0.1. Zero gives an immediate hit. The deepest dip occurs at Hit time, followed by Recovery (default Bop 0.22 s, Rebound 0.42 s).";
+            _accentGrid.Columns[3].ToolTipText = "Optional 0-5 seconds to keep the landing pose and dip after the hit. Zero recovers immediately. The beat keeps counting, then the normal pose sequence resumes. For a longer silent passage use Rest in Sections.";
+            foreach (DataGridViewColumn c in _accentGrid.Columns) c.SortMode = DataGridViewColumnSortMode.NotSortable;
+            foreach (var cue in map.Accents)
+                _accentGrid.Rows.Add(cue.TimeSeconds.ToString("0.#########", CultureInfo.CurrentCulture), cue.Strength.ToString(CultureInfo.CurrentCulture),
+                    cue.PrepareSeconds.ToString(CultureInfo.CurrentCulture), cue.HoldSeconds.ToString(CultureInfo.CurrentCulture), AccentMotions[cue.Motion == PartyAccentMotion.Bop ? 0 : 1], AccentPoses[(int)cue.EffectivePose], cue.RecoverySeconds?.ToString(CultureInfo.CurrentCulture),cue.NewHitPriority);
+            _accentGrid.CellToolTipTextNeeded += (sender, args) => { if (args.ColumnIndex >= 0) args.ToolTipText = _accentGrid.Columns[args.ColumnIndex].ToolTipText; };
+            _accentGrid.CellValueChanged += (sender, args) => MarkDirty();
+            _accentGrid.SelectionChanged += (sender, args) => RefreshMarkers();
+            _accentGrid.DataError += (sender, args) => { args.ThrowException = false; };
+        }
+
+        private static void ConfigureSeekNumber(NumericUpDown input, decimal minimum, decimal maximum,
+            decimal increment, decimal value, int places)
+        {
+            input.Minimum = minimum; input.Maximum = maximum; input.Increment = increment;
+            input.DecimalPlaces = places; input.Value = value; input.Width = 75;
+            input.Margin = new Padding(3, 7, 3, 3);
+            input.BackColor = Color.FromArgb(30, 35, 48); input.ForeColor = Color.FromArgb(232, 236, 245);
+        }
+
+        private void OpenComboOnClick(object sender, DataGridViewCellEventArgs args)
+        {
+            if (args.RowIndex < 0 || args.ColumnIndex < 0 ||
+                !(((DataGridView)sender)[args.ColumnIndex, args.RowIndex] is DataGridViewComboBoxCell)) return;
+            var grid = (DataGridView)sender;
+            var cell = grid[args.ColumnIndex, args.RowIndex];
+            BeginInvoke(new Action(() =>
+            {
+                if (IsDisposed || grid.IsDisposed || grid.CurrentCell != cell || cell.ReadOnly) return;
+                if (grid.BeginEdit(true) && grid.EditingControl is ComboBox combo && !combo.DroppedDown)
+                    combo.DroppedDown = true;
+            }));
+        }
+
+        private void SeekDoubleClickedRow(object sender, DataGridViewCellEventArgs args)
+        {
+            if (args.RowIndex < 0) return;
+            var grid = (DataGridView)sender;
+            if (args.ColumnIndex >= 0 && (grid[args.ColumnIndex, args.RowIndex] is DataGridViewComboBoxCell ||
+                grid[args.ColumnIndex, args.RowIndex] is DataGridViewCheckBoxCell)) return;
+            try { grid.EndEdit(); SeekTo(Number(grid.Rows[args.RowIndex], 0)); }
+            catch (Exception ex) { _status.Text = ex.Message; }
+        }
+
+        private double? EditingPosition()
+        {
+            var sample=_positionSample?.Invoke();
+            var reported = _positionSample==null ? _position() : sample==null ? (double?)null : sample.Position/1000d;
+            if (!reported.HasValue) { _pendingSeek = null; _cursorClock.Reset(); return null; }
+            if (_pendingSeek.HasValue && _seekAge.ElapsedMilliseconds < 1500)
+            {
+                bool playing=_displayPlaying();
+                var expected=_pendingSeek.Value+(playing?_seekAge.Elapsed.TotalSeconds:0);
+                if(sample==null){
+                    if(Math.Abs(reported.Value-expected)<=(playing?.075:.001))_seekAcks=3;
+                }else if(sample.PositionTimestamp>_seekIssuedAt && sample.PositionTimestamp!=_ackSample){
+                    _ackSample=sample.PositionTimestamp;
+                    var atSample=_pendingSeek.Value+(playing?(sample.PositionTimestamp-_seekIssuedAt)/(double)System.Diagnostics.Stopwatch.Frequency:0);
+                    _seekAcks=Math.Abs(reported.Value-atSample)<=(playing?.10:.001)?_seekAcks+1:0;
+                }
+                if(_seekAcks<3)return Math.Min(_timeline.Duration,expected);
+                _cursorClock.Seek((int)Math.Round(expected*1000),System.Diagnostics.Stopwatch.GetTimestamp(),System.Diagnostics.Stopwatch.Frequency,playing);
+            }
+            _pendingSeek = null;
+            return Math.Min(_timeline.Duration, _cursorClock.PositionAt((int)Math.Round(reported.Value * 1000),
+                System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency, _displayPlaying(), false, sample==null || sample.PositionTimestamp==0 ? (long?)null : sample.PositionTimestamp) / 1000d);
+        }
+
+        private static PartyDanceStyle StyleAt(DataGridViewRow row)
+        {
+            var value = Convert.ToString(row.Cells[3].Value);
+            if (value == "Normal") return PartyDanceStyle.Normal;
+            if (value == "Side to side") return PartyDanceStyle.SideToSide;
+            if (value == "Hold pose") return PartyDanceStyle.Hold;
+            if (value == "Rest (keep counting)") return PartyDanceStyle.Rest;
+            throw new ArgumentException("Choose a listed dance.");
+        }
+
+        private static double SpeedAt(DataGridViewRow row)
+        {
+            var index = Array.IndexOf(Speeds, Convert.ToString(row.Cells[8].Value));
+            if (index < 0) throw new ArgumentException("Choose a listed speed.");
+            return index == 0 ? 0.5 : index == 2 ? 2 : 1;
+        }
+
+        private void AddRow(double start, double bpm, double ramp, PartyDanceStyle style, bool align, bool countIn = false, PartyRhythm rhythm = PartyRhythm.Straight, double swingPercent = 66.67, double speed = 1, double? fromBpm = null)
+        {
+            _grid.Rows.Add(start.ToString("0.#########", CultureInfo.CurrentCulture), bpm.ToString("0.#########", CultureInfo.CurrentCulture),
+                ramp.ToString("0.#########", CultureInfo.CurrentCulture), style == PartyDanceStyle.Rest ? "Rest (keep counting)" : style == PartyDanceStyle.Hold ? "Hold pose" : style == PartyDanceStyle.SideToSide ? "Side to side" : "Normal", align, countIn, Rhythms[(int)rhythm], swingPercent.ToString("0.#########", CultureInfo.CurrentCulture), Speeds[(style == PartyDanceStyle.HalfSpeed || speed == 0.5) ? 0 : speed == 2 ? 2 : 1], fromBpm?.ToString("0.#########", CultureInfo.CurrentCulture), "Keep BPM");
+            if (ramp <= 0)
+                ((DataGridViewComboBoxCell)_grid.Rows[_grid.Rows.Count - 1].Cells[10]).DataSource = new[] { "Keep BPM", "Ramp to next" };
+            RefreshSwingCells();
+        }
+
+        private void RefreshSwingCells()
+        {
+            foreach (DataGridViewRow row in _grid.Rows)
+            {
+                var active = Convert.ToString(row.Cells[6].Value) == "Swing";
+                row.Cells[7].ReadOnly = !active;
+                row.Cells[7].Style.ForeColor = active ? ForeColor : Color.FromArgb(135, 148, 168);
+            }
+        }
+
+        private Button AddButton(FlowLayoutPanel panel, string text, Action action)
+        {
+            var button = new Button { Text = text, AutoSize = true, Height = 30, FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(43, 53, 73), ForeColor = Color.FromArgb(238, 241, 248), Padding = new Padding(6, 2, 6, 2) };
+            button.FlatAppearance.BorderColor = Color.FromArgb(83, 99, 124);
+            _tips.SetToolTip(button, text == "Save" ? "Apply both tabs to this song and keep the editor open. Saving does not capture the current beat." :
+                text == "Delete row" ? "Delete the selected row from the current tab. Save applies the deletion." :
+                text == "Seek to row" ? "Seek to the selected section or accent without changing it." :
+                text == "Close" ? "Close the editor; unsaved edits require confirmation." :
+                text == "Play / pause" ? "Toggle playback to preview your saved changes." : "Move playback by the Step (s) value without changing row times.");
+            button.Click += (sender, args) => action(); panel.Controls.Add(button); return button;
+        }
+
+        private void MarkDirty()
+        {
+            _dirty = true; _previewDirty=true; _status.Text = "Unsaved edits - preview auditions them; Save commits them.";
+            RefreshMarkers();
+        }
+
+        private void RefreshMarkers()
+        {
+            if(_startingBpm!=null && _grid.Rows.Count>0){
+                double bpm;if(double.TryParse(Convert.ToString(_grid.Rows[0].Cells[1].Value),out bpm)&&bpm>=40&&bpm<=240){
+                    _syncingBpm=true;_startingBpm.Value=(decimal)bpm;_syncingBpm=false;
+                }
+            }
+            _timeline.Markers.Clear();
+            foreach (DataGridViewRow row in _grid.Rows)
+            {
+                double seconds;
+                if (double.TryParse(Convert.ToString(row.Cells[0].Value), out seconds) &&
+                    !double.IsNaN(seconds) && !double.IsInfinity(seconds) && seconds >= 0 && seconds <= _timeline.Duration)
+                    _timeline.Markers.Add(new PartyTimeline.Marker { Row = row.Index, Seconds = seconds,
+                        Style = Convert.ToString(row.Cells[3].Value) == "Rest (keep counting)" ? PartyDanceStyle.Rest :
+                            Convert.ToString(row.Cells[3].Value) == "Hold pose" ? PartyDanceStyle.Hold :
+                            Convert.ToString(row.Cells[3].Value) == "Side to side" ? PartyDanceStyle.SideToSide : PartyDanceStyle.Normal });
+            }
+            _timeline.Accents.Clear();
+            foreach (DataGridViewRow row in _accentGrid.Rows)
+            {
+                double time;
+                if (double.TryParse(Convert.ToString(row.Cells[0].Value), out time) && !double.IsNaN(time) && !double.IsInfinity(time) && time >= 0 && time <= _timeline.Duration)
+                    _timeline.Accents.Add(new PartyTimeline.Marker { Row = row.Index, Seconds = time, Prepare=SafeDuration(row,2,.1), Hold=SafeDuration(row,3,0), Recovery=SafeDuration(row,6,Convert.ToString(row.Cells[4].Value)==AccentMotions[0]?.22:.42) });
+            }
+            _timeline.SelectedRow = _tabs.SelectedIndex == 0 ? _grid.CurrentRow?.Index ?? -1 : -1;
+            _timeline.SelectedAccent = _tabs.SelectedIndex == 1 ? _accentGrid.CurrentRow?.Index ?? -1 : -1;
+            _timeline.Invalidate();
+        }
+
+        private static double SafeDuration(DataGridViewRow row,int column,double fallback)
+        {
+            double value;return double.TryParse(Convert.ToString(row.Cells[column].Value),out value) && !double.IsNaN(value) && !double.IsInfinity(value) && value>=0 ? Math.Min(column==2?1:column==3?5:2,value) : fallback;
+        }
+        private void PollPlayback()
+        {
+            try
+            {
+                var position = EditingPosition(); var available = position.HasValue;
+                _waveform.Update(_source.TrackUrl,_timeline.ViewStart,_timeline.ViewLength>0?_timeline.ViewLength:_timeline.Duration,_timeline.Duration);
+                _timeline.Waveform=_waveform.Data;_timeline.WaveformStatus=_waveform.Status;
+                if (available)
+                {
+                    var durationNow = _duration();
+                    if (durationNow > 0 && Math.Abs(durationNow - _timeline.Duration) > .001)
+                    { _timeline.Duration = durationNow; _seekTime.Maximum = (decimal)durationNow;_loopStart.Maximum=_loopEnd.Maximum=(decimal)durationNow; RefreshMarkers(); }
+                }
+                _preview.Tick(_position());
+                if(_preview.Active && _previewDirty)ApplyPreview();
+                if(!_preview.Active)RestorePreview();
+                if (_closeAfterPreview && !_preview.Active) { _closeAfterPreview = false; Close(); return; }
+                if(!available && FollowCurrentSong!=null && !_dirty && !_preview.Active){
+                    _grid.EndEdit();_accentGrid.EndEdit();
+                    if(CanFollow && FollowCurrentSong!=null && FollowCurrentSong())return;
+                }
+                var transportReady = available && !_preview.Active;
+                _back.Enabled = _forward.Enabled = _seekRow.Enabled = _seekExact.Enabled = _seekTime.Enabled = _seekStep.Enabled = transportReady && _timeline.Duration > 0;
+                _timeline.Enabled=_overview.Enabled=available && _timeline.Duration>0;
+                _loopButton.Enabled=available;_loopButton.Text=_preview.Active?"Stop preview":"Loop preview";
+                _loopStart.Enabled=_loopEnd.Enabled=!_preview.Active;
+                if (!_timeline.SelectingLoop) { _timeline.LoopStart=(double)_loopStart.Value;_timeline.LoopEnd=(double)_loopEnd.Value; }
+                _overview.Duration=_timeline.Duration;_overview.LoopStart=_timeline.ViewStart;_overview.LoopEnd=_timeline.ViewStart+(_timeline.ViewLength>0?_timeline.ViewLength:_timeline.Duration);_overview.Invalidate();
+                _play.Enabled = available && !_preview.Active; _add.Enabled = available && !_preview.Active;
+                _previewButton.Enabled = available && (_preview.Active || _timeline.Duration > 0);
+                _previewButton.Text = _preview.Active ? "Stop preview" : "Preview 2 s";
+                var playText = available && _displayPlaying() ? "Pause" : "Play";
+                if (_play.Text != playText) _play.Text = playText;
+                if (available && !_timeline.Scrubbing) _timeline.Position = position.Value;
+                if (available && !_trackWasAvailable) _status.Text = _dirty ? "Original song ready — unsaved edits." : "Original song ready.";
+                _trackWasAvailable = available;
+                if (!available) _status.Text = "Another song is playing. Unsaved edits stay with this song. Save to follow the new song, or close to discard.";
+                _timeline.Invalidate();
+            }
+            catch (Exception ex) { _status.Text = ex.Message; }
+        }
+
+        private void SeekRelative(double seconds)
+        {
+            var position = EditingPosition();
+            if (position.HasValue) SeekTo(position.Value + seconds);
+        }
+
+        private void SeekTo(double seconds) { SeekCore(seconds, false); }
+
+        private void SeekCore(double seconds, bool fromPreview)
+        {
+            try
+            {
+                if (!fromPreview && (_preview.Active || _playbackBusy())) return;
+                if (!_position().HasValue || _timeline.Duration <= 0)
+                { if (fromPreview) throw new InvalidOperationException("Original song is not available for preview."); return; }
+                var clamped = Math.Max(0, Math.Min(_timeline.Duration, seconds));
+                var milliseconds = checked((int)Math.Round(clamped * 1000));
+                _seek(milliseconds);
+                clamped = milliseconds / 1000d;
+                _pendingSeek = clamped; _seekAge.Restart(); _seekIssuedAt=System.Diagnostics.Stopwatch.GetTimestamp();_ackSample=0;_seekAcks=0;_cursorClock.Reset();
+                _seekTime.Value = Math.Max(_seekTime.Minimum, Math.Min(_seekTime.Maximum, (decimal)clamped));
+                _timeline.Position = clamped; _timeline.Invalidate();
+            }
+            catch (Exception ex) { _status.Text = ex.Message; if (fromPreview) throw; }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { _cursorPacer?.Dispose();_cursorPacer=null;_waveform.Dispose(); _preview.Cancel();RestorePreview(); _rowMenu.Dispose(); _timer.Dispose(); _cursorTimer.Dispose(); _tips.Dispose(); _editorFont.Dispose(); }
+            base.Dispose(disposing);
+        }
+
+        private static double Number(DataGridViewRow row, int column)
+        {
+            double value;
+            if (!double.TryParse(Convert.ToString(row.Cells[column].Value), NumberStyles.Float,
+                CultureInfo.CurrentCulture, out value) || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentException("Enter a valid number in " + row.DataGridView.Columns[column].HeaderText + " on row " + (row.Index + 1) + ".");
+            return value;
+        }
+
+        private void DeleteSelectedRow()
+        {
+            if (ActiveGrid.CurrentRow == null) return;
+            ActiveGrid.Rows.Remove(ActiveGrid.CurrentRow);
+            NormalizeLastPoint(); MarkDirty();
+        }
+
+        private void NormalizeLastPoint()
+        {
+            if (_grid.Rows.Count == 0) return;
+            try
+            {
+                var last = _grid.Rows.Cast<DataGridViewRow>().OrderBy(r => Number(r, 0)).Last();
+                if (Convert.ToString(last.Cells[10].Value) == "Ramp to next") last.Cells[10].Value = "Keep BPM";
+            }
+            catch (ArgumentException) { /* Save reports unfinished numeric edits. */ }
+        }
+
+        private void RampToRow()
+        {
+            try
+            {
+                _grid.EndEdit();
+                var rows = _grid.Rows.Cast<DataGridViewRow>().OrderBy(r => Number(r, 0)).ToList();
+                var index = rows.IndexOf(_grid.CurrentRow);
+                if (index <= 0) throw new ArgumentException("Select a destination after the first point.");
+                if (StyleAt(rows[index - 1]) == PartyDanceStyle.Hold)
+                    throw new ArgumentException("Hold freezes tempo. Change the previous point to a dance or Rest first.");
+                rows[index - 1].Cells[10].Value = "Ramp to next";
+                MarkDirty();
+                _status.Text = "Previous point now ramps to this point. Times and BPM stay on their own rows. Save to apply.";
+            }
+            catch (Exception ex) { _status.Text = ex.Message; }
+        }
+
+        private PartyTempoMap ReadMap()
+        {
+            _grid.EndEdit(); _accentGrid.EndEdit();
+            NormalizeLastPoint();
+            var map = new PartyTempoMap { Version = 8, FlowAccentSequences = _flowAccents.Checked, TrackUrl = _source.TrackUrl, InitialBeat = _initialBeat, Enabled = _enabled.Checked };
+            foreach (DataGridViewRow row in _grid.Rows)
+                map.Sections.Add(new PartyTempoSection { StartSeconds = Number(row, 0),
+                    Bpm = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? Number(row, 9) : Number(row, 1),
+                    RampToNext = Convert.ToString(row.Cells[10].Value) == "Ramp to next",
+                    RampSeconds = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? Number(row, 2) : 0,
+                    RampStartBpm = Convert.ToString(row.Cells[10].Value) == "Custom (saved)" ? (double?)Number(row, 1) : null, Style = StyleAt(row),
+                    AlignBeat = Convert.ToBoolean(row.Cells[4].Value ?? false),
+                    CountIn = Convert.ToBoolean(row.Cells[5].Value ?? false),
+                    Rhythm = (PartyRhythm)Array.IndexOf(Rhythms, Convert.ToString(row.Cells[6].Value)),
+                    SwingPercent = Number(row, 7), Speed = SpeedAt(row) });
+            foreach (DataGridViewRow row in _accentGrid.Rows)
+                map.Accents.Add(new PartyAccentCue { TimeSeconds = Number(row, 0), Strength = Number(row, 1),
+                    PrepareSeconds = Number(row, 2), HoldSeconds = Number(row, 3),
+                    NewHitPriority = Convert.ToBoolean(row.Cells[7].Value ?? false),
+                    RecoverySeconds = string.IsNullOrWhiteSpace(Convert.ToString(row.Cells[6].Value)) ? (double?)null : Number(row,6),
+                    Motion = (PartyAccentMotion)Math.Max(0, Array.IndexOf(AccentMotions, Convert.ToString(row.Cells[4].Value))),
+                    Pose = (PartyAccentPose)Math.Max(0, Array.IndexOf(AccentPoses, Convert.ToString(row.Cells[5].Value))) });
+            map.Accents = map.Accents.OrderBy(c => c.TimeSeconds).ToList();
+            map.Sections = map.Sections.OrderBy(s => s.StartSeconds).ToList();
+            map.Validate();
+            return map;
+        }
+
+
+        private void SaveMap()
+        {
+            try
+            {
+                var map = ReadMap();
+                _save(map); _dirty = false;
+                _status.Text = map.Enabled ? "Saved — map applied. Keep listening and editing; this window stays open." : "Saved — map disabled; original BPM timing restored.";
+                RefreshMarkers();
+            }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Tempo map", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        }
+    }
+}

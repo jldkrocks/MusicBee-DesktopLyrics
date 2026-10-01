@@ -1,0 +1,111 @@
+{
+  "version": "1.15.59.0",
+  "cell": [
+    900,
+    1765
+  ],
+  "columns": 4,
+  "logical_frames": [
+    0,
+    3,
+    6,
+    9
+  ],
+  "decoded_bytes": 50832000,
+  "sources": {
+    "Rem": [
+      {
+        "frame": 0,
+        "path": "dancer-source-review\\upscale-four-pose\\refined\\Rem-00.png",
+        "sha256": "964970b3c73cd706b56f87a2a61727ddfeb92ad42473da6a52b1eada19fd911a"
+      },
+      {
+        "frame": 3,
+        "path": "dancer-source-review\\upscale-four-pose\\refined\\Rem-03.png",
+        "sha256": "0479587d7bacf65cac4be1876917500e2bb03bc8ad9fe356803e7d4ae78f99a1"
+      },
+      {
+        "frame": 6,
+        "path": "dancer-source-review\\upscale-four-pose\\refined\\Rem-06.png",
+        "sha256": "5127d0b9fec59afd52a17064232d3f3f8363694018d77639a64a68fdc42f3685"
+      },
+      {
+        "frame": 9,
+        "path": "dancer-source-review\\upscale-four-pose\\refined\\Rem-09.png",
+        "sha256": "c9759e59158f8c3d553861fafd843999578d23c8b3583764d5be037d45866fce"
+      }
+    ],
+    "Ram": [
+      {
+        "frame": 0,
+        "path": "dancer-source-review\\upscale-ram-four-pose\\accessories-smooth\\Ram-00.png",
+        "sha256": "f6b90d14852fab30aad95dbdc6e13f6296ee5486f6a03d2a653f636bdfe6e914"
+      },
+      {
+        "frame": 3,
+        "path": "dancer-source-review\\upscale-ram-four-pose\\accessories-smooth\\Ram-03.png",
+        "sha256": "745d7fdd79294287d719a60eca13266fe842fd902aa278fa020e136dde827560"
+      },
+      {
+        "frame": 6,
+        "path": "dancer-source-review\\upscale-ram-four-pose\\accessories-smooth\\Ram-06.png",
+        "sha256": "9739699336604a30df9d6f51609d96289c14f1f4bba975ba7df160d0c64f5317"
+      },
+      {
+        "frame": 9,
+        "path": "dancer-source-review\\upscale-ram-four-pose\\accessories-smooth\\Ram-09.png",
+        "sha256": "f499ed736b24d07bc2aa2af6ba01c97c594ca47f11622cacb75d6c7bc9939abc"
+      }
+    ]
+  },
+  "Rem_sheet": {
+    "sha256": "20e8875cc98877f7fa727e594d3820211352c354fa3a83b08baceff890273c84",
+    "bytes": 4396998
+  },
+  "Ram_sheet": {
+    "sha256": "e1797d1397e9912798b137286ca6b810ebf19d3bf7bae1794946989c92fa6c9b",
+    "bytes": 4365424
+  },
+  "packing_verification": [
+    {
+      "character": "Rem",
+      "logical_frame": 0,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Rem",
+      "logical_frame": 3,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Rem",
+      "logical_frame": 6,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Rem",
+      "logical_frame": 9,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Ram",
+      "logical_frame": 0,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Ram",
+      "logical_frame": 3,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Ram",
+      "logical_frame": 6,
+      "packed_pixels_match_approved": true
+    },
+    {
+      "character": "Ram",
+      "logical_frame": 9,
+      "packed_pixels_match_approved": true
+    }
+  ]
+}

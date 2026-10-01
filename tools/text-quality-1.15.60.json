@@ -1,0 +1,205 @@
+{
+  "scope": "Isolated DirectWrite outline experiment. Production rendering unchanged. Fixed GDI-wrapped text and final point size, same font request, software WIC raster at 96 DPI. GDI timings include fit/raster while DWrite timings are layout/outline only; not comparable throughput measures.",
+  "results": [
+    {
+      "id": "small-0-native",
+      "gdi_width": 264.41,
+      "dwrite_width": 256.989,
+      "width_delta_percent": -2.806626073144003,
+      "gdi_height": 32.893,
+      "dwrite_height": 32.8926,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "small-0-scaled",
+      "gdi_width": 264.41,
+      "dwrite_width": 256.989,
+      "width_delta_percent": -2.806626073144003,
+      "gdi_height": 32.893,
+      "dwrite_height": 32.8926,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "4k-0-native",
+      "gdi_width": 1339.627,
+      "dwrite_width": 1302.03,
+      "width_delta_percent": -2.806527488621835,
+      "gdi_height": 166.649,
+      "dwrite_height": 166.649,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "4k-0-scaled",
+      "gdi_width": 1339.627,
+      "dwrite_width": 1302.03,
+      "width_delta_percent": -2.806527488621835,
+      "gdi_height": 166.649,
+      "dwrite_height": 166.649,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "small-1-native",
+      "gdi_width": 265.111,
+      "dwrite_width": 257.63,
+      "width_delta_percent": -2.821836890962648,
+      "gdi_height": 27.435,
+      "dwrite_height": 27.4349,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "small-1-scaled",
+      "gdi_width": 265.111,
+      "dwrite_width": 257.63,
+      "width_delta_percent": -2.821836890962648,
+      "gdi_height": 27.435,
+      "dwrite_height": 27.4349,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "4k-1-native",
+      "gdi_width": 1363.88,
+      "dwrite_width": 1325.34,
+      "width_delta_percent": -2.825761797225579,
+      "gdi_height": 149.683,
+      "dwrite_height": 149.683,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "4k-1-scaled",
+      "gdi_width": 1363.88,
+      "dwrite_width": 1325.34,
+      "width_delta_percent": -2.825761797225579,
+      "gdi_height": 149.683,
+      "dwrite_height": 149.683,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "small-2-native",
+      "gdi_width": 254.943,
+      "dwrite_width": 226.775,
+      "width_delta_percent": -11.048744229102192,
+      "gdi_height": 62.316,
+      "dwrite_height": 65.513,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "small-2-scaled",
+      "gdi_width": 254.943,
+      "dwrite_width": 226.775,
+      "width_delta_percent": -11.048744229102192,
+      "gdi_height": 62.316,
+      "dwrite_height": 65.513,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "4k-2-native",
+      "gdi_width": 1351.056,
+      "dwrite_width": 1220.74,
+      "width_delta_percent": -9.645492118757481,
+      "gdi_height": 78.435,
+      "dwrite_height": 74.594,
+      "gdi_lines": 1,
+      "dwrite_lines": 1
+    },
+    {
+      "id": "4k-2-scaled",
+      "gdi_width": 1351.056,
+      "dwrite_width": 1220.74,
+      "width_delta_percent": -9.645492118757481,
+      "gdi_height": 78.435,
+      "dwrite_height": 74.594,
+      "gdi_lines": 1,
+      "dwrite_lines": 1
+    },
+    {
+      "id": "small-3-native",
+      "gdi_width": 260.074,
+      "dwrite_width": 252.891,
+      "width_delta_percent": -2.761906226689337,
+      "gdi_height": 57.996,
+      "dwrite_height": 57.9964,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "small-3-scaled",
+      "gdi_width": 260.074,
+      "dwrite_width": 252.891,
+      "width_delta_percent": -2.761906226689337,
+      "gdi_height": 57.996,
+      "dwrite_height": 57.9964,
+      "gdi_lines": 2,
+      "dwrite_lines": 2
+    },
+    {
+      "id": "4k-3-native",
+      "gdi_width": 1358.447,
+      "dwrite_width": 1320.06,
+      "width_delta_percent": -2.8258003440693624,
+      "gdi_height": 72.504,
+      "dwrite_height": 72.5043,
+      "gdi_lines": 1,
+      "dwrite_lines": 1
+    },
+    {
+      "id": "4k-3-scaled",
+      "gdi_width": 1358.447,
+      "dwrite_width": 1320.06,
+      "width_delta_percent": -2.8258003440693624,
+      "gdi_height": 72.504,
+      "dwrite_height": 72.5043,
+      "gdi_lines": 1,
+      "dwrite_lines": 1
+    },
+    {
+      "id": "small-4-native",
+      "gdi_width": 232.146,
+      "dwrite_width": 225.743,
+      "width_delta_percent": -2.7581780431280234,
+      "gdi_height": 28.359,
+      "dwrite_height": 28.3594,
+      "gdi_lines": 1,
+      "dwrite_lines": 1
+    },
+    {
+      "id": "small-4-scaled",
+      "gdi_width": 232.146,
+      "dwrite_width": 225.743,
+      "width_delta_percent": -2.7581780431280234,
+      "gdi_height": 28.359,
+      "dwrite_height": 28.3594,
+      "gdi_lines": 1,
+      "dwrite_lines": 1
+    },
+    {
+      "id": "4k-4-native",
+      "gdi_width": 717.542,
+      "dwrite_width": 697.753,
+      "width_delta_percent": -2.75788734317991,
+      "gdi_height": 87.656,
+      "dwrite_height": 87.6562,
+      "gdi_lines": 1,
+      "dwrite_lines": 1
+    },
+    {
+      "id": "4k-4-scaled",
+      "gdi_width": 717.542,
+      "dwrite_width": 697.753,
+      "width_delta_percent": -2.75788734317991,
+      "gdi_height": 87.656,
+      "dwrite_height": 87.6562,
+      "gdi_lines": 1,
+      "dwrite_lines": 1
+    }
+  ]
+}

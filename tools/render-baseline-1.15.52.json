@@ -1,0 +1,977 @@
+{
+  "environment": {
+    "cpu": "AMD Ryzen 7 9800X3D",
+    "logical_processors": 16,
+    "gpu_reported": "NVIDIA GeForce RTX 5090",
+    "display_context": "Virtual/1440p monitors reported. Actual 4K scan-out and MusicBee UI not measured.",
+    "method": "Unpaced actual GDI plugin drawing at requested pixel sizes, all layers, hidden dancer uploads; about 10 s measured after 2 s warmup per run. Screenshot encoding excluded."
+  },
+  "runs": [
+    {
+      "source": "gdi-3840-1.json",
+      "version": "1.15.52.0",
+      "metadata": {
+        "mode": "offscreen actual GDI code; no display FPS claim",
+        "width": 3840,
+        "height": 2160,
+        "run": 1,
+        "workload": "all layers; lyric transition every 2 s, uncached palette path 1 s every 8 s; two hidden layered dancer uploads",
+        "process_bits": 32,
+        "logical_processors": 16,
+        "remote_session": false
+      },
+      "measured_seconds": 9.9247954,
+      "metrics": {
+        "Scene": {
+          "count": 294,
+          "dropped": 0,
+          "average": 30.24709217687073,
+          "p95": 37.57,
+          "p99": 84.125,
+          "maximum": 94.9072,
+          "over_33_333": 25
+        },
+        "Clear": {
+          "count": 294,
+          "dropped": 0,
+          "average": 0.7093044217687073,
+          "p95": 0.9521,
+          "p99": 1.0934,
+          "maximum": 1.3141,
+          "over_33_333": 0
+        },
+        "Background": {
+          "count": 294,
+          "dropped": 0,
+          "average": 9.950843537414963,
+          "p95": 9.0899,
+          "p99": 62.8023,
+          "maximum": 66.2952,
+          "over_33_333": 12
+        },
+        "Spectrum": {
+          "count": 294,
+          "dropped": 0,
+          "average": 8.063232653061226,
+          "p95": 8.8429,
+          "p99": 9.6873,
+          "maximum": 10.1945,
+          "over_33_333": 0
+        },
+        "Artwork": {
+          "count": 295,
+          "dropped": 0,
+          "average": 1.884447457627119,
+          "p95": 2.094,
+          "p99": 2.3536,
+          "maximum": 2.4192,
+          "over_33_333": 0
+        },
+        "Lyrics": {
+          "count": 295,
+          "dropped": 0,
+          "average": 8.849962711864409,
+          "p95": 12.5979,
+          "p99": 16.9722,
+          "maximum": 17.5413,
+          "over_33_333": 0
+        },
+        "Queue": {
+          "count": 295,
+          "dropped": 0,
+          "average": 0.4795667796610169,
+          "p95": 0.5977,
+          "p99": 0.6848,
+          "maximum": 0.7191,
+          "over_33_333": 0
+        },
+        "Controls": {
+          "count": 295,
+          "dropped": 0,
+          "average": 0.2998610169491525,
+          "p95": 0.4077,
+          "p99": 0.4725,
+          "maximum": 0.6316,
+          "over_33_333": 0
+        },
+        "Dancers": {
+          "count": 295,
+          "dropped": 0,
+          "average": 3.4337362711864383,
+          "p95": 3.7498,
+          "p99": 4.0181,
+          "maximum": 4.1483,
+          "over_33_333": 0
+        },
+        "DancerRaster": {
+          "count": 590,
+          "dropped": 0,
+          "average": 1.3920205084745765,
+          "p95": 1.5596,
+          "p99": 1.7147,
+          "maximum": 2.0619,
+          "over_33_333": 0
+        },
+        "DancerUpload": {
+          "count": 590,
+          "dropped": 0,
+          "average": 0.3165872881355931,
+          "p95": 0.4314,
+          "p99": 0.5115,
+          "maximum": 0.5735,
+          "over_33_333": 0
+        },
+        "CpuOneCorePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 100.89647813440398,
+          "p95": 106.01320889660853,
+          "p99": 106.01320889660853,
+          "maximum": 106.01320889660853,
+          "over_33_333": 19
+        },
+        "CpuMachinePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 6.306029883400249,
+          "p95": 6.625825556038033,
+          "p99": 6.625825556038033,
+          "maximum": 6.625825556038033,
+          "over_33_333": 0
+        },
+        "WorkingSetMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 242.4625,
+          "p95": 262.609375,
+          "p99": 262.70703125,
+          "maximum": 262.70703125,
+          "over_33_333": 20
+        },
+        "PrivateMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 213.691015625,
+          "p95": 230.49609375,
+          "p99": 230.5625,
+          "maximum": 230.5625,
+          "over_33_333": 20
+        },
+        "FrameWork": {
+          "count": 294,
+          "dropped": 0,
+          "average": 33.687516326530606,
+          "p95": 41.0736,
+          "p99": 87.6478,
+          "maximum": 98.3808,
+          "over_33_333": 45
+        }
+      }
+    },
+    {
+      "source": "gdi-3840-2.json",
+      "version": "1.15.52.0",
+      "metadata": {
+        "mode": "offscreen actual GDI code; no display FPS claim",
+        "width": 3840,
+        "height": 2160,
+        "run": 2,
+        "workload": "all layers; lyric transition every 2 s, uncached palette path 1 s every 8 s; two hidden layered dancer uploads",
+        "process_bits": 32,
+        "logical_processors": 16,
+        "remote_session": false
+      },
+      "measured_seconds": 9.9232475,
+      "metrics": {
+        "Scene": {
+          "count": 330,
+          "dropped": 0,
+          "average": 26.602505151515157,
+          "p95": 32.4282,
+          "p99": 84.5801,
+          "maximum": 96.5604,
+          "over_33_333": 14
+        },
+        "Clear": {
+          "count": 330,
+          "dropped": 0,
+          "average": 0.6600466666666669,
+          "p95": 0.8597,
+          "p99": 1.0256,
+          "maximum": 1.0929,
+          "over_33_333": 0
+        },
+        "Background": {
+          "count": 330,
+          "dropped": 0,
+          "average": 7.902141515151515,
+          "p95": 6.3773,
+          "p99": 63.273,
+          "maximum": 67.1728,
+          "over_33_333": 12
+        },
+        "Spectrum": {
+          "count": 331,
+          "dropped": 0,
+          "average": 6.667612084592144,
+          "p95": 7.3164,
+          "p99": 8.5416,
+          "maximum": 8.6472,
+          "over_33_333": 0
+        },
+        "Artwork": {
+          "count": 331,
+          "dropped": 0,
+          "average": 1.8868006042296082,
+          "p95": 2.079,
+          "p99": 2.2261,
+          "maximum": 2.7028,
+          "over_33_333": 0
+        },
+        "Lyrics": {
+          "count": 331,
+          "dropped": 0,
+          "average": 8.69217190332326,
+          "p95": 11.9234,
+          "p99": 16.6142,
+          "maximum": 17.3844,
+          "over_33_333": 0
+        },
+        "Queue": {
+          "count": 331,
+          "dropped": 0,
+          "average": 0.4810815709969787,
+          "p95": 0.5603,
+          "p99": 0.7022,
+          "maximum": 0.7691,
+          "over_33_333": 0
+        },
+        "Controls": {
+          "count": 331,
+          "dropped": 0,
+          "average": 0.2971259818731117,
+          "p95": 0.3511,
+          "p99": 0.4855,
+          "maximum": 0.5935,
+          "over_33_333": 0
+        },
+        "Dancers": {
+          "count": 331,
+          "dropped": 0,
+          "average": 3.384954682779454,
+          "p95": 3.7639,
+          "p99": 3.923,
+          "maximum": 4.8048,
+          "over_33_333": 0
+        },
+        "DancerRaster": {
+          "count": 662,
+          "dropped": 0,
+          "average": 1.380374018126889,
+          "p95": 1.581,
+          "p99": 1.7421,
+          "maximum": 1.9261,
+          "over_33_333": 0
+        },
+        "DancerUpload": {
+          "count": 662,
+          "dropped": 0,
+          "average": 0.30358474320241685,
+          "p95": 0.3879,
+          "p99": 0.4791,
+          "maximum": 1.8054,
+          "over_33_333": 0
+        },
+        "CpuOneCorePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 100.33441458396233,
+          "p95": 103.68087096225216,
+          "p99": 103.68087096225216,
+          "maximum": 103.68087096225216,
+          "over_33_333": 19
+        },
+        "CpuMachinePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 6.2709009114976455,
+          "p95": 6.48005443514076,
+          "p99": 6.48005443514076,
+          "maximum": 6.48005443514076,
+          "over_33_333": 0
+        },
+        "WorkingSetMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 238.6130859375,
+          "p95": 261.84765625,
+          "p99": 261.92578125,
+          "maximum": 261.92578125,
+          "over_33_333": 20
+        },
+        "PrivateMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 211.978125,
+          "p95": 229.70703125,
+          "p99": 229.734375,
+          "maximum": 229.734375,
+          "over_33_333": 20
+        },
+        "FrameWork": {
+          "count": 330,
+          "dropped": 0,
+          "average": 29.99453666666667,
+          "p95": 35.8044,
+          "p99": 88.1674,
+          "maximum": 100.3747,
+          "over_33_333": 25
+        }
+      }
+    },
+    {
+      "source": "gdi-3840-3.json",
+      "version": "1.15.52.0",
+      "metadata": {
+        "mode": "offscreen actual GDI code; no display FPS claim",
+        "width": 3840,
+        "height": 2160,
+        "run": 3,
+        "workload": "all layers; lyric transition every 2 s, uncached palette path 1 s every 8 s; two hidden layered dancer uploads",
+        "process_bits": 32,
+        "logical_processors": 16,
+        "remote_session": false
+      },
+      "measured_seconds": 9.9248979,
+      "metrics": {
+        "Scene": {
+          "count": 331,
+          "dropped": 0,
+          "average": 26.51325256797584,
+          "p95": 31.552,
+          "p99": 86.8931,
+          "maximum": 95.1792,
+          "over_33_333": 13
+        },
+        "Clear": {
+          "count": 331,
+          "dropped": 0,
+          "average": 0.614221752265861,
+          "p95": 0.8869,
+          "p99": 1.0427,
+          "maximum": 1.4413,
+          "over_33_333": 0
+        },
+        "Background": {
+          "count": 331,
+          "dropped": 0,
+          "average": 7.939564954682778,
+          "p95": 6.6442,
+          "p99": 66.1678,
+          "maximum": 66.5204,
+          "over_33_333": 12
+        },
+        "Spectrum": {
+          "count": 331,
+          "dropped": 0,
+          "average": 6.56074743202417,
+          "p95": 7.5446,
+          "p99": 8.7113,
+          "maximum": 9.1064,
+          "over_33_333": 0
+        },
+        "Artwork": {
+          "count": 332,
+          "dropped": 0,
+          "average": 1.8930578313253004,
+          "p95": 2.1363,
+          "p99": 2.2111,
+          "maximum": 2.3751,
+          "over_33_333": 0
+        },
+        "Lyrics": {
+          "count": 332,
+          "dropped": 0,
+          "average": 8.690360542168673,
+          "p95": 12.7673,
+          "p99": 16.2938,
+          "maximum": 17.1542,
+          "over_33_333": 0
+        },
+        "Queue": {
+          "count": 332,
+          "dropped": 0,
+          "average": 0.49378162650602375,
+          "p95": 0.6201,
+          "p99": 0.7086,
+          "maximum": 0.9287,
+          "over_33_333": 0
+        },
+        "Controls": {
+          "count": 332,
+          "dropped": 0,
+          "average": 0.3033786144578313,
+          "p95": 0.4069,
+          "p99": 0.4948,
+          "maximum": 0.9313,
+          "over_33_333": 0
+        },
+        "Dancers": {
+          "count": 332,
+          "dropped": 0,
+          "average": 3.396168975903615,
+          "p95": 3.8294,
+          "p99": 4.0539,
+          "maximum": 5.5496,
+          "over_33_333": 0
+        },
+        "DancerRaster": {
+          "count": 664,
+          "dropped": 0,
+          "average": 1.3792018072289145,
+          "p95": 1.6348,
+          "p99": 1.8443,
+          "maximum": 2.214,
+          "over_33_333": 0
+        },
+        "DancerUpload": {
+          "count": 664,
+          "dropped": 0,
+          "average": 0.31001219879518105,
+          "p95": 0.4218,
+          "p99": 0.5728,
+          "maximum": 0.6538,
+          "over_33_333": 0
+        },
+        "CpuOneCorePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 99.91569298775217,
+          "p95": 103.25629037320952,
+          "p99": 103.25629037320952,
+          "maximum": 103.25629037320952,
+          "over_33_333": 19
+        },
+        "CpuMachinePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 6.24473081173451,
+          "p95": 6.453518148325595,
+          "p99": 6.453518148325595,
+          "maximum": 6.453518148325595,
+          "over_33_333": 0
+        },
+        "WorkingSetMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 234.0005859375,
+          "p95": 247.5390625,
+          "p99": 255.5078125,
+          "maximum": 255.5078125,
+          "over_33_333": 20
+        },
+        "PrivateMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 205.1591796875,
+          "p95": 223.203125,
+          "p99": 229.77734375,
+          "maximum": 229.77734375,
+          "over_33_333": 20
+        },
+        "FrameWork": {
+          "count": 331,
+          "dropped": 0,
+          "average": 29.91797371601209,
+          "p95": 34.819,
+          "p99": 90.5757,
+          "maximum": 98.6176,
+          "over_33_333": 27
+        }
+      }
+    },
+    {
+      "source": "gdi-960-1.json",
+      "version": "1.15.52.0",
+      "metadata": {
+        "mode": "offscreen actual GDI code; no display FPS claim",
+        "width": 960,
+        "height": 540,
+        "run": 1,
+        "workload": "all layers; lyric transition every 2 s, uncached palette path 1 s every 8 s; two hidden layered dancer uploads",
+        "process_bits": 32,
+        "logical_processors": 16,
+        "remote_session": false
+      },
+      "measured_seconds": 9.9351921,
+      "metrics": {
+        "Scene": {
+          "count": 2069,
+          "dropped": 0,
+          "average": 4.5697173513774745,
+          "p95": 8.426,
+          "p99": 9.6858,
+          "maximum": 10.196,
+          "over_33_333": 0
+        },
+        "Clear": {
+          "count": 2069,
+          "dropped": 0,
+          "average": 0.030446737554373965,
+          "p95": 0.0344,
+          "p99": 0.0648,
+          "maximum": 0.1877,
+          "over_33_333": 0
+        },
+        "Background": {
+          "count": 2069,
+          "dropped": 0,
+          "average": 0.671649202513291,
+          "p95": 4.7196,
+          "p99": 5.309,
+          "maximum": 5.553,
+          "over_33_333": 0
+        },
+        "Spectrum": {
+          "count": 2070,
+          "dropped": 0,
+          "average": 0.6650865700483094,
+          "p95": 0.8183,
+          "p99": 0.9623,
+          "maximum": 1.3433,
+          "over_33_333": 0
+        },
+        "Artwork": {
+          "count": 2070,
+          "dropped": 0,
+          "average": 0.9453829468599018,
+          "p95": 1.0904,
+          "p99": 1.2659,
+          "maximum": 1.5486,
+          "over_33_333": 0
+        },
+        "Lyrics": {
+          "count": 2070,
+          "dropped": 0,
+          "average": 1.7140110628019303,
+          "p95": 1.989,
+          "p99": 2.1938,
+          "maximum": 2.8505,
+          "over_33_333": 0
+        },
+        "Queue": {
+          "count": 2070,
+          "dropped": 0,
+          "average": 0.2630473913043477,
+          "p95": 0.3056,
+          "p99": 0.4313,
+          "maximum": 1.2304,
+          "over_33_333": 0
+        },
+        "Controls": {
+          "count": 2070,
+          "dropped": 0,
+          "average": 0.2760397101449276,
+          "p95": 0.3768,
+          "p99": 0.4675,
+          "maximum": 0.8887,
+          "over_33_333": 0
+        },
+        "Dancers": {
+          "count": 2070,
+          "dropped": 0,
+          "average": 0.2057071497584541,
+          "p95": 0.5139,
+          "p99": 0.6266,
+          "maximum": 1.3328,
+          "over_33_333": 0
+        },
+        "DancerRaster": {
+          "count": 2026,
+          "dropped": 0,
+          "average": 0.13531031589338618,
+          "p95": 0.1623,
+          "p99": 0.281,
+          "maximum": 0.3449,
+          "over_33_333": 0
+        },
+        "DancerUpload": {
+          "count": 2026,
+          "dropped": 0,
+          "average": 0.0659476307996052,
+          "p95": 0.108,
+          "p99": 0.2006,
+          "maximum": 0.2952,
+          "over_33_333": 0
+        },
+        "CpuOneCorePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 98.46612771749457,
+          "p95": 103.59239915511503,
+          "p99": 103.59239915511503,
+          "maximum": 103.59239915511503,
+          "over_33_333": 19
+        },
+        "CpuMachinePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 6.154132982343411,
+          "p95": 6.4745249471946895,
+          "p99": 6.4745249471946895,
+          "maximum": 6.4745249471946895,
+          "over_33_333": 0
+        },
+        "WorkingSetMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 65.192578125,
+          "p95": 66.234375,
+          "p99": 66.8125,
+          "maximum": 66.8125,
+          "over_33_333": 20
+        },
+        "PrivateMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 45.3091796875,
+          "p95": 46.88671875,
+          "p99": 47.4453125,
+          "maximum": 47.4453125,
+          "over_33_333": 20
+        },
+        "FrameWork": {
+          "count": 2069,
+          "dropped": 0,
+          "average": 4.779678830352843,
+          "p95": 8.4341,
+          "p99": 10.1133,
+          "maximum": 10.5957,
+          "over_33_333": 0
+        }
+      }
+    },
+    {
+      "source": "gdi-960-2.json",
+      "version": "1.15.52.0",
+      "metadata": {
+        "mode": "offscreen actual GDI code; no display FPS claim",
+        "width": 960,
+        "height": 540,
+        "run": 2,
+        "workload": "all layers; lyric transition every 2 s, uncached palette path 1 s every 8 s; two hidden layered dancer uploads",
+        "process_bits": 32,
+        "logical_processors": 16,
+        "remote_session": false
+      },
+      "measured_seconds": 9.9056479,
+      "metrics": {
+        "Scene": {
+          "count": 2095,
+          "dropped": 0,
+          "average": 4.514845011933172,
+          "p95": 8.4644,
+          "p99": 8.9897,
+          "maximum": 11.236,
+          "over_33_333": 0
+        },
+        "Clear": {
+          "count": 2095,
+          "dropped": 0,
+          "average": 0.034253842482100644,
+          "p95": 0.0385,
+          "p99": 0.0737,
+          "maximum": 0.1968,
+          "over_33_333": 0
+        },
+        "Background": {
+          "count": 2095,
+          "dropped": 0,
+          "average": 0.6609321718377087,
+          "p95": 4.7006,
+          "p99": 4.8818,
+          "maximum": 6.487,
+          "over_33_333": 0
+        },
+        "Spectrum": {
+          "count": 2096,
+          "dropped": 0,
+          "average": 0.648265505725191,
+          "p95": 0.8023,
+          "p99": 0.8807,
+          "maximum": 1.4215,
+          "over_33_333": 0
+        },
+        "Artwork": {
+          "count": 2096,
+          "dropped": 0,
+          "average": 0.9358124045801525,
+          "p95": 1.0832,
+          "p99": 1.1734,
+          "maximum": 1.378,
+          "over_33_333": 0
+        },
+        "Lyrics": {
+          "count": 2096,
+          "dropped": 0,
+          "average": 1.6967936068702285,
+          "p95": 1.9683,
+          "p99": 2.1033,
+          "maximum": 2.7059,
+          "over_33_333": 0
+        },
+        "Queue": {
+          "count": 2096,
+          "dropped": 0,
+          "average": 0.2610750477099241,
+          "p95": 0.3037,
+          "p99": 0.4246,
+          "maximum": 0.5323,
+          "over_33_333": 0
+        },
+        "Controls": {
+          "count": 2096,
+          "dropped": 0,
+          "average": 0.2733260973282442,
+          "p95": 0.3293,
+          "p99": 0.4524,
+          "maximum": 0.7058,
+          "over_33_333": 0
+        },
+        "Dancers": {
+          "count": 2096,
+          "dropped": 0,
+          "average": 0.2027018606870227,
+          "p95": 0.4731,
+          "p99": 0.6128,
+          "maximum": 0.7513,
+          "over_33_333": 0
+        },
+        "DancerRaster": {
+          "count": 2078,
+          "dropped": 0,
+          "average": 0.13344735322425402,
+          "p95": 0.1534,
+          "p99": 0.2697,
+          "maximum": 0.3467,
+          "over_33_333": 0
+        },
+        "DancerUpload": {
+          "count": 2078,
+          "dropped": 0,
+          "average": 0.0631746390760346,
+          "p95": 0.0992,
+          "p99": 0.1726,
+          "maximum": 0.28,
+          "over_33_333": 0
+        },
+        "CpuOneCorePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 98.08088607787562,
+          "p95": 105.441139927389,
+          "p99": 105.441139927389,
+          "maximum": 105.441139927389,
+          "over_33_333": 19
+        },
+        "CpuMachinePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 6.130055379867226,
+          "p95": 6.590071245461813,
+          "p99": 6.590071245461813,
+          "maximum": 6.590071245461813,
+          "over_33_333": 0
+        },
+        "WorkingSetMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 75.5140625,
+          "p95": 76.40234375,
+          "p99": 77.08203125,
+          "maximum": 77.08203125,
+          "over_33_333": 20
+        },
+        "PrivateMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 52.1529296875,
+          "p95": 53.40234375,
+          "p99": 53.95703125,
+          "maximum": 53.95703125,
+          "over_33_333": 20
+        },
+        "FrameWork": {
+          "count": 2095,
+          "dropped": 0,
+          "average": 4.7214916945107355,
+          "p95": 8.5586,
+          "p99": 9.3421,
+          "maximum": 11.2463,
+          "over_33_333": 0
+        }
+      }
+    },
+    {
+      "source": "gdi-960-3.json",
+      "version": "1.15.52.0",
+      "metadata": {
+        "mode": "offscreen actual GDI code; no display FPS claim",
+        "width": 960,
+        "height": 540,
+        "run": 3,
+        "workload": "all layers; lyric transition every 2 s, uncached palette path 1 s every 8 s; two hidden layered dancer uploads",
+        "process_bits": 32,
+        "logical_processors": 16,
+        "remote_session": false
+      },
+      "measured_seconds": 9.9028941,
+      "metrics": {
+        "Scene": {
+          "count": 2103,
+          "dropped": 0,
+          "average": 4.499616452686643,
+          "p95": 8.4259,
+          "p99": 9.2296,
+          "maximum": 10.3191,
+          "over_33_333": 0
+        },
+        "Clear": {
+          "count": 2103,
+          "dropped": 0,
+          "average": 0.03399044222539239,
+          "p95": 0.0388,
+          "p99": 0.0695,
+          "maximum": 0.2134,
+          "over_33_333": 0
+        },
+        "Background": {
+          "count": 2103,
+          "dropped": 0,
+          "average": 0.6627715644317645,
+          "p95": 4.685,
+          "p99": 4.8755,
+          "maximum": 5.945,
+          "over_33_333": 0
+        },
+        "Spectrum": {
+          "count": 2103,
+          "dropped": 0,
+          "average": 0.6464713742272933,
+          "p95": 0.7943,
+          "p99": 0.8603,
+          "maximum": 1.1748,
+          "over_33_333": 0
+        },
+        "Artwork": {
+          "count": 2104,
+          "dropped": 0,
+          "average": 0.9315246673003801,
+          "p95": 1.0255,
+          "p99": 1.1373,
+          "maximum": 2.5223,
+          "over_33_333": 0
+        },
+        "Lyrics": {
+          "count": 2104,
+          "dropped": 0,
+          "average": 1.688775760456275,
+          "p95": 1.961,
+          "p99": 2.1865,
+          "maximum": 2.7525,
+          "over_33_333": 0
+        },
+        "Queue": {
+          "count": 2104,
+          "dropped": 0,
+          "average": 0.2606647338403041,
+          "p95": 0.2946,
+          "p99": 0.3882,
+          "maximum": 1.4725,
+          "over_33_333": 0
+        },
+        "Controls": {
+          "count": 2104,
+          "dropped": 0,
+          "average": 0.2710489068441065,
+          "p95": 0.3074,
+          "p99": 0.4122,
+          "maximum": 0.5909,
+          "over_33_333": 0
+        },
+        "Dancers": {
+          "count": 2104,
+          "dropped": 0,
+          "average": 0.19888027566539893,
+          "p95": 0.4483,
+          "p99": 0.6184,
+          "maximum": 1.1924,
+          "over_33_333": 0
+        },
+        "DancerRaster": {
+          "count": 2048,
+          "dropped": 0,
+          "average": 0.13362773437500008,
+          "p95": 0.1571,
+          "p99": 0.2622,
+          "maximum": 0.3821,
+          "over_33_333": 0
+        },
+        "DancerUpload": {
+          "count": 2048,
+          "dropped": 0,
+          "average": 0.06211977539062502,
+          "p95": 0.0949,
+          "p99": 0.1494,
+          "maximum": 0.2592,
+          "over_33_333": 0
+        },
+        "CpuOneCorePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 99.51776289780395,
+          "p95": 105.63316569225663,
+          "p99": 105.63316569225663,
+          "maximum": 105.63316569225663,
+          "over_33_333": 19
+        },
+        "CpuMachinePercent": {
+          "count": 19,
+          "dropped": 0,
+          "average": 6.219860181112747,
+          "p95": 6.602072855766039,
+          "p99": 6.602072855766039,
+          "maximum": 6.602072855766039,
+          "over_33_333": 0
+        },
+        "WorkingSetMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 77.840625,
+          "p95": 78.1640625,
+          "p99": 78.16796875,
+          "maximum": 78.16796875,
+          "over_33_333": 20
+        },
+        "PrivateMiB": {
+          "count": 20,
+          "dropped": 0,
+          "average": 53.6310546875,
+          "p95": 53.95703125,
+          "p99": 55.18359375,
+          "maximum": 55.18359375,
+          "over_33_333": 20
+        },
+        "FrameWork": {
+          "count": 2103,
+          "dropped": 0,
+          "average": 4.702338278649544,
+          "p95": 8.47,
+          "p99": 9.597,
+          "maximum": 10.7208,
+          "over_33_333": 0
+        }
+      }
+    }
+  ]
+}

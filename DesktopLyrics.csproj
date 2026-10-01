@@ -92,12 +92,14 @@
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Data" />
+    <Reference Include="System.Security" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="FontConverter.cs" />
+    <Compile Include="ArtworkPalette.cs" />
     <Compile Include="FrmLyrics.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -106,7 +108,47 @@
     </Compile>
     <Compile Include="Gdiplus.cs" />
     <Compile Include="GdiplusPInvoke.cs" />
+    <Compile Include="FrmLyricsWindow.cs" />
+    <Compile Include="LyricsWindowThread.cs" />
+    <Compile Include="PlaybackSnapshotReader.cs" />
+    <Compile Include="PlaybackTimingTrace.cs" />
+    <Compile Include="RenderProfile.cs" />
+    <Compile Include="RenderFramePacer.cs" />
+    <Compile Include="GpuSceneRenderer.cs" />
+    <Compile Include="PartyTempoMap.cs" />
+    <Compile Include="TimelineWaveform.cs" />
+    <Compile Include="PartyTimeline.cs" />
+    <Compile Include="FrmPartyTempoMap.cs" />
+    <Compile Include="PartyPreviewSession.cs" />
+    <Compile Include="PartyAnimation.cs" />
+    <Compile Include="PartyPlaybackClock.cs" />
+    <Compile Include="PartyTapTempo.cs" />
+    <Compile Include="PartyBeatTracker.cs" />
+    <Compile Include="PartyTempoStore.cs" />
+    <Compile Include="GetSongBpmClient.cs" />
+    <Compile Include="DeezerBpmClient.cs" />
+    <Compile Include="PartyOnlineLookup.cs" />
+    <Compile Include="PartyLayout.cs" />
+    <Compile Include="PartyDancerWindow.cs" />
+    <Compile Include="DancerPosePreparer.cs" />
+    <Compile Include="LyricCardLayout.cs" />
+    <Compile Include="LyricTextLayout.cs" />
+    <Compile Include="FrmEnglishImport.cs" />
+    <Compile Include="EnglishImportDocument.cs" />
+    <Compile Include="EnglishTranslationStore.cs" />
+    <Compile Include="FrmTimingEditor.cs" />
+    <Compile Include="FrmTimingCreator.cs" />
+    <Compile Include="IDesktopLyricsView.cs" />
     <Compile Include="LyricParser.cs" />
+    <Compile Include="LrcTimingDocument.cs" />
+    <Compile Include="UntimedTimingDocument.cs" />
+    <Compile Include="TimingTagStore.cs" />
+    <Compile Include="QueueNavigation.cs" />
+    <Compile Include="UpcomingQueue.cs" />
+    <Compile Include="PlaybackHistory.cs" />
+    <Compile Include="LrcLibClient.cs" />
+    <Compile Include="ImportedLyricsTagStore.cs" />
+    <Compile Include="FrmLrcLibPicker.cs" />
     <Compile Include="LyricsController.cs" />
     <Compile Include="LyricsRenderer.cs" />
     <Compile Include="MusicBeeInterface.cs" />
@@ -146,6 +188,12 @@
     </BootstrapperPackage>
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets\PartyRem.png">
+      <LogicalName>MusicBeePlugin.PartyRem.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\PartyRam.png">
+      <LogicalName>MusicBeePlugin.PartyRam.png</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="FrmLyrics.resx">
       <DependentUpon>FrmLyrics.cs</DependentUpon>
     </EmbeddedResource>
@@ -186,6 +234,8 @@
     </GetAssemblyIdentity>
     <RemoveDir Directories="@(ZipFiles)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="pkgtemp\" />
+    <ItemGroup><GpuHelpers Include="$(TargetDir)DesktopLyricsGpu.Win32.dll;$(TargetDir)DesktopLyricsGpu.x64.dll" Condition="Exists('$(TargetDir)DesktopLyricsGpu.Win32.dll') and Exists('$(TargetDir)DesktopLyricsGpu.x64.dll')" /></ItemGroup>
+    <Copy SourceFiles="@(GpuHelpers)" DestinationFolder="pkgtemp\" />
     <Zip ZipFileName="pkg\$(ProjectName)_%(MyAssemblyIdentities.Version).zip" WorkingDirectory="pkg" Files="@(ZipFiles)" Flatten="true" Quiet="true" />
     <RemoveDir Directories="@(ZipFiles)" />
   </Target>

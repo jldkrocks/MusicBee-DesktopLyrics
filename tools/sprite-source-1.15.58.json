@@ -1,0 +1,172 @@
+{
+  "source_sha256": "b8a68f9ce50cc6f7430154678cd9666c0f4ce0feb64ecaaf5c22491cb38287d0",
+  "source_size": [
+    800,
+    800
+  ],
+  "source_frames": 12,
+  "source_duration_ms": 140,
+  "candidate_cell": [
+    360,
+    706
+  ],
+  "current_cell": [
+    180,
+    353
+  ],
+  "key_sequence": [
+    0,
+    3,
+    6,
+    9
+  ],
+  "transforms": {
+    "Ram": [
+      2.0697957396901856,
+      2.0814833709217817,
+      13.729293361959462,
+      38.66456036768226
+    ],
+    "Rem": [
+      2.080986067480654,
+      2.084235522393076,
+      15.776021722149341,
+      37.67624674112882
+    ]
+  },
+  "alignment_checks": {
+    "Rem": [
+      {
+        "frame": 0,
+        "old_bbox": [
+          23,
+          13,
+          168,
+          346
+        ],
+        "new_bbox": [
+          23,
+          13,
+          168,
+          346
+        ]
+      },
+      {
+        "frame": 3,
+        "old_bbox": [
+          18,
+          9,
+          171,
+          347
+        ],
+        "new_bbox": [
+          18,
+          8,
+          171,
+          347
+        ]
+      },
+      {
+        "frame": 6,
+        "old_bbox": [
+          7,
+          12,
+          164,
+          346
+        ],
+        "new_bbox": [
+          7,
+          12,
+          164,
+          346
+        ]
+      },
+      {
+        "frame": 9,
+        "old_bbox": [
+          14,
+          8,
+          174,
+          347
+        ],
+        "new_bbox": [
+          14,
+          8,
+          174,
+          347
+        ]
+      }
+    ],
+    "Ram": [
+      {
+        "frame": 0,
+        "old_bbox": [
+          12,
+          12,
+          158,
+          346
+        ],
+        "new_bbox": [
+          12,
+          12,
+          158,
+          346
+        ]
+      },
+      {
+        "frame": 3,
+        "old_bbox": [
+          9,
+          8,
+          164,
+          347
+        ],
+        "new_bbox": [
+          9,
+          8,
+          163,
+          347
+        ]
+      },
+      {
+        "frame": 6,
+        "old_bbox": [
+          16,
+          12,
+          174,
+          346
+        ],
+        "new_bbox": [
+          16,
+          11,
+          174,
+          346
+        ]
+      },
+      {
+        "frame": 9,
+        "old_bbox": [
+          6,
+          8,
+          167,
+          347
+        ],
+        "new_bbox": [
+          5,
+          7,
+          166,
+          347
+        ]
+      }
+    ]
+  },
+  "note": "Approved GIF-derived 360x706 cells, 12 frames, same four key indices. No AI assets shipped. Fixed per-character registration; connectivity background removal and exterior matte cleanup. Full extraction scripts and original/candidate comparisons remain in ../dancer-source-review.",
+  "original_sprite_sha256": {
+    "Ram": "f5200c9001035605af9cf68d1f5eeba14fe9abed830b12ee6bdd5d69641a781b",
+    "Rem": "8b96ce6522678b3a1dd921040f6a3e2a18e6b8d792e7a4374e347f05b142912e"
+  },
+  "replacement_sprite_sha256": {
+    "Rem": "325f0bfb91342c1e004104be66e08f8aafd564e1ab2de554136faa7c081aeaf1",
+    "Ram": "2daf5dbc4ea3cdd422821d4d3ee5e49180bbc0cddf0cc35924eb20b955631c21"
+  }
+}

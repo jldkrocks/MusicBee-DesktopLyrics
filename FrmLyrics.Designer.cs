@@ -47,7 +47,7 @@ namespace MusicBeePlugin
             this.Margin = new System.Windows.Forms.Padding(5, 5, 5, 5);
             this.Name = "FrmLyrics";
             this.ShowInTaskbar = false;
-            this.Text = "Desktop Lyrics";
+            this.Text = "KoreKara";
             this.Load += new System.EventHandler(this.FrmLyrics_Load);
             this.MouseDown += new System.Windows.Forms.MouseEventHandler(this.FrmLyrics_MouseDown);
             this.ResumeLayout(false);

@@ -1,24 +1,128 @@
-﻿namespace MusicBeePlugin
+﻿using System;
+using System.Text;
+
+namespace MusicBeePlugin
 {
     public class LyricsController
     {
+        // Keep the legacy setting name for compatibility with saved settings.
+        // A preview is now shown even when the active lyric has a translation.
         public bool NextLineWhenNoTranslation { get; set; }
+        public bool ShowTranslation { get; set; } = true;
 
         private readonly Plugin.MusicBeeApiInterface _interface;
+        private readonly EnglishTranslationStore _englishStore;
         private string _lastLyrics;
         private LyricParser.Lyrics _lyrics;
+        private string _editedTrackUrl, _editedLyrics;
+        private bool _editedLyricsSaved;
+        private bool _savedTagSeen;
+        private string _tagTrackUrl, _taggedLyrics;
+        private DateTime _nextTagCheckUtc;
+        private string _englishTrackUrl;
+        private LyricParser.Lyrics _englishLyrics;
+        private string[] _englishLines;
+
         public LyricsController(Plugin.MusicBeeApiInterface @interface)
+            : this(@interface, null)
+        {
+        }
+
+        internal LyricsController(Plugin.MusicBeeApiInterface @interface,
+            EnglishTranslationStore englishStore)
         {
             _interface = @interface;
+            _englishStore = englishStore;
+        }
+
+        public void InvalidateImportedEnglish()
+        {
+            _englishTrackUrl = null;
+            _englishLyrics = null;
+            _englishLines = null;
+        }
+
+        public void PreviewLyrics(string trackUrl, string lyrics)
+        {
+            _editedTrackUrl = trackUrl;
+            _editedLyrics = lyrics;
+            _editedLyricsSaved = false;
+            _savedTagSeen = false;
+        }
+
+        public void KeepSavedLyrics(string trackUrl, string lyrics)
+        {
+            _editedTrackUrl = trackUrl;
+            _editedLyrics = lyrics;
+            _editedLyricsSaved = true;
+            _savedTagSeen = false;
+            InvalidateTag();
+        }
+
+        public void InvalidateTag()
+        {
+            _nextTagCheckUtc = DateTime.MinValue;
+        }
+
+        public void CancelPreview(string trackUrl)
+        {
+            if (_editedTrackUrl != trackUrl || _editedLyricsSaved) return;
+            _editedTrackUrl = _editedLyrics = null;
+            _lastLyrics = null;
+            _lyrics = null;
+            InvalidateTag();
         }
 
         public LyricView UpdateLyrics(bool useGeneratedWhenUnavailable)
         {
             // TODO passively change?
-            var hasLyrics = _interface.NowPlaying_GetFileTag(Plugin.MetaDataType.HasLyrics);
-            if (hasLyrics.StartsWith("Y")  || hasLyrics.Length == 0)
+            var currentUrl = _interface.NowPlaying_GetFileUrl?.Invoke();
+            if (_editedTrackUrl != null &&
+                currentUrl != _editedTrackUrl)
             {
-                var lyrics = _interface.NowPlaying_GetLyrics();
+                _editedTrackUrl = _editedLyrics = null;
+                _editedLyricsSaved = false;
+                _savedTagSeen = false;
+                _lastLyrics = null;
+                _lyrics = null;
+            }
+            if (_tagTrackUrl != currentUrl)
+            {
+                _tagTrackUrl = currentUrl;
+                _taggedLyrics = null;
+                InvalidateTag();
+            }
+            if (!string.IsNullOrWhiteSpace(currentUrl) &&
+                DateTime.UtcNow >= _nextTagCheckUtc)
+            {
+                _nextTagCheckUtc = DateTime.UtcNow.AddMilliseconds(400);
+                try
+                {
+                    _taggedLyrics = _interface.Library_GetFileTag?.Invoke(currentUrl,
+                        Plugin.MetaDataType.Lyrics);
+                }
+                catch (Exception) { /* Streams may have no writable library tag. */ }
+            }
+            var taggedLyrics = _taggedLyrics;
+            // MusicBee may keep NowPlaying_GetLyrics cached until another song
+            // starts. A new tag saved in its editor must take precedence.
+            if (_editedLyricsSaved && _editedTrackUrl == currentUrl)
+            {
+                if (taggedLyrics == _editedLyrics) _savedTagSeen = true;
+                else if (_savedTagSeen && taggedLyrics != null)
+                {
+                    _editedTrackUrl = _editedLyrics = null;
+                    _editedLyricsSaved = false;
+                    _savedTagSeen = false;
+                }
+            }
+            var hasLyrics = _interface.NowPlaying_GetFileTag(Plugin.MetaDataType.HasLyrics) ?? "";
+            if (_editedTrackUrl != null || !string.IsNullOrWhiteSpace(taggedLyrics) ||
+                hasLyrics.StartsWith("Y") || hasLyrics.Length == 0)
+            {
+                var lyrics = _editedTrackUrl != null ? _editedLyrics :
+                    !string.IsNullOrWhiteSpace(taggedLyrics) ? taggedLyrics :
+                    _interface.NowPlaying_GetLyrics();
                 if (lyrics != _lastLyrics)
                 {
                     _lyrics = LyricParser.ParseLyric(lyrics);
@@ -40,33 +144,89 @@
                     _interface.NowPlaying_GetFileTag(Plugin.MetaDataType.Artist), null);
                 return null;
             }
+            if (_englishTrackUrl != currentUrl || !ReferenceEquals(_englishLyrics, _lyrics))
+            {
+                _englishTrackUrl = currentUrl;
+                _englishLyrics = _lyrics;
+                _englishLines = _englishStore?.Load(currentUrl, _lyrics.Entries);
+            }
                 
             var time = _interface.Player_GetPosition();
             var nTime = time + _lyrics.Offset;
             var entries = _lyrics.Entries;
 
-            LyricParser.LyricEntry currentEntry = null;
-            LyricParser.LyricEntry nextEntry = null;
+            if (entries.Count == 0 || nTime < entries[0].TimeMs) return null;
 
-            for (var i = 0; i < entries.Count; i++)
+            var currentIndex = entries.Count - 1;
+            for (var i = 1; i < entries.Count; i++)
             {
-                if (entries[i].TimeMs > nTime && i > 0)
+                if (entries[i].TimeMs > nTime)
                 {
-                    currentEntry = entries[i - 1];
-                    nextEntry = entries[i];
+                    currentIndex = i - 1;
                     break;
                 }
             }
 
-            if (currentEntry == null)
+            var currentEntry = entries[currentIndex];
+            string nextLine = null;
+            if (NextLineWhenNoTranslation)
             {
-                if (entries.Count <= 0) return null;
-                currentEntry = entries[entries.Count - 1];
+                for (var i = currentIndex + 1; i < entries.Count; i++)
+                {
+                    if (string.IsNullOrWhiteSpace(entries[i].LyricLine1)) continue;
+                    nextLine = entries[i].LyricLine1;
+                    break;
+                }
             }
+            var english = _englishLines != null && currentIndex < _englishLines.Length
+                ? _englishLines[currentIndex] : null;
+            var translation = !string.IsNullOrWhiteSpace(english)
+                ? english : currentEntry.LyricLine2;
+            if (RepeatsCurrentLine(currentEntry.LyricLine1, translation))
+                translation = null;
+            return new LyricView(currentEntry.LyricLine1,
+                ShowTranslation ? translation : null, nextLine);
+        }
 
-            if (_lyrics.HasTranslation || nextEntry == null || !NextLineWhenNoTranslation)
-                return new LyricView(currentEntry.LyricLine1, currentEntry.LyricLine2);
-            return new LyricView(currentEntry.LyricLine1, nextEntry.LyricLine1);
+        private static bool RepeatsCurrentLine(string current, string english)
+        {
+            if (string.IsNullOrWhiteSpace(current) ||
+                string.IsNullOrWhiteSpace(english)) return false;
+            var left = ComparableText(current);
+            var right = ComparableText(english);
+            if (left.Length == 0 || right.Length == 0) return false;
+            if (left == right) return true;
+            // A sung English phrase can differ by one word ending or a typo
+            // from the pasted meaning. Keep short phrases exact so a small
+            // difference in a short translation is still visible.
+            if (left.Length < 20 || right.Length < 20 ||
+                left.Length > 240 || right.Length > 240) return false;
+            var allowedChanges = Math.Max(1, Math.Max(left.Length, right.Length) / 12);
+            if (Math.Abs(left.Length - right.Length) > allowedChanges) return false;
+            var previous = new int[right.Length + 1];
+            var currentRow = new int[right.Length + 1];
+            for (var j = 0; j <= right.Length; j++) previous[j] = j;
+            for (var i = 1; i <= left.Length; i++)
+            {
+                currentRow[0] = i;
+                for (var j = 1; j <= right.Length; j++)
+                    currentRow[j] = Math.Min(Math.Min(currentRow[j - 1] + 1,
+                        previous[j] + 1), previous[j - 1] +
+                        (left[i - 1] == right[j - 1] ? 0 : 1));
+                var swap = previous;
+                previous = currentRow;
+                currentRow = swap;
+            }
+            return previous[right.Length] <= allowedChanges;
+        }
+
+        private static string ComparableText(string text)
+        {
+            var normalized = new StringBuilder(text.Length);
+            foreach (var c in text)
+                if (char.IsLetterOrDigit(c))
+                    normalized.Append(char.ToLowerInvariant(c));
+            return normalized.ToString();
         }
 
         public class LyricView
@@ -74,16 +234,18 @@
             // C# version < 8.0, can't use nullable reference feature....
             public string LyricLine1 { get; set; } // Nullable
             public string LyricLine2 { get; set; } // Nullable
+            public string NextLine { get; set; } // Nullable; preview of the next timed entry
 
-            public LyricView(string lyricLine1, string lyricLine2)
+            public LyricView(string lyricLine1, string lyricLine2, string nextLine = null)
             {
                 LyricLine1 = lyricLine1;
                 LyricLine2 = lyricLine2;
+                NextLine = nextLine;
             }
 
             public override string ToString()
             {
-                return $"[LyricView: {LyricLine1}, {LyricLine2}]";
+                return $"[LyricView: {LyricLine1}, {LyricLine2}, {NextLine}]";
             }
         }
     }

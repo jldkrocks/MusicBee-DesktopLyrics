@@ -45,7 +45,9 @@ namespace MusicBeePlugin
                     var wordMatch = LyricWordRegex.Match(line);
                     var word = wordMatch.Groups[1].Value;
 
-                    if (word.Length == 0) word = " ";
+                    // Empty timed entries mark gaps in some LRC files. Keeping them
+                    // as lyrics would clear the active line before the next lyric.
+                    if (string.IsNullOrWhiteSpace(word)) continue;
 
                     var timeMatch = LyricTimeRegex.Matches(line);
 
