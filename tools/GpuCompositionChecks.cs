@@ -18,6 +18,19 @@ class GpuCompositionChecks
     static void Set(object o,string n,object v) => o.GetType().GetField(n,Flags).SetValue(o,v);
     static object Call(object o,string n,params object[] a) => o.GetType().GetMethod(n,Flags).Invoke(o,a);
     static void Check(bool ok,string why) { if(!ok)throw new Exception(why); }
+    static void WaitPreparationIdle(object preparation)
+    {
+        var wait = Stopwatch.StartNew();
+        while (true)
+        {
+            // The worker clears _running and releases its bitmaps inside this
+            // lock. Reading the flag without it can observe partial cleanup.
+            lock (Get(preparation, "_gate"))
+                if (!(bool)Get(preparation, "_running")) return;
+            Check(wait.ElapsedMilliseconds < 5000, "Dancer preparation cleanup timed out");
+            System.Threading.Thread.Sleep(1);
+        }
+    }
     static void WaveformChecks(Assembly assembly)
     {
         var file=Path.Combine(Path.GetTempPath(),"DesktopLyrics-wave-"+Guid.NewGuid()+".wav");
@@ -122,8 +135,7 @@ class GpuCompositionChecks
                 var failedPreparation=Get(Get(form,"_gpu"),"_dancerPreparation");
                 lock(Get(failedPreparation,"_gate"))Set(failedPreparation,"_failure",new InvalidOperationException("injected raster failure"));
                 Check(!(bool)Call(form,"TryDrawGpu") && Get(form,"_gpu")==null && (bool)Get(form,"_gpuFailed"),"Preparation exception must release GPU and latch GDI fallback");
-                var stopped=Stopwatch.StartNew();
-                while((bool)Get(failedPreparation,"_running") && stopped.ElapsedMilliseconds<5000)System.Threading.Thread.Sleep(1);
+                WaitPreparationIdle(failedPreparation);
                 Check(((Bitmap[])Get(failedPreparation,"_sources")).All(b=>b==null),"In-flight disposal retained source bitmaps");
                 Check(((Bitmap[])Get(failedPreparation,"_ready")).All(b=>b==null),"In-flight disposal retained pose bitmaps");
                 Set(form,"_partyVisualValid",false);Set(form,"_gpuFailed",false);
@@ -262,8 +274,7 @@ class GpuCompositionChecks
                 foreach(var d in pair) {
                     Check(Get(d,"_sheet")==null,"Production GDI constructor decoded a sheet synchronously");
                     var prep=Get(d,"_preparation");
-                    var release=Stopwatch.StartNew();
-                    while((bool)Get(prep,"_running") && release.ElapsedMilliseconds<5000)System.Threading.Thread.Sleep(1);
+                    WaitPreparationIdle(prep);
                     Check(((Bitmap[])Get(prep,"_sources")).All(b=>b==null),"Hidden restored cache retained source sheets");
                 }
             }
@@ -366,8 +377,7 @@ class GpuCompositionChecks
             Check(((Size[])Get(renderer,"_dancerSizes")).All(s=>s==latest[0].Size),"Obsolete resize result replaced current poses");
             var preparation=Get(renderer,"_dancerPreparation");
             Call(renderer,"ClearDancers");Check((int)Get(renderer,"_dancerBytes")==0,"Restore must release dancer cache");
-            var release=Stopwatch.StartNew();
-            while((bool)Get(preparation,"_running") && release.ElapsedMilliseconds<5000)System.Threading.Thread.Sleep(1);
+            WaitPreparationIdle(preparation);
             Check(((Bitmap[])Get(preparation,"_sources")).All(b=>b==null),"Restore must release worker sources");
             Check(((Bitmap[])Get(preparation,"_ready")).All(b=>b==null),"Restore must release pending poses");
             Check(Get(renderer,"_dancerPreparation")==null,"Restore retained preparation owner");
