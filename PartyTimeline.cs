@@ -84,7 +84,7 @@ namespace MusicBeePlugin
         private const int MarginX = 18;
         internal PartyTimeline()
         {
-            DoubleBuffered = true; Height = 180; TabStop = true;
+            DoubleBuffered = true; Height = 220; TabStop = true;
             BackColor = Color.FromArgb(23, 27, 38); ForeColor = Color.FromArgb(232, 236, 245);
             AccessibleName = "Song timeline. Arrow keys seek five seconds; click a marker to select its section.";
             AccessibleRole = AccessibleRole.Slider;
@@ -146,22 +146,33 @@ namespace MusicBeePlugin
             }
             if(Waveform?.Peaks != null && Waveform.Start==ViewStart && Math.Abs(Waveform.Length-Span)<.00001)
             {
-                using(var pen=new Pen(Color.FromArgb(125,184,209)))
+                using(var outline=new Pen(Color.FromArgb(140,184,209)))
+                using(var body=new Pen(Color.FromArgb(80,134,166)))
+                using(var attacks=new Pen(Color.FromArgb(250,187,86)))
                 {
                     int pixels=Math.Max(1,Width-MarginX*2);var peaks=Waveform.Peaks;
                     for(int px=0;px<pixels;px++){
-                        int first=px*peaks.Length/pixels,last=Math.Max(first+1,(px+1)*peaks.Length/pixels);float peak=0;
-                        for(int n=first;n<Math.Min(last,peaks.Length);n++)peak=Math.Max(peak,peaks[n]);
-                        g.DrawLine(pen,MarginX+px,108-peak*19,MarginX+px,108+peak*19);
+                        int first=px*peaks.Length/pixels,last=Math.Max(first+1,(px+1)*peaks.Length/pixels);float peak=0,attack=0;double energy=0;int bins=0;
+                        for(int n=first;n<Math.Min(last,peaks.Length);n++){
+                            peak=Math.Max(peak,peaks[n]);
+                            var rms=Waveform.Rms==null?0:Waveform.Rms[n];energy+=rms*rms;bins++;
+                            if(Waveform.Attacks!=null)attack=Math.Max(attack,Waveform.Attacks[n]);
+                        }
+                        float level=(float)Math.Sqrt(energy/Math.Max(1,bins));
+                        g.DrawLine(body,MarginX+px,108-level*19,MarginX+px,108+level*19);
+                        g.DrawLine(outline,MarginX+px,108-peak*19,MarginX+px+1,108-peak*19);
+                        g.DrawLine(outline,MarginX+px,108+peak*19,MarginX+px+1,108+peak*19);
+                        if(attack>0)g.DrawLine(attacks,MarginX+px,166,MarginX+px,166-attack*28);
                     }
                 }
+                TextRenderer.DrawText(g,"ATTACK STRENGTH (relative)",Font,new Point(MarginX,127),Color.FromArgb(250,187,86));
             }
             else TextRenderer.DrawText(g,WaveformStatus??"Waveform",Font,new Point(MarginX,94),Color.Silver);
             foreach(var cue in Accents) {
                 var time=_dragAccent!=null && cue.Row==_dragAccent.Row?_dragAccent.Seconds:cue.Seconds;
                 if(time<ViewStart || time>ViewStart+Span)continue;
                 using(var guide=new Pen(Color.FromArgb(cue.Row==SelectedAccent?180:70,247,206,115))) {
-                    guide.DashStyle=DashStyle.Dot;g.DrawLine(guide,X(time),31,X(time),130);
+                    guide.DashStyle=DashStyle.Dot;g.DrawLine(guide,X(time),31,X(time),170);
                 }
             }
             var selectedAccent=_envelope??Accents.Find(c=>c.Row==SelectedAccent);
@@ -171,12 +182,12 @@ namespace MusicBeePlugin
                 var colors=new[]{Color.MediumPurple,Color.Gold,Color.MediumSeaGreen};
                 for(int i=0;i<3;i++)using(var fill=new SolidBrush(colors[i])){
                     float left=Math.Max(MarginX,X(points[i])),right=Math.Min(Width-MarginX,X(points[i+1]));
-                    if(right>left)g.FillRectangle(fill,left,135,right-left,6);
+                    if(right>left)g.FillRectangle(fill,left,175,right-left,6);
                 }
                 foreach(var time in new[]{points[0],points[2],points[3]}){
-                    float x=X(time);if(x>=MarginX&&x<=Width-MarginX)g.FillRectangle(Brushes.White,x-3,132,6,12);
+                    float x=X(time);if(x>=MarginX&&x<=Width-MarginX)g.FillRectangle(Brushes.White,x-3,172,6,12);
                 }
-                TextRenderer.DrawText(g,"Selected accent: purple = preparation, gold = hold, green = recovery. Drag white handles.",Font,new Point(MarginX,145),Color.Silver);
+                TextRenderer.DrawText(g,"Selected accent: purple = preparation, gold = hold, green = recovery. Drag white handles.",Font,new Point(MarginX,190),Color.Silver);
             }
             if (Focused) ControlPaint.DrawFocusRectangle(g, new Rectangle(2, 2, Width - 4, Height - 4));
         }
@@ -194,7 +205,7 @@ namespace MusicBeePlugin
                 _panStart = LoopStart; _panX = e.X; _panning = true; Capture = true;
                 return;
             }
-            if(e.Y>=129 && e.Y<=144){
+            if(e.Y>=169 && e.Y<=184){
                 var cue=Accents.Find(c=>c.Row==SelectedAccent);
                 if(cue!=null){
                     var times=new[]{cue.Seconds-cue.Prepare,cue.Seconds+cue.Hold,cue.Seconds+cue.Hold+cue.Recovery};

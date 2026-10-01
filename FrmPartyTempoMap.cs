@@ -69,7 +69,7 @@ namespace MusicBeePlugin
                 message => { if (!IsDisposed) _status.Text = message; });
             Font = _editorFont; BackColor = Color.FromArgb(23, 27, 38); ForeColor = Color.FromArgb(232, 236, 245);
             Text = "Tempo map — " + title;
-            Size = new Size(1200, 690); MinimumSize = new Size(1080, 650);
+            Size = new Size(1200, 730); MinimumSize = new Size(1080, 690);
             StartPosition = FormStartPosition.CenterParent; ShowInTaskbar = false;
             MinimizeBox = false; TopMost = true;
             var help = new Label { Dock = DockStyle.Fill };
@@ -166,7 +166,7 @@ namespace MusicBeePlugin
             _timeline.EditAccents=true;
             _timeline.AccentMoved += MoveAccent;
             _timeline.LoopRangeSelected += (start,end)=>{if(!_preview.Active){_loopStart.Value=(decimal)Math.Round(start,3);_loopEnd.Value=(decimal)Math.Round(end,3);}};
-            _tips.SetToolTip(_timeline,"Mouse wheel zooms under the pointer. Shift-drag selects a loop range. Drag gold accents to move their hit time. Select an accent, then Left/Right nudges 10 ms; Shift nudges 1 ms. Clicking a section still selects and seeks. Editing does not seek playback.");
+            _tips.SetToolTip(_timeline,"Blue body shows average energy; thin outlines show peaks. Orange spikes show relative increases in low/mid/high-band energy, not confirmed beats. Mouse wheel zooms under the pointer. Shift-drag selects a loop range. Drag gold accents to move their hit time. Select an accent, then Left/Right nudges 10 ms; Shift nudges 1 ms. Clicking a section still selects and seeks. Editing does not seek playback.");
             _overview.Duration=_timeline.Duration;_overview.Dock=DockStyle.Fill;
             _overview.ViewPanned += start => { _timeline.ViewStart=start; _timeline.Invalidate(); };
             _timeline.MarkerSelected += row => { _tabs.SelectedIndex = 0; if (row >= 0 && row < _grid.Rows.Count) _grid.CurrentCell = _grid.Rows[row].Cells[0]; };
@@ -222,14 +222,14 @@ namespace MusicBeePlugin
             _enabled.Dock = DockStyle.Fill; _enabled.Padding = Padding.Empty;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 7 };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 252));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 292));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             var detail=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Margin=Padding.Empty};
-            detail.RowStyles.Add(new RowStyle(SizeType.Absolute,32));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,180));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,40));
+            detail.RowStyles.Add(new RowStyle(SizeType.Absolute,32));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,220));detail.RowStyles.Add(new RowStyle(SizeType.Absolute,40));
             var editing=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
             AddButton(editing,"Whole song",()=>{_timeline.ViewStart=_timeline.ViewLength=0;_timeline.Invalidate();});
             editing.Controls.Add(new Label {Text="Loop (s)",AutoSize=true,Margin=new Padding(6,9,3,0)});
@@ -239,7 +239,7 @@ namespace MusicBeePlugin
             AddButton(editing,"Use view",()=>{_loopStart.Value=(decimal)_timeline.ViewStart;_loopEnd.Value=(decimal)Math.Min(_timeline.Duration,_timeline.ViewStart+(_timeline.ViewLength>0?_timeline.ViewLength:_timeline.Duration));});
             _loopButton=AddButton(editing,"Loop preview",()=>BeginPreview(true));
             editing.Controls.Add(_snapHits);
-            _tips.SetToolTip(_snapHits,"Optional: snap dragged hit times to a nearby waveform rise within 40 ms. These are candidate attacks, not verified beats. Arrow nudges always remain exact.");
+            _tips.SetToolTip(_snapHits,"Optional: snap dragged hit times to a nearby attack-strength peak within 40 ms. These are candidate attacks, not verified beats. Arrow nudges always remain exact.");
             _timeline.SnapTime = time => _snapHits.Checked ? _waveform.Data?.Snap(time) ?? time : time;
             _timeline.EnvelopeChanged += (row,prepare,hold,recovery) => {
                 if(row<0 || row>=_accentGrid.Rows.Count)return;
@@ -366,7 +366,7 @@ namespace MusicBeePlugin
                     var template = _accentGrid.CurrentRow;
                     _accentGrid.Rows.Add(seconds.ToString("0.#########", CultureInfo.CurrentCulture),
                         template?.Cells[1].Value ?? 1.7d, template?.Cells[2].Value ?? .1d, template?.Cells[3].Value ?? 0d,
-                        template?.Cells[4].Value ?? AccentMotions[0], template?.Cells[5].Value ?? AccentPoses[0], template?.Cells[6].Value);
+                        template?.Cells[4].Value ?? AccentMotions[0], template?.Cells[5].Value ?? AccentPoses[0], template?.Cells[6].Value,template?.Cells[7].Value ?? false);
                 }
                 else
                 {
@@ -415,11 +415,13 @@ namespace MusicBeePlugin
             _accentGrid.Columns.Add(new DataGridViewComboBoxColumn { Name = "motion", HeaderText = "Motion", DataSource = AccentMotions, FillWeight = 155 });
             _accentGrid.Columns.Add(new DataGridViewComboBoxColumn { Name = "pose", HeaderText = "Pose", DataSource = AccentPoses, FillWeight = 155 });
             _accentGrid.Columns.Add("recovery", "Recovery (s)");
+            _accentGrid.Columns.Add(new DataGridViewCheckBoxColumn {Name="priority",HeaderText="New hit wins",FillWeight=100});
+            _accentGrid.Columns[7].ToolTipText="Optional: at this hit time, interrupt older accents even if their remaining dip is stronger. Older holds/recoveries do not return afterwards. Preparation before this hit still follows normal overlap rules. Off preserves the existing strongest-accent behavior. This does not change beat timing.";
             _accentGrid.Columns[6].ToolTipText = "Time to recover after the hit/hold, 0.02-2 s. Blank keeps the original default: Bop 0.22 s, Rebound 0.42 s. Shorten for tightly spaced hits. Drag the selected accent's rightmost duration handle for the same adjustment.";
             _accentGrid.Columns[5].ToolTipText = "Independent of Motion: keep the current pose, choose a left/right hit, or alternate across cues using Alternate sides. Use Rebound + Alternate sides for stronger side hits. Left/right names the blue dancer's raised-hand side; pink mirrors it. Landings persist through a continuous rest. Seeking preserves the sequence.";
             _accentGrid.Columns[4].ToolTipText = "Bop is the original dip. Rebound is a deeper landing and recovery bounce. Combine either with any Pose, including Alternate sides. Strength and lead-in are independent.";
             _accentGrid.CellClick += OpenComboOnClick;
-            _accentGrid.CurrentCellDirtyStateChanged += (sender, args) => { if (_accentGrid.IsCurrentCellDirty && _accentGrid.CurrentCell is DataGridViewComboBoxCell) _accentGrid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+            _accentGrid.CurrentCellDirtyStateChanged += (sender, args) => { if (_accentGrid.IsCurrentCellDirty && (_accentGrid.CurrentCell is DataGridViewComboBoxCell || _accentGrid.CurrentCell is DataGridViewCheckBoxCell)) _accentGrid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
             _accentGrid.Columns[0].ToolTipText = "Double-click a row to seek. Exact song time of the deepest downward bop. Not when you click Save. Cues do not change BPM, rhythm or beat alignment. They can also add a hit during Rest or Hold.";
             _accentGrid.Columns[1].ToolTipText = "Bop strength: 0.5 = light, 1 = regular, 1.7 = strong (default), 2.5 = maximum. An accent emphasizes the current pose without forcing another side landing.";
             _accentGrid.Columns[2].ToolTipText = "Seconds to crouch into the hit, 0-1. Default 0.1. Zero gives an immediate hit. The deepest dip occurs at Hit time, followed by Recovery (default Bop 0.22 s, Rebound 0.42 s).";
@@ -427,7 +429,7 @@ namespace MusicBeePlugin
             foreach (DataGridViewColumn c in _accentGrid.Columns) c.SortMode = DataGridViewColumnSortMode.NotSortable;
             foreach (var cue in map.Accents)
                 _accentGrid.Rows.Add(cue.TimeSeconds.ToString("0.#########", CultureInfo.CurrentCulture), cue.Strength.ToString(CultureInfo.CurrentCulture),
-                    cue.PrepareSeconds.ToString(CultureInfo.CurrentCulture), cue.HoldSeconds.ToString(CultureInfo.CurrentCulture), AccentMotions[cue.Motion == PartyAccentMotion.Bop ? 0 : 1], AccentPoses[(int)cue.EffectivePose], cue.RecoverySeconds?.ToString(CultureInfo.CurrentCulture));
+                    cue.PrepareSeconds.ToString(CultureInfo.CurrentCulture), cue.HoldSeconds.ToString(CultureInfo.CurrentCulture), AccentMotions[cue.Motion == PartyAccentMotion.Bop ? 0 : 1], AccentPoses[(int)cue.EffectivePose], cue.RecoverySeconds?.ToString(CultureInfo.CurrentCulture),cue.NewHitPriority);
             _accentGrid.CellToolTipTextNeeded += (sender, args) => { if (args.ColumnIndex >= 0) args.ToolTipText = _accentGrid.Columns[args.ColumnIndex].ToolTipText; };
             _accentGrid.CellValueChanged += (sender, args) => MarkDirty();
             _accentGrid.SelectionChanged += (sender, args) => RefreshMarkers();
@@ -700,6 +702,7 @@ namespace MusicBeePlugin
             foreach (DataGridViewRow row in _accentGrid.Rows)
                 map.Accents.Add(new PartyAccentCue { TimeSeconds = Number(row, 0), Strength = Number(row, 1),
                     PrepareSeconds = Number(row, 2), HoldSeconds = Number(row, 3),
+                    NewHitPriority = Convert.ToBoolean(row.Cells[7].Value ?? false),
                     RecoverySeconds = string.IsNullOrWhiteSpace(Convert.ToString(row.Cells[6].Value)) ? (double?)null : Number(row,6),
                     Motion = (PartyAccentMotion)Math.Max(0, Array.IndexOf(AccentMotions, Convert.ToString(row.Cells[4].Value))),
                     Pose = (PartyAccentPose)Math.Max(0, Array.IndexOf(AccentPoses, Convert.ToString(row.Cells[5].Value))) });

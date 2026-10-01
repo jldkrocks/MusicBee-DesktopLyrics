@@ -69,16 +69,25 @@ internal static class TimelineChecks
         using(var t=new PartyTimeline {Width=236,Duration=10,EditAccents=true,SelectedAccent=0}) {
             var cue=new PartyTimeline.Marker {Row=0,Seconds=2,Prepare=.5,Hold=.5,Recovery=.5};t.Accents.Add(cue);
             int changes=0;t.EnvelopeChanged+=(r,p,h,recovery)=>{changes++;if(recovery!=1)throw new Exception("Recovery handle used wrong origin.");};
-            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,78,138,0));
-            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,88,138,0));
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,78,178,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,88,178,0));
             if(changes!=0)throw new Exception("Duration drag must commit only on release.");
-            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,88,138,0));
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,88,178,0));
             if(changes!=1)throw new Exception("Duration drag did not commit.");
-            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,48,138,0));
-            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,38,138,0));
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,48,178,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,38,178,0));
             Call(t,"OnKeyDown",new KeyEventArgs(Keys.Escape));
             if(cue.Prepare!=.5 || changes!=1)throw new Exception("Escape must restore duration without committing.");
         }
+        var bandFixture=new float[3000];
+        for(int i=0;i<1000;i++)bandFixture[(i<500?0:1000)+i]=.3f;
+        var attacks=TimelineWaveform.BuildAttacks(bandFixture,1);
+        int strongest=Array.IndexOf(attacks,1f);
+        if(Math.Abs(strongest-500)>8)throw new Exception("Band change must expose an attack even when total energy stays constant.");
+        var waveform=new TimelineWaveform.Range {Start=0,Length=1,Attacks=attacks};
+        if(Math.Abs(waveform.Snap(.51)-.5)>.008 || waveform.Snap(.8)!=.8)throw new Exception("Snapping must target nearby attacks only.");
+        var silence=TimelineWaveform.BuildAttacks(new float[3000],1);
+        foreach(var v in silence)if(v!=0)throw new Exception("Silence must have no attack spikes.");
         var map = new PartyTempoMap { TrackUrl = "original" };
         map.Accents.Add(new PartyAccentCue {TimeSeconds=5});
         map.Sections.Add(new PartyTempoSection { Bpm = 120, Style = PartyDanceStyle.HalfSpeed });

@@ -37,6 +37,9 @@ class GpuCompositionChecks
             Check(peaks!=null,"WAV decode failed: "+Get(result,"Error"));
             int highest=Array.IndexOf(peaks,peaks.Max());
             Check(Math.Abs(.4+highest*.3/peaks.Length-.5)<.002 && peaks.Max()>.9,"Waveform timestamp or amplitude shifted");
+            var rms=(float[])Get(result,"Rms");var attacks=(float[])Get(result,"Attacks");
+            Check(rms!=null && rms.Length==peaks.Length && rms.Max()>0 && rms.Max()<peaks.Max(),"RMS must retain energy without filling to peak amplitude");
+            Check(attacks!=null && attacks.Max()>.9 && Math.Abs(.4+Array.IndexOf(attacks,attacks.Max())*.3/attacks.Length-.5)<.01,"Attack lane must locate the known impulse");
             Check(Get(decode(file,0,61,System.Threading.CancellationToken.None),"Peaks")==null,"Oversized waveform range accepted");
             Check(Get(decode(file,0,1,new System.Threading.CancellationToken(true)),"Peaks")==null,"Cancelled waveform decoded");
             Check(Get(decode(file+".missing",0,1,System.Threading.CancellationToken.None),"Peaks")==null,"Missing audio must fail safely");

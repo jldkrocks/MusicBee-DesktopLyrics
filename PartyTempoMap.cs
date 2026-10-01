@@ -37,6 +37,7 @@ namespace MusicBeePlugin
         public double PrepareSeconds = 0.1;
         public double HoldSeconds;
         public double? RecoverySeconds;
+        public bool NewHitPriority;
         internal double EffectiveRecovery => RecoverySeconds ?? (Motion == PartyAccentMotion.Bop ? .22 : .42);
         internal const double ReleaseSeconds = 0.22;
     }
@@ -122,12 +123,18 @@ namespace MusicBeePlugin
                     if (section.Style != PartyDanceStyle.Rest && section.Style != PartyDanceStyle.Hold) heldStart = -1;
                     else if (heldStart < 0) heldStart = section.StartSeconds;
                 }
+            // An opted-in landing ends older accent envelopes permanently.
+            // Otherwise a long older hold could return after the new hit ends.
+            double cutoff=-1;
+            foreach(var cue in Accents)
+                if(cue.NewHitPriority && cue.TimeSeconds<=seconds)cutoff=cue.TimeSeconds;
             foreach (var cue in Accents)
             {
                 var side = cue.EffectivePose == PartyAccentPose.Left ? -1 : cue.EffectivePose == PartyAccentPose.Right ? 1 :
                     cue.EffectivePose == PartyAccentPose.Alternate ? ((alternateIndex++ % 2 == 0) ? -1 : 1) : 0;
                 if (pose.Held && side != 0 && cue.TimeSeconds >= heldStart && cue.TimeSeconds <= seconds)
                     pose.Frame = side < 0 ? 6 : 0;
+                if(cue.TimeSeconds<cutoff)continue;
                 var relative = seconds - cue.TimeSeconds;
                 if (relative < -cue.PrepareSeconds || relative >= cue.HoldSeconds + cue.EffectiveRecovery) continue;
                 var release = cue.EffectiveRecovery;

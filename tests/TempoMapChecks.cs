@@ -127,6 +127,23 @@ internal static class TempoMapChecks
     internal static void Run()
     {
         var countInMap = CheckCountIn();
+        var overlap=new PartyTempoMap {TrackUrl="priority",Sections={new PartyTempoSection {Bpm=120,Style=PartyDanceStyle.Rest}},Accents={
+            new PartyAccentCue {TimeSeconds=1,Strength=2.5,HoldSeconds=1,Pose=PartyAccentPose.Left},
+            new PartyAccentCue {TimeSeconds=1.07,Strength=1.7,Pose=PartyAccentPose.Right}}};
+        overlap.Validate();var oldOverlap=overlap.At(1.07);
+        if(oldOverlap.Frame!=6)throw new Exception("Legacy stronger overlapping cue must retain priority.");
+        overlap.Accents[1].NewHitPriority=true;
+        var newOverlap=overlap.At(1.07);
+        Near(newOverlap.Impact,1.7,"New hit wins at its exact timestamp even when weaker");
+        if(newOverlap.Frame!=0)throw new Exception("New hit must land on its chosen side.");
+        Near(overlap.At(1.5).Impact,0,"Interrupted old hold must not reappear after new recovery");
+        overlap.Accents[1].NewHitPriority=false;var preHit=overlap.At(1.06);overlap.Accents[1].NewHitPriority=true;
+        Near(overlap.At(1.06).Impact,preHit.Impact,"Priority must not interrupt before the new timestamp");
+        var savedPriority=JsonConvert.DeserializeObject<PartyTempoMap>(JsonConvert.SerializeObject(overlap));
+        if(!savedPriority.Accents[1].NewHitPriority)throw new Exception("Priority checkbox must persist.");
+        Near(savedPriority.At(1.07).Beat,oldOverlap.Beat,"Priority must not change beat integration");
+        Near(savedPriority.At(1.07).Impact,newOverlap.Impact,"Seeking must reproduce priority landing");
+
         var heldRamp=new PartyTempoMap {TrackUrl="hold-ramp",Sections={
             new PartyTempoSection {Bpm=120},new PartyTempoSection {StartSeconds=2,Bpm=90,Style=PartyDanceStyle.Hold},
             new PartyTempoSection {StartSeconds=10,Bpm=180,RampSeconds=4,CountIn=true,AlignBeat=true}}};
