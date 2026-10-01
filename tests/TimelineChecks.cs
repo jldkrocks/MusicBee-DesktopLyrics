@@ -174,6 +174,9 @@ internal static class TimelineChecks
             seekInput.Value = 12.345m;
             ((Button)Field(editor, "_seekExact")).PerformClick();
             if (requestedSeek != 12345) throw new Exception("Exact seek button must use the entered time.");
+            var accents=(DataGridView)Field(editor,"_accentGrid");
+            accents.Rows[0].Cells[7].Value=true;Call(editor,"SaveMap");
+            if(!last.Accents[0].NewHitPriority || map.Accents[0].NewHitPriority)throw new Exception("Editor must save opt-in priority without mutating the loaded source.");
             editor.Hide();
         }
         Console.WriteLine("Timeline seek, section selection, repeat-save and track-change checks passed.");
