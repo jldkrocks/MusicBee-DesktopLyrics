@@ -50,6 +50,10 @@ namespace MusicBeePlugin
         private long _seekIssuedAt, _ackSample;
         private int _seekAcks;
         private RenderFramePacer _cursorPacer;
+        internal bool OwnerPresents;
+        private long _lastOwnerPresentation;
+        private bool _ownerPresentationFailed;
+        private readonly System.Diagnostics.Stopwatch _presentationPoll = System.Diagnostics.Stopwatch.StartNew();
         private const int CursorMessage=0x8000+93;
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd,int msg,IntPtr w,IntPtr l);
         private double _initialBeat;
@@ -294,11 +298,14 @@ namespace MusicBeePlugin
             _enabled.CheckedChanged += (sender, args) => MarkDirty();
             _flowAccents.CheckedChanged += (sender, args) => MarkDirty();
             _timer.Tick += (sender, args) => PollPlayback();
-            _cursorTimer.Tick += (sender,args)=>UpdateCursor();
+            _cursorTimer.Tick += (sender,args)=>{
+                if(!OwnerPresents || _ownerPresentationFailed || System.Diagnostics.Stopwatch.GetTimestamp()-_lastOwnerPresentation>System.Diagnostics.Stopwatch.Frequency/20)PresentEditorSafely();
+            };
             Shown += (sender,args)=>{
                 RefreshMarkers();PollPlayback();
                 if(IsDisposed)return; // Song following may replace this editor during the poll.
                 _timer.Start();
+                if(OwnerPresents){_cursorTimer.Start();return;}
                 var handle=Handle;string failure;
                 _cursorPacer=RenderFramePacer.TryCreate(token=>PostMessage(handle,CursorMessage,new IntPtr(token),IntPtr.Zero),out failure);
                 if(_cursorPacer!=null)_cursorPacer.Start(120);else _cursorTimer.Start();
@@ -316,6 +323,33 @@ namespace MusicBeePlugin
             FormClosed += (sender,args)=>RestorePreview();
         }
 
+        internal void PresentFromOwner()
+        {
+            if(_ownerPresentationFailed)return;
+            _lastOwnerPresentation=System.Diagnostics.Stopwatch.GetTimestamp();
+            PresentEditorSafely();
+        }
+        private void PresentEditorSafely()
+        {
+            try { PresentEditor(); }
+            catch(Exception ex) {
+                _ownerPresentationFailed=true;
+                if(!IsDisposed)_status.Text="Timeline switched to timer rendering: "+ex.Message;
+            }
+        }
+        private void PresentEditor()
+        {
+            if(IsDisposed || !Visible || WindowState==FormWindowState.Minimized)return;
+            if(_presentationPoll.ElapsedMilliseconds>=120){_presentationPoll.Restart();PollPlayback();}
+            if(!IsDisposed){UpdateCursor();UpdateEditorControls(this);}
+        }
+        private static void UpdateEditorControls(Control control)
+        {
+            if(control.IsDisposed || !control.Visible)return;
+            control.Update();
+            foreach(Control child in control.Controls)UpdateEditorControls(child);
+        }
+
         private void UpdateCursor(){
             if(!Visible || WindowState==FormWindowState.Minimized || _timeline.Scrubbing)return;
             try{var now=EditingPosition();if(now.HasValue && Math.Abs(_timeline.Position-now.Value)>.0005){_timeline.Position=now.Value;_timeline.Invalidate();}}
@@ -326,7 +360,17 @@ namespace MusicBeePlugin
                 var pacer=_cursorPacer;if(pacer==null)return;
                 if(pacer.Failure!=null){pacer.Stop();_cursorTimer.Start();return;}
                 double late;long skipped;
-                try{if(pacer.BeginFrame(m.WParam.ToInt32(),out late,out skipped)){UpdateCursor();_timeline.Update();}}
+                try{
+                    if(pacer.BeginFrame(m.WParam.ToInt32(),out late,out skipped)){
+                        // WM_TIMER/WM_PAINT are lower priority than posted frames.
+                        // Service the editor, not just its timeline, before acking.
+                        PresentEditor();
+                    }
+                }
+                catch(Exception ex){
+                    pacer.Stop();_cursorTimer.Start();
+                    if(!IsDisposed)_status.Text="Timeline switched to timer rendering: "+ex.Message;
+                }
                 finally{pacer.EndFrame(m.WParam.ToInt32());}
                 return;
             }

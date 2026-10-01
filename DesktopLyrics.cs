@@ -71,9 +71,16 @@ namespace MusicBeePlugin
         }
 
         // ReSharper disable once UnusedParameter.Global
+        private FrmSettings _settingsForm;
         public bool Configure(IntPtr panelHandle)
         {
+            if (_settingsForm != null && !_settingsForm.IsDisposed)
+            {
+                _settingsForm.Activate();
+                return true;
+            }
             var settingsForm = new FrmSettings(_settings);
+            _settingsForm = settingsForm;
             settingsForm.TopMost = _frmLyrics is FrmLyricsWindow;
             settingsForm.ShowWindowRequested += (sender, args) => ShowLyricsWindow();
             settingsForm.SettingsChanged += (sender, settings) =>
@@ -82,7 +89,8 @@ namespace MusicBeePlugin
                 if (view == null) return;
                 if (!view.Form.IsDisposed) view.Form.BeginInvoke(new Action(() => { if (!view.Form.IsDisposed) view.UpdateFromSettings(settings); }));
             };
-            settingsForm.ShowDialog();
+            try { settingsForm.ShowDialog(); }
+            finally { _settingsForm = null; settingsForm.Dispose(); }
             SaveSettings(_settings);
             LyricParser.PreserveSlash = _settings.PreserveSlash;
             _lyricsCtrl.NextLineWhenNoTranslation = _settings.NextLineWhenNoTranslation;
@@ -390,6 +398,15 @@ namespace MusicBeePlugin
             }, ex =>
             {
                 if (ReferenceEquals(_windowThread, host)) _frmLyrics = null;
+                // Keep one bounded report if the private UI thread fails. Trace
+                // output alone is not retained by every MusicBee installation.
+                try
+                {
+                    var report = DateTime.UtcNow.ToString("O") + "\n" + ex;
+                    File.WriteAllText(Path.Combine(_mbApiInterface.Setting_GetPersistentStoragePath(),
+                        "DesktopLyrics-last-ui-error.log"), report.Substring(0, Math.Min(report.Length, 16384)));
+                }
+                catch (Exception) { }
                 if (!_closing) _mbApiInterface.MB_Trace("KoreKara UI: " + ex);
             });
         }

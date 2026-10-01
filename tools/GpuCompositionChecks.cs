@@ -59,6 +59,51 @@ class GpuCompositionChecks
             Console.WriteLine("Native waveform timing, amplitude, bounds, cancellation and missing-file checks passed.");
         }finally{if(File.Exists(file))File.Delete(file);}
     }
+    static void EditorPresentationChecks(Assembly assembly)
+    {
+        var clock=Stopwatch.StartNew();
+        var type=assembly.GetType("MusicBeePlugin.FrmLyricsWindow");
+        var ctor=type.GetConstructors()[0];var pars=ctor.GetParameters();var values=new object[pars.Length];
+        var settings=SettingsObj.GenerateDefault();settings.DisableDeezerBpmLookup=true;
+        values[0]=settings;
+        values[1]=new Plugin.MusicBeeApiInterface {
+            Player_GetPosition=()=>(int)clock.ElapsedMilliseconds,
+            Player_GetPlayState=()=>Plugin.PlayState.Playing,
+            NowPlaying_GetFileUrl=()=>"editor-presentation-test",NowPlaying_GetDuration=()=>188000 };
+        values[2]=Activator.CreateInstance(pars[2].ParameterType,true);
+        var folder=Path.Combine(Path.GetTempPath(),"KoreKara-editor-"+Guid.NewGuid());
+        values[10]=Activator.CreateInstance(pars[10].ParameterType,Flags,null,new object[]{folder},null);
+        try {
+            using(var owner=(Form)ctor.Invoke(values))
+            using(var timer=new System.Windows.Forms.Timer {Interval=100}) {
+                owner.StartPosition=FormStartPosition.Manual;owner.Location=new Point(-20000,-20000);
+                owner.Size=new Size(1440,800);owner.ShowInTaskbar=false;
+                Set(owner,"_artworkTrackUrl","editor-presentation-test");
+                int ticks=0;bool timedOut=false;Form editor=null;
+                owner.Shown+=(s,e)=>{
+                    Call(owner,"OpenPartyTempoMap");editor=(Form)Get(owner,"_tempoMapEditor");
+                    Check(editor!=null && (bool)Get(editor,"OwnerPresents"),"Owned editor must share presentation");
+                    Check(Get(editor,"_cursorPacer")==null,"Owned editor must not start a competing frame worker");
+                };
+                timer.Tick+=(s,e)=>{ticks++;if(clock.ElapsedMilliseconds>=2000)owner.Close();};
+                timer.Start();
+                using(var watchdog=new System.Threading.Timer(_=>{
+                    try { owner.BeginInvoke(new Action(()=>{timedOut=true;owner.Close();})); }
+                    catch(InvalidOperationException) { }
+                },null,6000,System.Threading.Timeout.Infinite)) Application.Run(owner);
+                Check(!timedOut && ticks>=5,"Editor presentation starved the UI timer");
+                Check(editor!=null && editor.IsDisposed,"Owned editor must dispose when owner closes");
+            }
+            using(var settingsForm=new FrmSettings(settings)) {
+                settingsForm.StartPosition=FormStartPosition.Manual;settingsForm.Location=new Point(-20000,-20000);
+                settingsForm.ShowInTaskbar=false;settingsForm.Show();
+                var plugin=new Plugin();Set(plugin,"_settingsForm",settingsForm);
+                Check(plugin.Configure(IntPtr.Zero) && ReferenceEquals(Get(plugin,"_settingsForm"),settingsForm),
+                    "Repeated settings request must activate the existing form");
+            }
+            Console.WriteLine("Owned editor presentation, timer responsiveness, disposal and single settings checks passed.");
+        } finally { if(Directory.Exists(folder))Directory.Delete(folder,true); }
+    }
     [STAThread] static void Main(string[] args)
     {
         Assembly.LoadFrom(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"mb_DesktopLyrics.dll"));
@@ -69,6 +114,7 @@ class GpuCompositionChecks
     {
         var assembly=typeof(Plugin).Assembly;
         WaveformChecks(assembly);
+        EditorPresentationChecks(assembly);
         var type=assembly.GetType("MusicBeePlugin.FrmLyricsWindow");
         var settings=SettingsObj.GenerateDefault();settings.PartyMode=true;settings.DisableDeezerBpmLookup=true;
         var ctor=type.GetConstructors()[0];var pars=ctor.GetParameters();var values=new object[pars.Length];

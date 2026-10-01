@@ -525,6 +525,9 @@ namespace MusicBeePlugin
                 // Flush this invalidation before acknowledging the wakeup.
                 // Posted messages cannot starve WM_PAINT or queue old frames.
                 Update();
+                // Share this presentation slot with the owned editor instead
+                // of competing high-rate producers on the same message loop.
+                if(_tempoMapEditor!=null && !_tempoMapEditor.IsDisposed)_tempoMapEditor.PresentFromOwner();
             }
             finally { profile?.End(RenderMetric.FrameWork, stamp); pacer.EndFrame(token); }
         }
@@ -1164,6 +1167,7 @@ namespace MusicBeePlugin
                     if(preview==null && !(_partyMap?.Enabled??false))StartPartyOnlineLookup();
                     _lastPartyUpdate=0;UpdatePartyDancers();Invalidate();
                 }, () => { var sample=_playback.Latest;return sample.TrackUrl==track?sample:null; });
+            editor.OwnerPresents=true;
             _tempoMapEditor=editor;
             editor.FollowCurrentSong=()=>{
                 if(IsDisposed || _animationDisposed || !editor.CanFollow || string.IsNullOrWhiteSpace(_artworkTrackUrl) ||
