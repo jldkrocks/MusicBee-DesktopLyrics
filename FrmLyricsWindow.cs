@@ -1157,8 +1157,10 @@ namespace MusicBeePlugin
             }
         }
 
+        private FrmPartyTempoMap _tempoMapEditor;
         private void OpenPartyTempoMap()
         {
+            if(_tempoMapEditor!=null && !_tempoMapEditor.IsDisposed){_tempoMapEditor.Activate();return;}
             var track = _artworkTrackUrl;
             if (string.IsNullOrWhiteSpace(track)) return;
             Func<bool> editingCurrentSong = () => _playback.Latest.TrackUrl == track;
@@ -1167,7 +1169,7 @@ namespace MusicBeePlugin
             var map = _partyTempoStore.LoadMap(track) ?? new PartyTempoMap { TrackUrl = track,
                 InitialBeat = -origin * bpm / 60000d,
                 Sections = new List<PartyTempoSection> { new PartyTempoSection { Bpm = bpm } } };
-            using (var editor = new FrmPartyTempoMap(map, _songTitle,
+            var editor = new FrmPartyTempoMap(map, _songTitle,
                 () => editingCurrentSong() ? (double?)_playback.Latest.Position / 1000 : null,
                 position =>
                 {
@@ -1211,7 +1213,20 @@ namespace MusicBeePlugin
                     CancelPartyLookup();_partyMap=preview??_partyTempoStore.LoadMap(track);
                     if(preview==null && !(_partyMap?.Enabled??false))StartPartyOnlineLookup();
                     _lastPartyUpdate=0;UpdatePartyDancers();Invalidate();
-                })) editor.ShowDialog(this);
+                });
+            _tempoMapEditor=editor;
+            editor.FollowCurrentSong=()=>{
+                if(IsDisposed || _animationDisposed || !editor.CanFollow || string.IsNullOrWhiteSpace(_artworkTrackUrl) ||
+                    _artworkTrackUrl==track || _playback.Latest.TrackUrl!=_artworkTrackUrl)return false;
+                var bounds=editor.Bounds;var state=editor.WindowState;
+                _tempoMapEditor=null;editor.Close();
+                if(!editor.IsDisposed){_tempoMapEditor=editor;return false;}
+                OpenPartyTempoMap();
+                if(_tempoMapEditor!=null){_tempoMapEditor.StartPosition=FormStartPosition.Manual;_tempoMapEditor.Bounds=bounds;_tempoMapEditor.WindowState=state;}
+                return true;
+            };
+            editor.FormClosed+=(sender,args)=>{if(ReferenceEquals(_tempoMapEditor,editor))_tempoMapEditor=null;};
+            editor.Show(this);
         }
 
         private void OpenPartyTempoEditor()

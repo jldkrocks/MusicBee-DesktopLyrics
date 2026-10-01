@@ -46,6 +46,8 @@ namespace MusicBeePlugin
         private readonly System.Diagnostics.Stopwatch _seekAge = new System.Diagnostics.Stopwatch();
         private double? _pendingSeek;
         private bool _dirty, _trackWasAvailable = true;
+        internal Func<bool> FollowCurrentSong;
+        internal bool CanFollow => !_dirty && !_preview.Active;
         private static readonly string[] AccentMotions = { "Bop (original)", "Rebound" };
         private static readonly string[] AccentPoses = { "Current pose", "Left hit", "Right hit", "Alternate sides" };
         private static readonly string[] Styles = { "Normal", "Side to side", "Hold pose", "Rest (keep counting)" };
@@ -164,7 +166,8 @@ namespace MusicBeePlugin
             };
             _timeline.Duration = Math.Max(0, duration); _timeline.Dock = DockStyle.Fill;
             _timeline.SeekRequested += SeekTo;
-            _timeline.EditAccents=true;
+            _timeline.EditAccents=true;_timeline.EditSections=true;
+            _timeline.SectionMoved += MoveSection;
             _timeline.AccentMoved += MoveAccent;
             _timeline.LoopRangeSelected += (start,end)=>{if(!_preview.Active){_loopStart.Value=(decimal)Math.Round(start,3);_loopEnd.Value=(decimal)Math.Round(end,3);}};
             _overview.Duration=_timeline.Duration;_overview.Dock=DockStyle.Fill;
@@ -205,7 +208,7 @@ namespace MusicBeePlugin
             AddButton(actions, "Close", () => Close());
             _status.Text = "Diamonds select sections; gold circles select accents. Save applies both tabs and keeps this window open.";
             _status.ForeColor = Color.FromArgb(178, 192, 212);
-            help.Text = "Overview: drag or scroll to pan. Wheel over detail to zoom. Detail: drag empty space to pan, gold accents to edit; Shift-drag a loop. Hover here for timeline help.";
+            help.Text = "Overview: drag or scroll to pan. Wheel over detail to zoom. Detail: drag empty space to pan, gold accents or section diamonds to edit; Shift-drag a loop. Hover here for timeline help.";
             _tips.SetToolTip(_seekStep, "Seconds moved by - step and + step. Pause for precise placement; 0.01 s is the smallest step.");
             _tips.SetToolTip(_seekTime, "Exact song position in seconds. Enter or Seek moves playback without changing your rows.");
             _tips.SetToolTip(_enabled, "Apply this song's saved sections and accent cues. Uncheck to use its ordinary BPM settings.");
@@ -292,6 +295,14 @@ namespace MusicBeePlugin
             FormClosed += (sender,args)=>RestorePreview();
         }
 
+        private void MoveSection(int row,double seconds)
+        {
+            if(row<=0||row>=_grid.Rows.Count)return;
+            _grid.EndEdit();var old=_grid.Rows[row].Cells[0].Value;
+            try{_grid.Rows[row].Cells[0].Value=seconds.ToString("0.000",CultureInfo.CurrentCulture);ReadMap();}
+            catch(Exception ex){_grid.Rows[row].Cells[0].Value=old;_status.Text="Section not moved: "+ex.Message;}
+            _timeline.Focus();
+        }
         private void MoveAccent(int row,double seconds){
             if(row<0||row>=_accentGrid.Rows.Count)return;
             _accentGrid.EndEdit();_accentGrid.Rows[row].Cells[0].Value=seconds.ToString("0.000",CultureInfo.CurrentCulture);
@@ -580,7 +591,7 @@ namespace MusicBeePlugin
             try
             {
                 var position = EditingPosition(); var available = position.HasValue;
-                _waveform.Update(_source.TrackUrl,_timeline.ViewStart,_timeline.ViewLength>0?_timeline.ViewLength:_timeline.Duration);
+                _waveform.Update(_source.TrackUrl,_timeline.ViewStart,_timeline.ViewLength>0?_timeline.ViewLength:_timeline.Duration,_timeline.Duration);
                 _timeline.Waveform=_waveform.Data;_timeline.WaveformStatus=_waveform.Status;
                 if (available)
                 {
@@ -592,6 +603,10 @@ namespace MusicBeePlugin
                 if(_preview.Active && _previewDirty)ApplyPreview();
                 if(!_preview.Active)RestorePreview();
                 if (_closeAfterPreview && !_preview.Active) { _closeAfterPreview = false; Close(); return; }
+                if(!available && FollowCurrentSong!=null && !_dirty && !_preview.Active){
+                    _grid.EndEdit();_accentGrid.EndEdit();
+                    if(CanFollow && FollowCurrentSong!=null && FollowCurrentSong())return;
+                }
                 var transportReady = available && !_preview.Active;
                 _back.Enabled = _forward.Enabled = _seekRow.Enabled = _seekExact.Enabled = _seekTime.Enabled = _seekStep.Enabled = transportReady && _timeline.Duration > 0;
                 _timeline.Enabled=_overview.Enabled=available && _timeline.Duration>0;
@@ -607,7 +622,7 @@ namespace MusicBeePlugin
                 if (available && !_timeline.Scrubbing) _timeline.Position = position.Value;
                 if (available && !_trackWasAvailable) _status.Text = _dirty ? "Original song ready — unsaved edits." : "Original song ready.";
                 _trackWasAvailable = available;
-                if (!available) _status.Text = "Another song is playing. Edits and Save still belong to the original song.";
+                if (!available) _status.Text = "Another song is playing. Unsaved edits stay with this song. Save to follow the new song, or close to discard.";
                 _timeline.Invalidate();
             }
             catch (Exception ex) { _status.Text = ex.Message; }

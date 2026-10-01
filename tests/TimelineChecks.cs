@@ -108,25 +108,42 @@ internal static class TimelineChecks
         int decodes=0;
         using(var waveformCache=new TimelineWaveform((path,start,length,token)=>{Interlocked.Increment(ref decodes);return new TimelineWaveform.Range {Start=start,Length=length,Peaks=new float[100],Rms=new float[100],Attacks=new float[100]};})) {
             string path=typeof(TimelineChecks).Assembly.Location;
-            Action<double,double> update=(start,length)=>{waveformCache.Update(path,start,length);waveformCache.GetType().GetField("_changed",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(waveformCache,DateTime.UtcNow.AddSeconds(-1));waveformCache.Update(path,start,length);};
+            Action<double,double> update=(start,length)=>{waveformCache.Update(path,start,length,1000);waveformCache.GetType().GetField("_changed",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(waveformCache,DateTime.UtcNow.AddSeconds(-1));waveformCache.Update(path,start,length,1000);};
             update(10,2);
-            if(!SpinWait.SpinUntil(()=>{waveformCache.Update(path,10,2);return waveformCache.Data!=null;},2000))throw new Exception("Buffered waveform failed to finish.");
-            var cached=waveformCache.Data;
-            if(!cached.Covers(9,4) || cached.Length>60)throw new Exception("Waveform must include bounded pan headroom.");
-            update(10.5,2);update(9.5,2);
-            if(decodes!=1 || !ReferenceEquals(cached,waveformCache.Data))throw new Exception("Panning inside buffer must reuse identical waveform without decoding.");
-            waveformCache.Update(path,13,2);
-            if(!ReferenceEquals(cached,waveformCache.Data))throw new Exception("Partially exposed pan must keep the existing waveform while loading.");
-            update(13,2);
-            if(!SpinWait.SpinUntil(()=>{waveformCache.Update(path,13,2);return !ReferenceEquals(cached,waveformCache.Data);},2000))throw new Exception("Panning beyond buffer must load the next range.");
-            if(decodes!=2)throw new Exception("Pan extension should decode only once.");
-            int first,lastBin;
-            if(!cached.PixelBins(10,10.06,out first,out lastBin) || first!=33 || lastBin!=35)throw new Exception("Cached bins must map to absolute song time.");
-            if(cached.PixelBins(30,31,out first,out lastBin))throw new Exception("Out-of-buffer pixels must not repeat the final sample.");
-            waveformCache.Update(path+"missing",13,2);
+            if(!SpinWait.SpinUntil(()=>{waveformCache.Update(path,10,2,1000);return waveformCache.Data!=null&&waveformCache.Data.Covers(0,90);},2000))throw new Exception("Adjacent chunks must prefetch.");
+            var cached=waveformCache.Data;int loaded=decodes;
+            update(10.5,2);update(9.5,1);
+            if(decodes!=loaded || !ReferenceEquals(cached,waveformCache.Data))throw new Exception("Nearby pan and zoom must reuse identical cache without decoding.");
+            update(65,2);
+            if(!waveformCache.Data.Covers(65,2))throw new Exception("Prefetched view must be immediately available.");
+            for(int i=0;i<20;i++){
+                double time=i*30;update(time,1);
+                if(!SpinWait.SpinUntil(()=>{waveformCache.Update(path,time,1,1000);return waveformCache.Data.Covers(time,1);},2000))throw new Exception("Moving to new chunks must load them.");
+                if(waveformCache.Data.Tiles.Length>TimelineWaveform.CacheLimit)throw new Exception("Cache must remain bounded.");
+            }
+            waveformCache.Update(path+"missing",13,2,1000);
             if(waveformCache.Data!=null)throw new Exception("Changing songs must clear old waveform data.");
         }
-        if(TimelineWaveform.BufferedRange(0,.5).Start!=0 || TimelineWaveform.BufferedRange(100,40).Length!=60)throw new Exception("Pan headroom must respect start and decode cap.");
+        using(var t=new PartyTimeline {Width=236,Duration=100,ViewLength=10,EditSections=true}) {
+            t.Markers.Add(new PartyTimeline.Marker {Row=0,Seconds=0});t.Markers.Add(new PartyTimeline.Marker {Row=1,Seconds=5});t.Markers.Add(new PartyTimeline.Marker {Row=2,Seconds=8});
+            int seeks=0,moves=0;double moved=-1;t.SeekRequested+=v=>seeks++;t.SectionMoved+=(row,v)=>{moves++;moved=v;};
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,118,39,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,138,39,0));
+            if(moves!=0||seeks!=0)throw new Exception("Section drag must not seek or commit before release.");
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,138,39,0));
+            if(moved!=6||moves!=1||seeks!=0)throw new Exception("Section drag must use zoom-relative times.");
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,118,39,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,220,39,0));
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,220,39,0));
+            if(moved!=7.999)throw new Exception("Section drag must stop before its neighbour.");
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,118,39,0));
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,118,39,0));
+            if(seeks!=1||moves!=2)throw new Exception("Section click must still seek.");
+            Call(t,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,18,39,0));
+            Call(t,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,100,39,0));
+            Call(t,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,100,39,0));
+            if(moves!=2||t.Markers[0].Seconds!=0)throw new Exception("First section must stay fixed at zero.");
+        }
         var bandFixture=new float[3000];
         for(int i=0;i<1000;i++)bandFixture[(i<500?0:1000)+i]=.3f;
         var attacks=TimelineWaveform.BuildAttacks(bandFixture,1);
@@ -230,6 +247,21 @@ internal static class TimelineChecks
             accents.Rows[0].Cells[7].Value=true;Call(editor,"SaveMap");
             if(!last.Accents[0].NewHitPriority || map.Accents[0].NewHitPriority)throw new Exception("Editor must save opt-in priority without mutating the loaded source.");
             editor.Hide();
+        }
+        var followMap=new PartyTempoMap {TrackUrl="follow",Sections={new PartyTempoSection {Bpm=120},new PartyTempoSection {StartSeconds=4,Bpm=150}}};
+        double? followPosition=0;int follows=0;
+        using(var owner=new Form())using(var editor=new FrmPartyTempoMap(followMap,"Follow test",()=>followPosition,_=>{},_=>{},30,()=>{},()=>false)){
+            owner.Opacity=0;owner.Show();editor.Opacity=0;editor.Show(owner);Application.DoEvents();
+            if(!owner.Enabled||editor.Modal)throw new Exception("Modeless editor must leave owner interactive.");
+            editor.FollowCurrentSong=()=>{follows++;return true;};
+            var grid=(DataGridView)Field(editor,"_grid");grid.Rows[0].Cells[10].Value="Ramp to next";
+            Call(editor,"MoveSection",1,6d);Call(editor,"SaveMap");
+            if(Convert.ToString(grid.Rows[1].Cells[0].Value)!="6.000")throw new Exception("Section drag must update grid.");
+            grid.Rows[1].Cells[1].Value="160";followPosition=null;Call(editor,"PollPlayback");
+            if(follows!=0||editor.CanFollow)throw new Exception("Unsaved edits must block automatic song replacement.");
+            Call(editor,"SaveMap");Call(editor,"PollPlayback");
+            if(follows!=1)throw new Exception("Saved editor must follow a new song.");
+            editor.Close();owner.Close();
         }
         Console.WriteLine("Timeline seek, section selection, repeat-save and track-change checks passed.");
     }

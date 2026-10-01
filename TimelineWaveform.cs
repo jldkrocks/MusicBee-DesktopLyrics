@@ -1,22 +1,41 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace MusicBeePlugin
 {
-    // One buffered bounded range, one worker and no disk cache. Results are polled by
+    // A bounded nearby-chunk cache, one worker and no disk cache. Results are polled by
     // the editor, so closing it never leaves an Invoke on a disposed handle.
     internal sealed class TimelineWaveform : IDisposable
     {
         internal sealed class Range
         {
             internal double Start, Length;
+            internal Range[] Tiles;
+            internal bool HasSamples => Peaks != null || (Tiles != null && Tiles.Any(t=>t.Peaks!=null));
+            internal bool Sample(double start,double end,out float peak,out float rms,out float attack)
+            {
+                peak=rms=attack=0;
+                if(Tiles!=null){bool found=false;foreach(var tile in Tiles){float p,r,a;if(tile.Sample(start,end,out p,out r,out a)){found=true;peak=Math.Max(peak,p);rms=Math.Max(rms,r);attack=Math.Max(attack,a);}}return found;}
+                int first,last;if(!PixelBins(start,end,out first,out last))return false;
+                double power=0;
+                for(int i=first;i<last;i++){peak=Math.Max(peak,Peaks[i]);if(Rms!=null)power+=Rms[i]*Rms[i];if(Attacks!=null)attack=Math.Max(attack,Attacks[i]/AttackDisplayMaximum);}
+                rms=(float)Math.Sqrt(power/(last-first));return true;
+            }
             internal float[] Peaks, Rms, Attacks;
             internal float AttackDisplayMaximum=1;
             internal string Error;
-            internal bool Covers(double start, double length) => Peaks != null && start >= Start - 1e-7 && start + length <= Start + Length + 1e-7;
+            internal bool Covers(double start, double length)
+            {
+                if(Tiles==null)return Peaks!=null && start>=Start-1e-7 && start+length<=Start+Length+1e-7;
+                double covered=start;
+                foreach(var tile in Tiles){if(tile.Start>covered+1e-7)break;if(tile.Peaks!=null && tile.Start+tile.Length>covered)covered=tile.Start+tile.Length;}
+                return covered>=start+length-1e-7;
+            }
             internal bool PixelBins(double start, double end, out int first, out int last)
             {
                 first = last = 0;
@@ -27,6 +46,7 @@ namespace MusicBeePlugin
             }
             internal double Snap(double time)
             {
+                if(Tiles!=null){double bestTile=time,distance=.040001;foreach(var tile in Tiles){var snapped=tile.Snap(time);if(snapped!=time&&Math.Abs(snapped-time)<distance){bestTile=snapped;distance=Math.Abs(snapped-time);}}return bestTile;}
                 if (Attacks == null) return time;
                 double step = Length / Attacks.Length, bestDistance = .04, best = time;
                 for (int i=1;i<Attacks.Length-1;i++)
@@ -47,54 +67,60 @@ namespace MusicBeePlugin
         private static readonly SemaphoreSlim DecodeGate = new SemaphoreSlim(1,1);
         private Task<Range> _task;
         private CancellationTokenSource _cancel;
-        private double _start=-1,_length, _pendingStart, _pendingLength, _pendingZoom, _dataZoom;
+        internal const int CacheLimit=16;
+        internal const double ChunkSeconds=30;
+        private readonly List<Range> _cache=new List<Range>();
+        private readonly HashSet<double> _failed=new HashSet<double>();
         private string _path;
-        private readonly Func<string,double,double,CancellationToken,Range> _read;
-        internal TimelineWaveform(Func<string,double,double,CancellationToken,Range> read = null) { _read = read ?? Read; }
-        internal static Range BufferedRange(double start, double length)
-        {
-            var bufferedLength = Math.Min(60, length * 3);
-            return new Range { Start = Math.Max(0, start - (bufferedLength - length) / 2), Length = bufferedLength };
-        }
+        private double _start=-1,_length,_pendingStart;
         private DateTime _changed;
-        private bool _disposed,_requested;
+        private bool _disposed;
+        private readonly Func<string,double,double,CancellationToken,Range> _read;
+        internal TimelineWaveform(Func<string,double,double,CancellationToken,Range> read=null){_read=read??Read;}
         internal Range Data {get;private set;}
-        internal string Status {get;private set;}="Zoom to 60 seconds or less for waveform.";
-        internal void Update(string path,double start,double length)
+        internal string Status {get;private set;}="Loading waveform...";
+        internal void Update(string path,double start,double length,double duration=0)
         {
             if(_disposed)return;
-            bool changedPath = !string.Equals(_path, path, StringComparison.OrdinalIgnoreCase);
-            if(changedPath || start!=_start || length!=_length)
-            {
-                _path=path; _start=start; _length=length; _changed=DateTime.UtcNow; _requested=false;
-                if(changedPath)Data=null;
-                // Keep an in-flight buffer if the new viewport still fits it.
-                if(changedPath || _pendingZoom!=length || start<_pendingStart || start+length>_pendingStart+_pendingLength) _cancel?.Cancel();
-            }
+            bool newPath=!string.Equals(path,_path,StringComparison.OrdinalIgnoreCase);
+            if(newPath){_path=path;_cache.Clear();_failed.Clear();Data=null;_cancel?.Cancel();}
+            if(newPath||start!=_start||length!=_length){_start=start;_length=length;_changed=DateTime.UtcNow;}
+            double end=start+length;
             if(_task!=null){
+                // Cancel obsolete far-away work, but let nearby prefetch finish.
+                if(_pendingStart+ChunkSeconds<start-2*ChunkSeconds||_pendingStart>end+2*ChunkSeconds)_cancel.Cancel();
                 if(!_task.IsCompleted)return;
                 var result=_task.Result;_task=null;
                 if(!_cancel.IsCancellationRequested){
-                    if(result.Peaks!=null){Data=result;_dataZoom=_pendingZoom;}
-                    Status=result.Error??"Waveform: audio peaks, not automatically identified beats.";
+                    if(result.Peaks!=null){
+                        _cache.RemoveAll(t=>t.Start==result.Start);_cache.Add(result);
+                        while(_cache.Count>CacheLimit){var farthest=_cache.OrderByDescending(t=>Math.Abs(t.Start+ t.Length/2-(start+length/2))).First();_cache.Remove(farthest);}
+                        var tiles=_cache.OrderBy(t=>t.Start).ToArray();Data=new Range {Start=tiles[0].Start,Length=tiles[tiles.Length-1].Start+tiles[tiles.Length-1].Length-tiles[0].Start,Tiles=tiles};
+                        Status="Waveform ready; nearby audio is cached.";
+                    }else{if(_failed.Count>=CacheLimit)_failed.Clear();_failed.Add(result.Start);Status=result.Error;}
                 }
                 _cancel.Dispose();_cancel=null;
             }
-            if(Data!=null && _dataZoom==length && Data.Covers(start,length))return;
-            if(length<=0 || length>60){Data=null;Status="Zoom to 60 seconds or less for waveform.";return;}
-            if(_requested || (DateTime.UtcNow-_changed).TotalMilliseconds<300)return;
-            _requested=true;
+            if(length<=0||length>300){Status="Zoom to five minutes or less for waveform.";return;}
+            if((DateTime.UtcNow-_changed).TotalMilliseconds<120)return;
             if(string.IsNullOrEmpty(path)||path.StartsWith(@"\\")||!File.Exists(path)){Status="Waveform unavailable: local audio file required.";return;}
-            var buffer=BufferedRange(start,length);
-            _pendingStart=buffer.Start;_pendingLength=buffer.Length;_pendingZoom=length;
-            Status="Loading waveform...";_cancel=new CancellationTokenSource();var token=_cancel.Token;
-            _task=Task.Run(()=>{
-                bool entered=false;
-                try { DecodeGate.Wait(token);entered=true;return _read(path,buffer.Start,buffer.Length,token); }
-                catch(OperationCanceledException){return new Range {Start=buffer.Start,Length=buffer.Length,Error="Waveform cancelled."};}
-                catch(Exception ex){return new Range {Start=buffer.Start,Length=buffer.Length,Error="Waveform unavailable: "+ex.Message};}
-                finally{if(entered)DecodeGate.Release();}
-            });
+            // Visible chunks first, then two neighbours in either direction.
+            var wanted=new List<double>();double first=Math.Floor(Math.Max(0,start)/ChunkSeconds)*ChunkSeconds;
+            for(double t=first;t<end-1e-7;t+=ChunkSeconds)wanted.Add(t);
+            double after=Math.Ceiling(end/ChunkSeconds)*ChunkSeconds;
+            for(int i=0;i<2;i++){wanted.Add(after+i*ChunkSeconds);wanted.Add(first-(i+1)*ChunkSeconds);}
+            foreach(double t in wanted){
+                if(t<0||(duration>0&&t>=duration)||_failed.Contains(t)||_cache.Any(r=>r.Start==t))continue;
+                double span=duration>0?Math.Min(ChunkSeconds,duration-t):ChunkSeconds;
+                _pendingStart=t;_cancel=new CancellationTokenSource();var token=_cancel.Token;
+                _task=Task.Run(()=>{bool entered=false;
+                    try{DecodeGate.Wait(token);entered=true;return _read(path,t,span,token);}
+                    catch(Exception ex){return new Range {Start=t,Length=span,Error="Waveform unavailable: "+ex.Message};}
+                    finally{if(entered)DecodeGate.Release();}
+                });
+                if(Data==null)Status="Loading waveform...";
+                return;
+            }
         }
 
         internal static Range Read(string path,double start,double length,CancellationToken token)

@@ -52,3 +52,14 @@ With **Flow accent sequences** enabled, the final accent recovers through centre
 The waveform now loads a surrounding buffer, normally three times the visible span, capped at 60 seconds and 16,384 bins. Nearby panning reuses the same samples and attack contrast without clearing or decoding them again. When panning beyond the buffer, its overlapping portion stays visible while a new buffer loads after navigation settles. Newly exposed audio cannot be displayed until decoded. Zooming requests an appropriately sized buffer. Only one completed buffer is retained, with one background decoder; no disk cache or whole-library analysis. The old buffer remains alongside the in-flight result until replacement, so transient memory includes both buffers plus decoder scratch space. Attack contrast may change on buffer replacement or zoom, but stays fixed while panning within it.
 
 The yellow loop range and playhead now stay inside the timeline's drawing bounds at any zoom. Editing surfaces no longer show tooltips. Hover the instruction text above the overview for timeline help; individual settings retain their tooltips.
+
+
+## Cached navigation, section dragging and song following (1.15.70)
+
+Waveforms use up to sixteen cached 30-second chunks (about 3 MiB maximum sample-array storage), with one decoder. Visible chunks load first, then two neighbouring chunks in each direction. Panning and zooming reuse the same samples. Views up to five minutes can fill in progressively; longer views require zooming in. Jumps outside the cache still need loading. Changing songs clears the cache; no waveform files are stored on disk. Decoder scratch space and one pending result are additional to the sample cache. Attack contrast is fixed per chunk, so background prefetch does not rescale existing spikes.
+
+Drag a section diamond to move its start, just like an accent. The move commits on release without seeking. A click still selects and seeks. The first section stays at zero and other sections cannot cross their neighbours. Ramp to next follows the moved boundary automatically. If a custom saved ramp would become invalid, the move is rejected and the original start retained. Escape cancels an unfinished drag.
+
+The tempo editor is now modeless: you can drag and use the main lyrics window while it is open. Opening Tempo map again focuses the existing editor. A saved editor follows the newly playing song automatically once its metadata is ready, keeping the editor's position and size. Unsaved edits stay attached to the original song instead of being discarded or applied to the wrong song. The status explains this; Save commits them to that song and then permits following. Close offers the existing discard confirmation. Song changes safely end audition before replacing the editor. Follow does not modify any saved map by itself.
+
+Layout alternatives are previews only and are not included in this build.

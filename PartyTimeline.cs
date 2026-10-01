@@ -41,7 +41,16 @@ namespace MusicBeePlugin
         internal double ViewStart, ViewLength;
         internal double LoopStart, LoopEnd;
         internal bool Overview, EditAccents;
-        private Marker _dragAccent;
+        private Marker _dragAccent, _dragSection;
+        internal bool EditSections;
+        internal event Action<int,double> SectionMoved;
+        private double SectionDragTime(int x)
+        {
+            var previous=Markers.Find(m=>m.Row==_dragSection.Row-1);
+            var next=Markers.Find(m=>m.Row==_dragSection.Row+1);
+            double lower=previous==null?0:previous.Seconds+.001, upper=next==null?Duration:next.Seconds-.001;
+            return Math.Max(lower,Math.Min(upper,DragTime(x)));
+        }
         private int _dragX;
         private bool _accentDragging, _panning;
         private double _panStart;
@@ -64,7 +73,7 @@ namespace MusicBeePlugin
         }
         internal void ZoomAt(double factor, int x)
         {
-            if (Duration <= 0 || _dragAccent != null || _envelope != null || _selectingLoop || _detailPending || _detailPanning || _panning) return;
+            if (Duration <= 0 || _dragAccent != null || _dragSection != null || _envelope != null || _selectingLoop || _detailPending || _detailPanning || _panning) return;
             var fraction = SecondsAt(x, Width, 1);
             var anchor = ViewStart + fraction * Span;
             ViewLength = Math.Min(Duration, Math.Max(.5, Span * factor));
@@ -125,7 +134,7 @@ namespace MusicBeePlugin
             var contentClip = g.Save();
             g.SetClip(new Rectangle(MarginX, 20, Math.Max(1, Width - 2 * MarginX), 165), CombineMode.Intersect);
             if(LoopEnd>LoopStart)using(var loop=new SolidBrush(Color.FromArgb(35,247,206,115)))g.FillRectangle(loop,X(LoopStart),20,X(LoopEnd)-X(LoopStart),43);
-            var ordered = new List<Marker>(Markers); ordered.Sort((a,b) => a.Seconds.CompareTo(b.Seconds));
+            var ordered = Markers.ConvertAll(m=>new Marker {Row=m.Row,Style=m.Style,Seconds=_dragSection!=null&&m.Row==_dragSection.Row?_dragSection.Seconds:m.Seconds}); ordered.Sort((a,b) => a.Seconds.CompareTo(b.Seconds));
             for (int i = 0; i < ordered.Count; i++)
             {
                 var marker = ordered[i];
@@ -156,27 +165,20 @@ namespace MusicBeePlugin
             }
             contentClip = g.Save();
             g.SetClip(new Rectangle(MarginX, 86, Math.Max(1, Width - 2 * MarginX), 99), CombineMode.Intersect);
-            if(Waveform?.Peaks != null && Waveform.Start < ViewStart+Span && Waveform.Start+Waveform.Length > ViewStart)
+            if(Waveform?.HasSamples == true && Waveform.Start < ViewStart+Span && Waveform.Start+Waveform.Length > ViewStart)
             {
                 using(var outline=new Pen(Color.FromArgb(140,184,209)))
                 using(var body=new Pen(Color.FromArgb(80,134,166)))
                 using(var attacks=new Pen(Color.FromArgb(250,187,86)))
                 {
-                    int pixels=Math.Max(1,Width-MarginX*2);var peaks=Waveform.Peaks;float previousPeak=0;
+                    int pixels=Math.Max(1,Width-MarginX*2);float previousPeak=0;
                     for(int px=0;px<pixels;px++){
-                        int first,last;
-                        if(!Waveform.PixelBins(ViewStart+px*Span/pixels,ViewStart+(px+1)*Span/pixels,out first,out last)){previousPeak=0;continue;}
-                        float peak=0,attack=0;double energy=0;int bins=0;
-                        for(int n=first;n<Math.Min(last,peaks.Length);n++){
-                            peak=Math.Max(peak,peaks[n]);
-                            var rms=Waveform.Rms==null?0:Waveform.Rms[n];energy+=rms*rms;bins++;
-                            if(Waveform.Attacks!=null)attack=Math.Max(attack,Waveform.Attacks[n]);
-                        }
-                        float level=(float)Math.Sqrt(energy/Math.Max(1,bins));
+                        float peak,level,attack;
+                        if(!Waveform.Sample(ViewStart+px*Span/pixels,ViewStart+(px+1)*Span/pixels,out peak,out level,out attack)){previousPeak=0;continue;}
                         g.DrawLine(body,MarginX+px,108-level*19,MarginX+px,108+level*19);
                         g.DrawLine(outline,MarginX+Math.Max(0,px-1),108-(px==0?peak:previousPeak)*19,MarginX+px,108-peak*19);
                         g.DrawLine(outline,MarginX+Math.Max(0,px-1),108+(px==0?peak:previousPeak)*19,MarginX+px,108+peak*19);previousPeak=peak;
-                        if(attack>0)g.DrawLine(attacks,MarginX+px,169,MarginX+px,169-Math.Min(1,attack/Waveform.AttackDisplayMaximum)*25);
+                        if(attack>0)g.DrawLine(attacks,MarginX+px,169,MarginX+px,169-Math.Min(1,attack)*25);
                     }
                 }
                 TextRenderer.DrawText(g,"ATTACK STRENGTH (relative)",Font,new Point(MarginX,127),Color.FromArgb(250,187,86));
@@ -254,6 +256,7 @@ namespace MusicBeePlugin
             if (nearest != null)
             {
                 MarkerSelected?.Invoke(nearest.Row);
+                if(EditSections && nearest.Row>0){_dragSection=new Marker {Row=nearest.Row,Seconds=nearest.Seconds,Style=nearest.Style};_dragOriginal=nearest.Seconds;_dragX=e.X;_accentDragging=false;Capture=true;return;}
                 Position = Math.Max(0, Math.Min(Duration, nearest.Seconds));
                 SeekRequested?.Invoke(Position); Invalidate(); return;
             }
@@ -276,6 +279,7 @@ namespace MusicBeePlugin
             if (_envelope != null) { MoveEnvelope(e.X); Invalidate(); return; }
             if (_panning) { Pan(_panStart + (e.X - _panX) * Duration / Math.Max(1, Width - MarginX * 2)); return; }
             if(_selectingLoop){LoopStart=Math.Min(_loopAnchor,At(e.X));LoopEnd=Math.Max(_loopAnchor,At(e.X));Invalidate();return;}
+            if(_dragSection!=null){_accentDragging|=Math.Abs(e.X-_dragX)>2;if(_accentDragging)_dragSection.Seconds=SectionDragTime(e.X);Invalidate();return;}
             if (_dragAccent != null)
             {
                 _accentDragging |= Math.Abs(e.X - _dragX) > 2;
@@ -302,13 +306,14 @@ namespace MusicBeePlugin
             }
             if (_panning && e.Button == MouseButtons.Left) { Pan(_panStart + (e.X - _panX) * Duration / Math.Max(1, Width - MarginX * 2)); _panning = false; Capture = false; return; }
             if(_selectingLoop && e.Button==MouseButtons.Left){_selectingLoop=false;Capture=false;LoopStart=Math.Min(_loopAnchor,At(e.X));LoopEnd=Math.Max(_loopAnchor,At(e.X));if(LoopEnd-LoopStart>=.01)LoopRangeSelected?.Invoke(LoopStart,LoopEnd);Invalidate();return;}
+            if(_dragSection!=null && e.Button==MouseButtons.Left){var cue=_dragSection;double time=SectionDragTime(e.X);_dragSection=null;Capture=false;if(_accentDragging)SectionMoved?.Invoke(cue.Row,time);else{Position=cue.Seconds;SeekRequested?.Invoke(Position);}Invalidate();return;}
             if(_dragAccent!=null && e.Button==MouseButtons.Left){var cue=_dragAccent;_dragAccent=null;Capture=false;if(_accentDragging)AccentMoved?.Invoke(cue.Row,SnapTime?.Invoke(DragTime(e.X))??DragTime(e.X));Invalidate();return;}
             if (!Scrubbing || e.Button != MouseButtons.Left) return;
             Position = At(e.X); Scrubbing = false; Capture = false;
             SeekRequested?.Invoke(Position); Invalidate();
         }
         protected override void OnMouseCaptureChanged(EventArgs e)
-        { base.OnMouseCaptureChanged(e); if (!Capture) {_detailPending=_detailPanning=false;Cursor=Cursors.Default;_panning=false;_selectingLoop=false;Scrubbing = false;
+        { base.OnMouseCaptureChanged(e); if (!Capture) {_dragSection=null;_detailPending=_detailPanning=false;Cursor=Cursors.Default;_panning=false;_selectingLoop=false;Scrubbing = false;
             if(_envelope!=null){_envelope.Prepare=_prepareOriginal;_envelope.Hold=_holdOriginal;_envelope.Recovery=_recoveryOriginal;_envelope=null;}if(_dragAccent!=null)_dragAccent.Seconds=_dragOriginal;_dragAccent=null;Invalidate();} }
         protected override void OnMouseWheel(MouseEventArgs e)
         {
@@ -323,7 +328,7 @@ namespace MusicBeePlugin
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e); if (Duration <= 0 || !Enabled) return;
-            if(e.KeyCode==Keys.Escape && (_dragAccent!=null || _envelope!=null || _detailPending || _detailPanning)){Capture=false;e.Handled=true;return;}
+            if(e.KeyCode==Keys.Escape && (_dragAccent!=null || _dragSection!=null || _envelope!=null || _detailPending || _detailPanning)){Capture=false;e.Handled=true;return;}
             if(EditAccents && SelectedAccent>=0 && (e.KeyCode==Keys.Left||e.KeyCode==Keys.Right)){
                 var cue=Accents.Find(c=>c.Row==SelectedAccent);if(cue!=null)AccentMoved?.Invoke(cue.Row,Math.Round(Math.Max(0,Math.Min(Duration,cue.Seconds+(e.KeyCode==Keys.Left?-1:1)*(e.Shift?.001:.01))),3));
                 e.Handled=true;e.SuppressKeyPress=true;return;
