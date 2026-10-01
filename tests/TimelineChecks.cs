@@ -314,6 +314,12 @@ internal static class TimelineChecks
             ((NumericUpDown)Field(editor,"_startingBpm")).Value=134.5m;Call(editor,"SaveMap");
             if(quickSaved.Sections[0].Bpm!=134.5 || quickSaved.Sections[1].Bpm!=150)throw new Exception("Quick BPM must edit first point only.");
         }
+
+        var doubleSpeed=new PartyTempoMap {TrackUrl="align",Sections={new PartyTempoSection {Bpm=120,Speed=2}}};
+        using(var editor=new FrmPartyTempoMap(doubleSpeed,"Starting alignment",()=>5,_=>{},m=>quickSaved=m,30,()=>{},()=>false)){
+            Call(editor,"AlignStartingBeat");Call(editor,"SaveMap");
+            if(!quickSaved.Enabled || Math.Abs(quickSaved.At(5).Beat)>.0001)throw new Exception("Starting alignment must use the integrated dance speed and enable the map.");
+        }
         Console.WriteLine("Timeline seek, section selection, repeat-save and track-change checks passed.");
     }
 }

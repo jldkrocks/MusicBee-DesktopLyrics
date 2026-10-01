@@ -367,13 +367,7 @@ namespace MusicBeePlugin
             _tips.SetToolTip(_startingBpm,"BPM of the first point only. Later points remain unchanged. Save applies; enable Use this map to use it.");
             var tap=new PartyTapTempo();
             AddButton(tempoHeader,"Tap BPM",()=>{double bpm;if(tap.Tap(System.Diagnostics.Stopwatch.GetTimestamp(),System.Diagnostics.Stopwatch.Frequency,out bpm)&&bpm>=40&&bpm<=240)_startingBpm.Value=(decimal)Math.Round(bpm,2);});
-            AddButton(tempoHeader,"Align beat now",()=>{
-                if(_grid.Rows.Count!=1 || StyleAt(_grid.Rows[0])!=PartyDanceStyle.Normal || Convert.ToBoolean(_grid.Rows[0].Cells[4].Value)){
-                    _status.Text="For multi-section maps use Align on the section row. Align beat now is for one Normal section without row alignment.";return;}
-                var pos=EditingPosition();if(!pos.HasValue)return;
-                _initialBeat=-pos.Value*(double)_startingBpm.Value/60;MarkDirty();
-                _status.Text="Starting beat marked at "+pos.Value.ToString("0.000")+" s. Save to apply.";
-            });
+            AddButton(tempoHeader,"Align beat now",AlignStartingBeat);
             root.Controls.Add(tempoHeader,1,0);
             var side=new FlowLayoutPanel {Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true,BackColor=Color.FromArgb(30,35,48),Padding=new Padding(8)};
             Action<string> label=text=>side.Controls.Add(new Label {Text=text,Width=170,Height=26,TextAlign=ContentAlignment.BottomLeft,Margin=new Padding(3,8,3,5)});
@@ -415,6 +409,19 @@ namespace MusicBeePlugin
             root.Controls.Add(side,0,1);root.Controls.Add(content,1,1);root.Controls.Add(footer,0,2);root.SetColumnSpan(footer,2);
             // Keep the existing command controls owned for their enabled-state bindings.
             old.Visible=false;Controls.Add(old);Controls.Add(root);root.BringToFront();ResumeLayout(true);
+        }
+
+        private void AlignStartingBeat()
+        {
+            try{
+                if(_grid.Rows.Count!=1 || StyleAt(_grid.Rows[0])!=PartyDanceStyle.Normal || Convert.ToBoolean(_grid.Rows[0].Cells[4].Value)){
+                    _status.Text="For multi-section maps use Align on the section row. Align beat now is for one Normal section without row alignment.";return;}
+                _grid.EndEdit();var pos=EditingPosition();if(!pos.HasValue)return;
+                var map=ReadMap();
+                _initialBeat+=(map.Sections[0].Rhythm==PartyRhythm.AccentFour?3:0)-map.At(pos.Value).Beat;
+                _enabled.Checked=true;MarkDirty();
+                _status.Text="Starting beat marked at "+pos.Value.ToString("0.000")+" s. Save to apply.";
+            }catch(Exception ex){_status.Text=ex.Message;}
         }
 
         private void MoveSection(int row,double seconds)
