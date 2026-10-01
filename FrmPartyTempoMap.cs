@@ -10,7 +10,7 @@ namespace MusicBeePlugin
     {
         private readonly DataGridView _grid = new DataGridView();
         private readonly DataGridView _accentGrid = new DataGridView();
-        private readonly TabControl _tabs = new TabControl { Dock = DockStyle.Fill };
+        private readonly TabControl _tabs = new DarkTabs { Dock = DockStyle.Fill };
         private readonly ToolTip _tips = new ToolTip { InitialDelay = 350, AutoPopDelay = 20000, ShowAlways = true };
         private DataGridView ActiveGrid => _tabs.SelectedIndex == 1 ? _accentGrid : _grid;
         private readonly ContextMenuStrip _rowMenu = new ContextMenuStrip();
@@ -38,6 +38,8 @@ namespace MusicBeePlugin
         private readonly Action<PartyTempoMap> _previewMap;
         private bool _previewApplied,_previewDirty;
         private readonly Timer _timer = new Timer { Interval = 120 };
+        private readonly Timer _cursorTimer = new Timer { Interval = 15 };
+        private readonly Func<PlaybackSnapshotReader.Snapshot> _positionSample;
         private readonly Label _status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
         private readonly Font _editorFont = new Font("Segoe UI", 9f);
         private Button _play, _back, _forward, _add, _seekRow, _seekExact;
@@ -60,8 +62,9 @@ namespace MusicBeePlugin
             Action<int> seek, Action<PartyTempoMap> save, double duration,
             Action togglePlayback, Func<bool> playing, Func<double> durationProvider = null,
             Action<bool, Action<bool>> setPlaying = null, Func<bool> playbackBusy = null, Func<bool> displayPlaying = null,
-            Action<PartyTempoMap> previewMap = null)
+            Action<PartyTempoMap> previewMap = null, Func<PlaybackSnapshotReader.Snapshot> positionSample = null)
         {
+            _positionSample=positionSample;
             _source = map; _position = position; _seek = seek; _save = save;
             _previewMap=previewMap;
             _togglePlayback = togglePlayback; _playing = playing; _displayPlaying = displayPlaying ?? playing;
@@ -260,7 +263,7 @@ namespace MusicBeePlugin
             _tips.SetToolTip(_flowAccents, "During Hold/Rest, the first Alternate hit keeps the starting side, then each Alternate flips from the preceding cue. Current/Left/Right cues also establish the side. On returning to dance with Align off, recover through centre, then land on the opposite side from the final accent. The dance keeps that handedness until a new rest, Align or dance/rhythm change. Hit times, BPM and beat phase stay unchanged. Off preserves legacy choreography. Save applies.");
             mapOptions.Controls.Add(_enabled); mapOptions.Controls.Add(_flowAccents);
             layout.Controls.Add(mapOptions, 0, 4); layout.Controls.Add(_status, 0, 5); layout.Controls.Add(actions, 0, 6);
-            Controls.Add(layout);
+            BuildSidebarLayout(transport,editing,actions,help,layout);
             _grid.CellValueChanged += (sender, args) => { RefreshSwingCells(); MarkDirty(); };
             _grid.CellToolTipTextNeeded += (sender, args) =>
             {
@@ -283,7 +286,14 @@ namespace MusicBeePlugin
             _enabled.CheckedChanged += (sender, args) => MarkDirty();
             _flowAccents.CheckedChanged += (sender, args) => MarkDirty();
             _timer.Tick += (sender, args) => PollPlayback();
-            Shown += (sender, args) => { RefreshMarkers(); PollPlayback(); _timer.Start(); };
+            _cursorTimer.Tick += (sender,args) => {
+                if(!Visible || WindowState==FormWindowState.Minimized || _timeline.Scrubbing)return;
+                try{
+                    var positionNow=EditingPosition();
+                    if(positionNow.HasValue && Math.Abs(_timeline.Position-positionNow.Value)>.0005){_timeline.Position=positionNow.Value;_timeline.Invalidate();}
+                }catch(Exception ex){_status.Text=ex.Message;}
+            };
+            Shown += (sender, args) => { RefreshMarkers(); PollPlayback(); _timer.Start(); _cursorTimer.Start(); };
             FormClosing += (sender, args) =>
             {
                 if (_preview.Active) { args.Cancel = true; _closeAfterPreview = true; _preview.Stop(); return; }
@@ -293,6 +303,73 @@ namespace MusicBeePlugin
             };
             _grid.DataError += (sender, args) => { args.ThrowException = false; };
             FormClosed += (sender,args)=>RestorePreview();
+        }
+
+        private sealed class DarkTabs : TabControl
+        {
+            internal DarkTabs(){
+                SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);
+                SizeMode=TabSizeMode.Fixed;ItemSize=new Size(130,32);Padding=new Point(12,6);
+            }
+            protected override void OnPaint(PaintEventArgs e){
+                e.Graphics.Clear(Color.FromArgb(23,27,38));
+                for(int i=0;i<TabCount;i++){
+                    var r=GetTabRect(i);
+                    using(var brush=new SolidBrush(i==SelectedIndex?Color.FromArgb(60,87,118):Color.FromArgb(30,35,48)))e.Graphics.FillRectangle(brush,r);
+                    TextRenderer.DrawText(e.Graphics,TabPages[i].Text,Font,r,ForeColor,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
+                    if(i==SelectedIndex)using(var pen=new Pen(Color.FromArgb(98,178,221),2))e.Graphics.DrawLine(pen,r.Left,r.Bottom-2,r.Right,r.Bottom-2);
+                }
+            }
+            protected override void OnSelectedIndexChanged(EventArgs e){base.OnSelectedIndexChanged(e);Invalidate();}
+        }
+        private void BuildSidebarLayout(FlowLayoutPanel transport,FlowLayoutPanel editing,FlowLayoutPanel actions,Label help,TableLayoutPanel old)
+        {
+            SuspendLayout();ClientSize=new Size(1440,800);MinimumSize=new Size(1180,740);
+            var root=new TableLayoutPanel {Dock=DockStyle.Fill,Padding=new Padding(14),ColumnCount=2,RowCount=3};
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,200));root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute,30));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,44));
+            var heading=new Label {Text=Text.Substring("Tempo map - ".Length),Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft,AutoEllipsis=true};
+            root.Controls.Add(heading,0,0);root.SetColumnSpan(heading,2);
+            var side=new FlowLayoutPanel {Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true,BackColor=Color.FromArgb(30,35,48),Padding=new Padding(8)};
+            Action<string> label=text=>side.Controls.Add(new Label {Text=text,Width=170,Height=26,TextAlign=ContentAlignment.BottomLeft,Margin=new Padding(3,8,3,5)});
+            Action<Control> wide=c=>{c.Dock=DockStyle.None;c.AutoSize=false;c.Width=166;c.Height=30;c.Margin=new Padding(3,3,3,3);side.Controls.Add(c);};
+            Func<Control[],FlowLayoutPanel> row=items=>{
+                var panel=new FlowLayoutPanel {Width=176,Height=34,WrapContents=false,Margin=Padding.Empty};
+                foreach(var item in items){item.Dock=DockStyle.None;item.AutoSize=false;item.Margin=new Padding(3);panel.Controls.Add(item);}side.Controls.Add(panel);return panel;
+            };
+            label("PLAYBACK");wide(_play);wide(_previewButton);
+            _seekTime.Width=108;_seekExact.Width=52;row(new Control[]{_seekTime,_seekExact});
+            label("NUDGE PLAYHEAD");_back.Text="-";_forward.Text="+";_back.Width=_forward.Width=32;_seekStep.Width=84;row(new Control[]{_back,_seekStep,_forward});
+            label("LOOP RANGE (seconds)");_loopStart.Width=_loopEnd.Width=78;row(new Control[]{_loopStart,_loopEnd});
+            var useView=editing.Controls.OfType<Button>().First(b=>b.Text=="Use view");useView.Text="Use visible range";wide(useView);wide(_loopButton);
+            wide(editing.Controls.OfType<Button>().First(b=>b.Text=="Whole song"));wide(_snapHits);
+            label("SONG OPTIONS");_enabled.Text="Use this map";wide(_enabled);wide(_flowAccents);
+            var helpButton=AddButton(side,"Timeline help",()=>MessageBox.Show(this,
+                "Wheel: zoom under pointer. Drag empty space: pan. Click: seek.\n"+
+                "Drag diamonds or gold dots: edit time. Section and accent markers snap together within 8 pixels; hold Shift for free movement.\n"+
+                "Shift-drag empty space: select loop. White handles: accent durations. Arrow keys: nudge selected accent 10 ms; Shift-arrows: 1 ms.\n"+
+                "Pointer time is shown to milliseconds. Major ticks use round times with five minor divisions. The gold playhead crosses the waveform.\n"+
+                "Snap hits optionally snaps accents to candidate audio attacks. Save applies both tabs. Preview auditions valid unsaved edits. Saved editors follow song changes; unsaved edits stay with their song.",
+                "Timeline help",MessageBoxButtons.OK,MessageBoxIcon.Information));wide(helpButton);
+            _tips.SetToolTip(_snapHits,"Snap accents to audio attacks within 40 ms. Marker alignment takes priority; Shift bypasses both. Peaks are candidates, not confirmed beats.");
+            var content=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Margin=new Padding(8,0,0,0)};
+            content.RowStyles.Add(new RowStyle(SizeType.Absolute,30));content.RowStyles.Add(new RowStyle(SizeType.Absolute,220));content.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            content.Controls.Add(_overview,0,0);content.Controls.Add(_timeline,0,1);content.Controls.Add(_tabs,0,2);
+            var footer=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=3,RowCount=1};footer.RowStyles.Add(new RowStyle(SizeType.Percent,100));footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,250));footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,170));
+            var left=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};left.Controls.Add(_add);
+            var menu=new ContextMenuStrip {BackColor=Color.FromArgb(30,35,48),ForeColor=ForeColor,Renderer=new RowMenuRenderer(),ShowImageMargin=false};
+            menu.Items.Add("Delete row",null,(sender,args)=>DeleteSelectedRow());
+            var seek=menu.Items.Add("Seek to row",null,(sender,args)=>{try{if(ActiveGrid.CurrentRow!=null)SeekTo(Number(ActiveGrid.CurrentRow,0));}catch(Exception ex){_status.Text=ex.Message;}});
+            var ramp=menu.Items.Add("Ramp from previous",null,(sender,args)=>RampToRow());
+            var copy=menu.Items.Add("Add accent at this time",null,(sender,args)=>CopyTimeToOtherTab(ActiveGrid));
+            menu.Opening+=(sender,args)=>{seek.Enabled=_seekRow.Enabled&&ActiveGrid.CurrentRow!=null;ramp.Enabled=_tabs.SelectedIndex==0;copy.Text=_tabs.SelectedIndex==0?"Add accent at this time":"Add section at this time";};
+            var rowButton=AddButton(left,"Row actions",()=>{});rowButton.Click+=(sender,args)=>menu.Show(rowButton,new Point(0,rowButton.Height));rowButton.Disposed+=(sender,args)=>menu.Dispose();
+            var right=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false,FlowDirection=FlowDirection.RightToLeft};
+            var close=actions.Controls.OfType<Button>().First(b=>b.Text=="Close");var save=actions.Controls.OfType<Button>().First(b=>b.Text=="Save");right.Controls.Add(close);right.Controls.Add(save);
+            footer.Controls.Add(left,0,0);footer.Controls.Add(_status,1,0);footer.Controls.Add(right,2,0);
+            root.Controls.Add(side,0,1);root.Controls.Add(content,1,1);root.Controls.Add(footer,0,2);root.SetColumnSpan(footer,2);
+            // Keep the existing command controls owned for their enabled-state bindings.
+            old.Visible=false;Controls.Add(old);Controls.Add(root);root.BringToFront();ResumeLayout(true);
         }
 
         private void MoveSection(int row,double seconds)
@@ -487,7 +564,8 @@ namespace MusicBeePlugin
 
         private double? EditingPosition()
         {
-            var reported = _position();
+            var sample=_positionSample?.Invoke();
+            var reported = _positionSample==null ? _position() : sample==null ? (double?)null : sample.Position/1000d;
             if (!reported.HasValue) { _pendingSeek = null; _cursorClock.Reset(); return null; }
             if (_pendingSeek.HasValue && _seekAge.ElapsedMilliseconds < 1000)
             {
@@ -498,8 +576,8 @@ namespace MusicBeePlugin
                 else return Math.Min(_timeline.Duration, expected);
             }
             _pendingSeek = null;
-            return _cursorClock.PositionAt((int)Math.Round(reported.Value * 1000),
-                System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency, _displayPlaying(), true) / 1000d;
+            return Math.Min(_timeline.Duration, _cursorClock.PositionAt((int)Math.Round(reported.Value * 1000),
+                System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency, _displayPlaying(), false, sample==null || sample.PositionTimestamp==0 ? (long?)null : sample.PositionTimestamp) / 1000d);
         }
 
         private static PartyDanceStyle StyleAt(DataGridViewRow row)
@@ -656,7 +734,7 @@ namespace MusicBeePlugin
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _waveform.Dispose(); _preview.Cancel();RestorePreview(); _rowMenu.Dispose(); _timer.Dispose(); _tips.Dispose(); _editorFont.Dispose(); }
+            if (disposing) { _waveform.Dispose(); _preview.Cancel();RestorePreview(); _rowMenu.Dispose(); _timer.Dispose(); _cursorTimer.Dispose(); _tips.Dispose(); _editorFont.Dispose(); }
             base.Dispose(disposing);
         }
 

@@ -24,6 +24,23 @@ namespace MusicBeePlugin
         internal Func<double,double> SnapTime;
         internal TimelineWaveform.Range Waveform;
         internal string WaveformStatus;
+        private Bitmap _waveImage;
+        private TimelineWaveform.Range _waveImageData;
+        private double _waveStart, _waveSpan;
+        private int _waveWidth;
+        internal int WaveformRenders { get; private set; }
+        private int _hoverX = -1;
+        internal Func<bool> FreeDrag = () => (ModifierKeys & Keys.Shift) != 0;
+        internal double SnapMarker(double value, bool section, int row)
+        {
+            if (FreeDrag()) return value;
+            double best=value, distance=8 * Span / Math.Max(1,Width-MarginX*2);
+            // Same-kind duplicate timestamps are invalid. Sections still clamp to neighbours.
+            foreach(var marker in (section ? Accents : Markers))
+                if(Math.Abs(marker.Seconds-value)<distance){best=marker.Seconds;distance=Math.Abs(best-value);}
+            if(best!=value || section)return best;
+            return SnapTime?.Invoke(value)??value;
+        }
         private Marker _envelope;
         private int _handle;
         private double _prepareOriginal,_holdOriginal,_recoveryOriginal;
@@ -49,7 +66,7 @@ namespace MusicBeePlugin
             var previous=Markers.Find(m=>m.Row==_dragSection.Row-1);
             var next=Markers.Find(m=>m.Row==_dragSection.Row+1);
             double lower=previous==null?0:previous.Seconds+.001, upper=next==null?Duration:next.Seconds-.001;
-            return Math.Max(lower,Math.Min(upper,DragTime(x)));
+            return Math.Max(lower,Math.Min(upper,SnapMarker(DragTime(x),true,_dragSection.Row)));
         }
         private int _dragX;
         private bool _accentDragging, _panning;
@@ -155,35 +172,18 @@ namespace MusicBeePlugin
             using (var pen = new Pen(Color.FromArgb(247, 206, 115), 2))
                 g.DrawLine(pen, X(Position), 29, X(Position), 62);
             g.Restore(contentClip);
-            var divisions = Math.Max(2, Math.Min(8, Width / 115));
-            for (int i = 0; i <= divisions; i++)
-            {
-                var seconds = ViewStart+Span * i / divisions;
-                var label = Span<30?seconds.ToString("0.00",CultureInfo.InvariantCulture)+"s":Time(seconds); var size = TextRenderer.MeasureText(label, Font);
-                var left = Math.Max(0, Math.Min(Width - size.Width, (int)X(seconds) - size.Width / 2));
-                TextRenderer.DrawText(g, label, Font, new Point(left, 67), Color.FromArgb(166, 177, 197));
+            double step=TickStep(Span,Width);
+            for(double seconds=Math.Ceiling(ViewStart/step)*step;seconds<=ViewStart+Span+step*.001;seconds+=step){
+                var label=seconds.ToString(step<1?"0.000":"0.##",CultureInfo.InvariantCulture)+"s";
+                var size=TextRenderer.MeasureText(label,Font);
+                TextRenderer.DrawText(g,label,Font,new Point(Math.Max(0,Math.Min(Width-size.Width,(int)X(seconds)-size.Width/2)),67),Color.FromArgb(166,177,197));
+                using(var pen=new Pen(Color.FromArgb(100,120,146)))g.DrawLine(pen,X(seconds),56,X(seconds),63);
             }
+            for(double seconds=Math.Ceiling(ViewStart/(step/5))*(step/5);seconds<=ViewStart+Span;seconds+=step/5)
+                using(var pen=new Pen(Color.FromArgb(65,80,100)))g.DrawLine(pen,X(seconds),57,X(seconds),60);
             contentClip = g.Save();
             g.SetClip(new Rectangle(MarginX, 86, Math.Max(1, Width - 2 * MarginX), 99), CombineMode.Intersect);
-            if(Waveform?.HasSamples == true && Waveform.Start < ViewStart+Span && Waveform.Start+Waveform.Length > ViewStart)
-            {
-                using(var outline=new Pen(Color.FromArgb(140,184,209)))
-                using(var body=new Pen(Color.FromArgb(80,134,166)))
-                using(var attacks=new Pen(Color.FromArgb(250,187,86)))
-                {
-                    int pixels=Math.Max(1,Width-MarginX*2);float previousPeak=0;
-                    for(int px=0;px<pixels;px++){
-                        float peak,level,attack;
-                        if(!Waveform.Sample(ViewStart+px*Span/pixels,ViewStart+(px+1)*Span/pixels,out peak,out level,out attack)){previousPeak=0;continue;}
-                        g.DrawLine(body,MarginX+px,108-level*19,MarginX+px,108+level*19);
-                        g.DrawLine(outline,MarginX+Math.Max(0,px-1),108-(px==0?peak:previousPeak)*19,MarginX+px,108-peak*19);
-                        g.DrawLine(outline,MarginX+Math.Max(0,px-1),108+(px==0?peak:previousPeak)*19,MarginX+px,108+peak*19);previousPeak=peak;
-                        if(attack>0)g.DrawLine(attacks,MarginX+px,169,MarginX+px,169-Math.Min(1,attack)*25);
-                    }
-                }
-                TextRenderer.DrawText(g,"ATTACK STRENGTH (relative)",Font,new Point(MarginX,127),Color.FromArgb(250,187,86));
-            }
-            else TextRenderer.DrawText(g,WaveformStatus??"Waveform",Font,new Point(MarginX,94),Color.Silver);
+            DrawWaveformCached(g);
             g.Restore(contentClip);
             contentClip = g.Save();
             g.SetClip(new Rectangle(MarginX, 20, Math.Max(1, Width - 2 * MarginX), 165), CombineMode.Intersect);
@@ -211,8 +211,61 @@ namespace MusicBeePlugin
                 TextRenderer.DrawText(g,"Selected accent: purple = preparation, gold = hold, green = recovery. Drag white handles.",Font,new Point(MarginX,190),Color.Silver);
             }
             g.Restore(contentClip);
+            if(_hoverX>=MarginX && _hoverX<=Width-MarginX){
+                TextRenderer.DrawText(g,"Pointer "+At(_hoverX).ToString("0.000",CultureInfo.InvariantCulture)+" s",Font,new Point(MarginX+90,8),Color.FromArgb(180,210,230));
+            }
+            contentClip=g.Save();g.SetClip(new Rectangle(MarginX,29,Math.Max(1,Width-2*MarginX),141),CombineMode.Intersect);
+            using(var pen=new Pen(Color.FromArgb(247,206,115),1))g.DrawLine(pen,X(Position),29,X(Position),170);
+            g.Restore(contentClip);
             if (Focused) ControlPaint.DrawFocusRectangle(g, new Rectangle(2, 2, Width - 4, Height - 4));
         }
+        internal static double TickStep(double span,int width)
+        {
+            double target=Math.Max(.001,span/Math.Max(2,width/95)),power=Math.Pow(10,Math.Floor(Math.Log10(target))),n=target/power;
+            return (n<=1?1:n<=2?2:n<=5?5:10)*power;
+        }
+        private void DrawWaveformCached(Graphics target)
+        {
+            int pixels=Math.Max(1,Width-MarginX*2);
+            bool ready=Waveform?.HasSamples==true;
+            if(ready){
+                if(_waveImage==null || _waveWidth!=Width || _waveSpan!=Span || ViewStart<_waveStart || ViewStart+Span>_waveStart+_waveSpan*3 || !ReferenceEquals(_waveImageData,Waveform)){
+                    _waveImage?.Dispose();_waveImage=new Bitmap(pixels*3+MarginX*2,99);
+                    _waveWidth=Width;_waveImageData=Waveform;_waveStart=ViewStart-Span;_waveSpan=Span;WaveformRenders++;
+                    using(var g=Graphics.FromImage(_waveImage)){
+                        g.Clear(BackColor);g.SmoothingMode=SmoothingMode.AntiAlias;g.TranslateTransform(0,-86);
+                        RenderWaveform(g,_waveStart,Span*3,pixels*3);
+                    }
+                }
+                // Integer translation preserves the waveform shape while panning.
+                int source=MarginX+(int)Math.Round((ViewStart-_waveStart)/Span*pixels);
+                target.DrawImage(_waveImage,new Rectangle(MarginX,86,pixels,99),new Rectangle(source,0,pixels,99),GraphicsUnit.Pixel);
+                TextRenderer.DrawText(target,"ATTACK STRENGTH (relative)",Font,new Point(MarginX,127),Color.FromArgb(250,187,86));
+            }else{
+                _waveImage?.Dispose();_waveImage=null;
+                TextRenderer.DrawText(target,WaveformStatus??"Waveform",Font,new Point(MarginX,94),Color.Silver);
+            }
+        }
+        private void RenderWaveform(Graphics g,double start,double span,int pixels)
+        {
+            using(var outline=new Pen(Color.FromArgb(140,184,209)))
+            using(var body=new Pen(Color.FromArgb(80,134,166)))
+            using(var attacks=new Pen(Color.FromArgb(250,187,86))){
+                float previousPeak=0;
+                for(int px=0;px<pixels;px++){
+                    float peak,level,attack;
+                    if(!Waveform.Sample(start+px*span/pixels,start+(px+1)*span/pixels,out peak,out level,out attack)){previousPeak=0;continue;}
+                    g.DrawLine(body,MarginX+px,108-level*19,MarginX+px,108+level*19);
+                    g.DrawLine(outline,MarginX+Math.Max(0,px-1),108-(px==0?peak:previousPeak)*19,MarginX+px,108-peak*19);
+                    g.DrawLine(outline,MarginX+Math.Max(0,px-1),108+(px==0?peak:previousPeak)*19,MarginX+px,108+peak*19);previousPeak=peak;
+                    if(attack>0)g.DrawLine(attacks,MarginX+px,169,MarginX+px,169-Math.Min(1,attack)*25);
+                }
+            }
+        }
+        protected override void OnFontChanged(EventArgs e){base.OnFontChanged(e);_waveImage?.Dispose();_waveImage=null;}
+        protected override void OnBackColorChanged(EventArgs e){base.OnBackColorChanged(e);_waveImage?.Dispose();_waveImage=null;}
+        protected override void Dispose(bool disposing){if(disposing){_waveImage?.Dispose();_waveImage=null;}base.Dispose(disposing);}
+        protected override void OnMouseLeave(EventArgs e){base.OnMouseLeave(e);_hoverX=-1;Invalidate();}
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
@@ -236,7 +289,6 @@ namespace MusicBeePlugin
                     }
                 }
             }
-            if((ModifierKeys&Keys.Shift)!=0){_selectingLoop=true;_loopAnchor=At(e.X);Capture=true;return;}
             if (e.Y >= 20 && e.Y <= 31)
             {
                 Marker accent = null; float best = 8;
@@ -260,6 +312,7 @@ namespace MusicBeePlugin
                 Position = Math.Max(0, Math.Min(Duration, nearest.Seconds));
                 SeekRequested?.Invoke(Position); Invalidate(); return;
             }
+            if((ModifierKeys&Keys.Shift)!=0){_selectingLoop=true;_loopAnchor=At(e.X);Capture=true;return;}
             if (Math.Abs(X(Position) - e.X) > 6 || e.Y < 29 || e.Y > 62)
             {
                 _detailPending = true; _panStart = ViewStart; _panSpan = Span; _panX = e.X; Capture = true; return;
@@ -270,6 +323,7 @@ namespace MusicBeePlugin
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            _hoverX=e.X;Invalidate();
             if (_detailPending || _detailPanning)
             {
                 if (Math.Abs(e.X - _panX) > 3) _detailPanning = true;
@@ -283,7 +337,7 @@ namespace MusicBeePlugin
             if (_dragAccent != null)
             {
                 _accentDragging |= Math.Abs(e.X - _dragX) > 2;
-                if (_accentDragging) _dragAccent.Seconds = DragTime(e.X);
+                if (_accentDragging) _dragAccent.Seconds = SnapMarker(DragTime(e.X),false,_dragAccent.Row);
                 Invalidate(); return;
             }
             if (!Scrubbing) return;
@@ -307,7 +361,7 @@ namespace MusicBeePlugin
             if (_panning && e.Button == MouseButtons.Left) { Pan(_panStart + (e.X - _panX) * Duration / Math.Max(1, Width - MarginX * 2)); _panning = false; Capture = false; return; }
             if(_selectingLoop && e.Button==MouseButtons.Left){_selectingLoop=false;Capture=false;LoopStart=Math.Min(_loopAnchor,At(e.X));LoopEnd=Math.Max(_loopAnchor,At(e.X));if(LoopEnd-LoopStart>=.01)LoopRangeSelected?.Invoke(LoopStart,LoopEnd);Invalidate();return;}
             if(_dragSection!=null && e.Button==MouseButtons.Left){var cue=_dragSection;double time=SectionDragTime(e.X);_dragSection=null;Capture=false;if(_accentDragging)SectionMoved?.Invoke(cue.Row,time);else{Position=cue.Seconds;SeekRequested?.Invoke(Position);}Invalidate();return;}
-            if(_dragAccent!=null && e.Button==MouseButtons.Left){var cue=_dragAccent;_dragAccent=null;Capture=false;if(_accentDragging)AccentMoved?.Invoke(cue.Row,SnapTime?.Invoke(DragTime(e.X))??DragTime(e.X));Invalidate();return;}
+            if(_dragAccent!=null && e.Button==MouseButtons.Left){var cue=_dragAccent;double time=SnapMarker(DragTime(e.X),false,cue.Row);_dragAccent=null;Capture=false;if(_accentDragging)AccentMoved?.Invoke(cue.Row,time);Invalidate();return;}
             if (!Scrubbing || e.Button != MouseButtons.Left) return;
             Position = At(e.X); Scrubbing = false; Capture = false;
             SeekRequested?.Invoke(Position); Invalidate();

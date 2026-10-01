@@ -1,3 +1,13 @@
+## Timeline editor, 1.15.71
+
+The left panel groups playback, exact seeking, stepping and loop preview. Sections and Accent cues use dark tabs. Add at playhead stays below the table; **Row actions** contains Delete, Seek to row, Ramp from previous, and copying the selected timestamp to the other tab. Save applies both tabs without closing.
+
+Drag a section diamond or accent dot to align their timestamps. Opposite-lane markers attract within eight screen pixels, so zooming in makes snapping more precise. Hold **Shift** while dragging a marker to bypass marker snapping and optional audio-hit snapping. Sections cannot cross their neighbours, and the first remains at zero. Shift-drag on empty timeline space still selects a loop. Arrow-key nudges remain exact.
+
+The ruler uses round intervals and five minor subdivisions. **Pointer** in the timeline header shows the hovered time to milliseconds. The gold playhead extends through the waveform and updates independently of background loading, using the acquisition timestamp of the existing playback sample. It is a display estimate, not an audio-device clock or a guarantee of millisecond audible accuracy. Pause, seek and Preview 2 s remain the precise audition workflow.
+
+A retained waveform image covers three visible spans and shifts during nearby panning. It is rebuilt for zoom, resize, newly decoded samples, or panning outside that strip. This is separate from the bounded sixteen-chunk decoded-audio cache. At 1200 px, the strip is about 1.3 MiB; it is disposed with the editor. No disk cache or new dependencies.
+
 # Precise accent editing (1.15.67)
 
 1. Open the song's tempo map. Hover over the desired point of the detail timeline and scroll to zoom around that point. Drag the selected window in the thin overview bar, or scroll over that bar, to pan without changing zoom or seeking. Clicking outside the selected window centres the same-sized view there. Whole song resets the view.

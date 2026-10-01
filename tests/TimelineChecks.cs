@@ -263,6 +263,38 @@ internal static class TimelineChecks
             if(follows!=1)throw new Exception("Saved editor must follow a new song.");
             editor.Close();owner.Close();
         }
+
+        using(var t=new PartyTimeline {Width=1036,Height=220,Duration=60,ViewLength=10,EditSections=true,EditAccents=true}){
+            t.Markers.Add(new PartyTimeline.Marker {Row=0,Seconds=0});
+            t.Markers.Add(new PartyTimeline.Marker {Row=1,Seconds=3});
+            t.Accents.Add(new PartyTimeline.Marker {Row=0,Seconds=4});
+            if(t.SnapMarker(3.06,false,0)!=3 || t.SnapMarker(4.06,true,1)!=4 || t.SnapMarker(3.1,false,0)!=3.1)
+                throw new Exception("Marker snapping must use an eight-pixel cross-lane threshold.");
+            t.FreeDrag=()=>true;
+            if(t.SnapMarker(3.06,false,0)!=3.06 || t.SnapMarker(4.06,true,1)!=4.06)throw new Exception("Shift must bypass marker snapping.");
+            if(PartyTimeline.TickStep(22.88,1036)!=5 || PartyTimeline.TickStep(.5,1036)!=.05)
+                throw new Exception("Timeline tick intervals must use readable round values.");
+            t.Waveform=new TimelineWaveform.Range {Start=0,Length=60,Peaks=new float[30000],Rms=new float[30000],Attacks=new float[30000]};
+            using(var bitmap=new Bitmap(t.Width,t.Height)){
+                t.DrawToBitmap(bitmap,t.ClientRectangle);var count=t.WaveformRenders;
+                t.Position=3.1;t.DrawToBitmap(bitmap,t.ClientRectangle);
+                if(t.WaveformRenders!=count)throw new Exception("Moving playhead must reuse waveform raster.");
+                t.ViewStart=1;t.DrawToBitmap(bitmap,t.ClientRectangle);
+                if(t.WaveformRenders!=count)throw new Exception("Nearby panning must reuse waveform raster.");
+                t.ViewStart=25;t.DrawToBitmap(bitmap,t.ClientRectangle);
+                if(t.WaveformRenders!=count+1)throw new Exception("Far panning must update waveform raster.");
+                t.Width+=10;t.DrawToBitmap(bitmap,new Rectangle(0,0,bitmap.Width,bitmap.Height));
+                if(t.WaveformRenders!=count+2)throw new Exception("Resize must rebuild waveform raster.");
+            }
+        }
+        var sample=new PlaybackSnapshotReader.Snapshot {TrackUrl="sample",Position=2000,PositionTimestamp=System.Diagnostics.Stopwatch.GetTimestamp()-System.Diagnostics.Stopwatch.Frequency/10};
+        using(var editor=new FrmPartyTempoMap(followMap,"Timestamp test",()=>2,_=>{},_=>{},30,()=>{},()=>true,positionSample:()=>sample)){
+            var cursorPosition=(double?)editor.GetType().GetMethod("EditingPosition",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(editor,null);
+            if(cursorPosition<2.09 || cursorPosition>2.25)throw new Exception("Editor cursor must account for sample acquisition age.");
+            sample=null;
+            cursorPosition=(double?)editor.GetType().GetMethod("EditingPosition",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(editor,null);
+            if(cursorPosition.HasValue)throw new Exception("Editor cursor must stop when its song sample disappears.");
+        }
         Console.WriteLine("Timeline seek, section selection, repeat-save and track-change checks passed.");
     }
 }

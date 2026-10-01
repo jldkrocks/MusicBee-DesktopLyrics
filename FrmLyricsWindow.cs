@@ -1213,7 +1213,7 @@ namespace MusicBeePlugin
                     CancelPartyLookup();_partyMap=preview??_partyTempoStore.LoadMap(track);
                     if(preview==null && !(_partyMap?.Enabled??false))StartPartyOnlineLookup();
                     _lastPartyUpdate=0;UpdatePartyDancers();Invalidate();
-                });
+                }, () => { var sample=_playback.Latest;return sample.TrackUrl==track?sample:null; });
             _tempoMapEditor=editor;
             editor.FollowCurrentSong=()=>{
                 if(IsDisposed || _animationDisposed || !editor.CanFollow || string.IsNullOrWhiteSpace(_artworkTrackUrl) ||
