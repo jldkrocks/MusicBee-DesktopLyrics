@@ -167,7 +167,6 @@ namespace MusicBeePlugin
             _timeline.EditAccents=true;
             _timeline.AccentMoved += MoveAccent;
             _timeline.LoopRangeSelected += (start,end)=>{if(!_preview.Active){_loopStart.Value=(decimal)Math.Round(start,3);_loopEnd.Value=(decimal)Math.Round(end,3);}};
-            _tips.SetToolTip(_timeline,"Blue body shows average energy; thin outlines show peaks. Orange spikes show relative increases in low/mid/high-band energy, not confirmed beats. Mouse wheel zooms under the pointer. Shift-drag selects a loop range. Drag gold accents to move their hit time. Select an accent, then Left/Right nudges 10 ms; Shift nudges 1 ms. Clicking a section still selects and seeks. Editing does not seek playback.");
             _overview.Duration=_timeline.Duration;_overview.Dock=DockStyle.Fill;
             _overview.ViewPanned += start => { _timeline.ViewStart=start; _timeline.Invalidate(); };
             _timeline.MarkerSelected += row => { _tabs.SelectedIndex = 0; if (row >= 0 && row < _grid.Rows.Count) _grid.CurrentCell = _grid.Rows[row].Cells[0]; };
@@ -206,11 +205,10 @@ namespace MusicBeePlugin
             AddButton(actions, "Close", () => Close());
             _status.Text = "Diamonds select sections; gold circles select accents. Save applies both tabs and keeps this window open.";
             _status.ForeColor = Color.FromArgb(178, 192, 212);
-            help.Text = "Overview: drag or scroll to pan. Wheel over detail to zoom. Detail: drag empty space to pan, gold accents to edit; Shift-drag a loop. Hover for help.";
+            help.Text = "Overview: drag or scroll to pan. Wheel over detail to zoom. Detail: drag empty space to pan, gold accents to edit; Shift-drag a loop. Hover here for timeline help.";
             _tips.SetToolTip(_seekStep, "Seconds moved by - step and + step. Pause for precise placement; 0.01 s is the smallest step.");
             _tips.SetToolTip(_seekTime, "Exact song position in seconds. Enter or Seek moves playback without changing your rows.");
             _tips.SetToolTip(_enabled, "Apply this song's saved sections and accent cues. Uncheck to use its ordinary BPM settings.");
-            _tips.SetToolTip(_timeline, "Diamonds select sections; gold circles select accent cues. Both seek to their saved time. Click empty space to seek; drag empty space to pan at the current zoom. Drag the playhead to seek. Shift-drag selects a loop. Blue = Normal, purple = Side to side, grey = Hold, teal = Rest.");
             _tips.SetToolTip(_add, "Add a section or accent at the playhead, depending on the selected tab. Pause and fine-seek first for exact placement. Save applies the new row.");
             SetupAccentGrid(map);
             SetupRowMenu();
@@ -248,7 +246,7 @@ namespace MusicBeePlugin
                 _accentGrid.Rows[row].Cells[3].Value=hold.ToString("0.000",CultureInfo.CurrentCulture);
                 _accentGrid.Rows[row].Cells[6].Value=recovery.ToString("0.000",CultureInfo.CurrentCulture);
             };
-            _tips.SetToolTip(_overview,"Drag the selected window or scroll to pan without changing zoom or seeking. Click outside it to centre the view there.");
+            _tips.SetToolTip(help, "Wheel zooms under the pointer. Drag empty detail space or the overview to pan; click detail to seek. Drag the playhead to seek, gold accents to edit time, and white handles to edit durations. Shift-drag selects a loop. Selected accent: arrows nudge 10 ms, Shift-arrows 1 ms. Blue waveform shows RMS and peaks; orange shows relative attacks, not confirmed beats. Nearby panning reuses a buffered waveform; moving beyond the buffer loads another range in the background.");
             _tips.SetToolTip(_loopButton,"Audition the range repeatedly with 0.5 s lead-in. Valid edits preview without saving. Loop boundaries pause/seek/resume MusicBee and are not gapless. Stop restores the saved map.");
             detail.Controls.Add(_overview,0,0);detail.Controls.Add(_timeline,0,1);detail.Controls.Add(editing,0,2);
             layout.Controls.Add(help, 0, 0); layout.Controls.Add(detail, 0, 1);
@@ -256,7 +254,7 @@ namespace MusicBeePlugin
             var mapOptions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
             _enabled.Dock = DockStyle.None; _enabled.AutoSize = true;
             _flowAccents.Text = "Flow accent sequences"; _flowAccents.AutoSize = true; _flowAccents.Checked = map.FlowAccentSequences;
-            _tips.SetToolTip(_flowAccents, "During Hold/Rest, the first Alternate hit keeps the starting side, then each Alternate flips from the preceding cue. Current/Left/Right cues also establish the side. On returning to dance with Align off, an opposing release pose uses a short centre bridge. Hit times, BPM and beat phase stay unchanged. Off preserves legacy choreography. Save applies.");
+            _tips.SetToolTip(_flowAccents, "During Hold/Rest, the first Alternate hit keeps the starting side, then each Alternate flips from the preceding cue. Current/Left/Right cues also establish the side. On returning to dance with Align off, recover through centre, then land on the opposite side from the final accent. The dance keeps that handedness until a new rest, Align or dance/rhythm change. Hit times, BPM and beat phase stay unchanged. Off preserves legacy choreography. Save applies.");
             mapOptions.Controls.Add(_enabled); mapOptions.Controls.Add(_flowAccents);
             layout.Controls.Add(mapOptions, 0, 4); layout.Controls.Add(_status, 0, 5); layout.Controls.Add(actions, 0, 6);
             Controls.Add(layout);

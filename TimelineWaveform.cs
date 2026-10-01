@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace MusicBeePlugin
 {
-    // One bounded range, one worker and no disk cache. Results are polled by
+    // One buffered bounded range, one worker and no disk cache. Results are polled by
     // the editor, so closing it never leaves an Invoke on a disposed handle.
     internal sealed class TimelineWaveform : IDisposable
     {
@@ -16,6 +16,15 @@ namespace MusicBeePlugin
             internal float[] Peaks, Rms, Attacks;
             internal float AttackDisplayMaximum=1;
             internal string Error;
+            internal bool Covers(double start, double length) => Peaks != null && start >= Start - 1e-7 && start + length <= Start + Length + 1e-7;
+            internal bool PixelBins(double start, double end, out int first, out int last)
+            {
+                first = last = 0;
+                if (Peaks == null || Length <= 0 || end <= Start || start >= Start + Length) return false;
+                first = Math.Max(0, Math.Min(Peaks.Length - 1, (int)Math.Floor((start - Start) / Length * Peaks.Length)));
+                last = Math.Max(first + 1, Math.Min(Peaks.Length, (int)Math.Ceiling((end - Start) / Length * Peaks.Length)));
+                return true;
+            }
             internal double Snap(double time)
             {
                 if (Attacks == null) return time;
@@ -38,7 +47,15 @@ namespace MusicBeePlugin
         private static readonly SemaphoreSlim DecodeGate = new SemaphoreSlim(1,1);
         private Task<Range> _task;
         private CancellationTokenSource _cancel;
-        private double _start=-1,_length;
+        private double _start=-1,_length, _pendingStart, _pendingLength, _pendingZoom, _dataZoom;
+        private string _path;
+        private readonly Func<string,double,double,CancellationToken,Range> _read;
+        internal TimelineWaveform(Func<string,double,double,CancellationToken,Range> read = null) { _read = read ?? Read; }
+        internal static Range BufferedRange(double start, double length)
+        {
+            var bufferedLength = Math.Min(60, length * 3);
+            return new Range { Start = Math.Max(0, start - (bufferedLength - length) / 2), Length = bufferedLength };
+        }
         private DateTime _changed;
         private bool _disposed,_requested;
         internal Range Data {get;private set;}
@@ -46,25 +63,40 @@ namespace MusicBeePlugin
         internal void Update(string path,double start,double length)
         {
             if(_disposed)return;
-            if(start!=_start || length!=_length){_start=start;_length=length;_changed=DateTime.UtcNow;_requested=false;Data=null;_cancel?.Cancel();}
+            bool changedPath = !string.Equals(_path, path, StringComparison.OrdinalIgnoreCase);
+            if(changedPath || start!=_start || length!=_length)
+            {
+                _path=path; _start=start; _length=length; _changed=DateTime.UtcNow; _requested=false;
+                if(changedPath)Data=null;
+                // Keep an in-flight buffer if the new viewport still fits it.
+                if(changedPath || _pendingZoom!=length || start<_pendingStart || start+length>_pendingStart+_pendingLength) _cancel?.Cancel();
+            }
             if(_task!=null){
                 if(!_task.IsCompleted)return;
                 var result=_task.Result;_task=null;
-                if(!_cancel.IsCancellationRequested){Data=result;Status=result.Error??"Waveform: audio peaks, not automatically identified beats.";}
+                if(!_cancel.IsCancellationRequested){
+                    if(result.Peaks!=null){Data=result;_dataZoom=_pendingZoom;}
+                    Status=result.Error??"Waveform: audio peaks, not automatically identified beats.";
+                }
                 _cancel.Dispose();_cancel=null;
             }
+            if(Data!=null && _dataZoom==length && Data.Covers(start,length))return;
+            if(length<=0 || length>60){Data=null;Status="Zoom to 60 seconds or less for waveform.";return;}
             if(_requested || (DateTime.UtcNow-_changed).TotalMilliseconds<300)return;
-            if(length<=0 || length>60){Status="Zoom to 60 seconds or less for waveform.";return;}
             _requested=true;
             if(string.IsNullOrEmpty(path)||path.StartsWith(@"\\")||!File.Exists(path)){Status="Waveform unavailable: local audio file required.";return;}
+            var buffer=BufferedRange(start,length);
+            _pendingStart=buffer.Start;_pendingLength=buffer.Length;_pendingZoom=length;
             Status="Loading waveform...";_cancel=new CancellationTokenSource();var token=_cancel.Token;
             _task=Task.Run(()=>{
                 bool entered=false;
-                try { DecodeGate.Wait(token);entered=true;return Read(path,start,length,token); }
-                catch(OperationCanceledException){return new Range {Start=start,Length=length,Error="Waveform cancelled."};}
+                try { DecodeGate.Wait(token);entered=true;return _read(path,buffer.Start,buffer.Length,token); }
+                catch(OperationCanceledException){return new Range {Start=buffer.Start,Length=buffer.Length,Error="Waveform cancelled."};}
+                catch(Exception ex){return new Range {Start=buffer.Start,Length=buffer.Length,Error="Waveform unavailable: "+ex.Message};}
                 finally{if(entered)DecodeGate.Release();}
             });
         }
+
         internal static Range Read(string path,double start,double length,CancellationToken token)
         {
             var result=new Range {Start=start,Length=length};IntPtr library=IntPtr.Zero;

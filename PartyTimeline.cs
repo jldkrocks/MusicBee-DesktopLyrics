@@ -122,6 +122,8 @@ namespace MusicBeePlugin
             using (var track = new SolidBrush(Color.FromArgb(57, 64, 81)))
                 g.FillRectangle(track, MarginX, 43, Math.Max(1, Width - MarginX * 2), 10);
             if (Duration <= 0) return;
+            var contentClip = g.Save();
+            g.SetClip(new Rectangle(MarginX, 20, Math.Max(1, Width - 2 * MarginX), 165), CombineMode.Intersect);
             if(LoopEnd>LoopStart)using(var loop=new SolidBrush(Color.FromArgb(35,247,206,115)))g.FillRectangle(loop,X(LoopStart),20,X(LoopEnd)-X(LoopStart),43);
             var ordered = new List<Marker>(Markers); ordered.Sort((a,b) => a.Seconds.CompareTo(b.Seconds));
             for (int i = 0; i < ordered.Count; i++)
@@ -143,6 +145,7 @@ namespace MusicBeePlugin
                     g.FillEllipse(fill, X(_dragAccent != null && cue.Row == _dragAccent.Row ? _dragAccent.Seconds : cue.Seconds) - 4, 23, 8, 8);
             using (var pen = new Pen(Color.FromArgb(247, 206, 115), 2))
                 g.DrawLine(pen, X(Position), 29, X(Position), 62);
+            g.Restore(contentClip);
             var divisions = Math.Max(2, Math.Min(8, Width / 115));
             for (int i = 0; i <= divisions; i++)
             {
@@ -151,7 +154,9 @@ namespace MusicBeePlugin
                 var left = Math.Max(0, Math.Min(Width - size.Width, (int)X(seconds) - size.Width / 2));
                 TextRenderer.DrawText(g, label, Font, new Point(left, 67), Color.FromArgb(166, 177, 197));
             }
-            if(Waveform?.Peaks != null && Waveform.Start==ViewStart && Math.Abs(Waveform.Length-Span)<.00001)
+            contentClip = g.Save();
+            g.SetClip(new Rectangle(MarginX, 86, Math.Max(1, Width - 2 * MarginX), 99), CombineMode.Intersect);
+            if(Waveform?.Peaks != null && Waveform.Start < ViewStart+Span && Waveform.Start+Waveform.Length > ViewStart)
             {
                 using(var outline=new Pen(Color.FromArgb(140,184,209)))
                 using(var body=new Pen(Color.FromArgb(80,134,166)))
@@ -159,7 +164,9 @@ namespace MusicBeePlugin
                 {
                     int pixels=Math.Max(1,Width-MarginX*2);var peaks=Waveform.Peaks;float previousPeak=0;
                     for(int px=0;px<pixels;px++){
-                        int first=px*peaks.Length/pixels,last=Math.Max(first+1,(px+1)*peaks.Length/pixels);float peak=0,attack=0;double energy=0;int bins=0;
+                        int first,last;
+                        if(!Waveform.PixelBins(ViewStart+px*Span/pixels,ViewStart+(px+1)*Span/pixels,out first,out last)){previousPeak=0;continue;}
+                        float peak=0,attack=0;double energy=0;int bins=0;
                         for(int n=first;n<Math.Min(last,peaks.Length);n++){
                             peak=Math.Max(peak,peaks[n]);
                             var rms=Waveform.Rms==null?0:Waveform.Rms[n];energy+=rms*rms;bins++;
@@ -175,6 +182,9 @@ namespace MusicBeePlugin
                 TextRenderer.DrawText(g,"ATTACK STRENGTH (relative)",Font,new Point(MarginX,127),Color.FromArgb(250,187,86));
             }
             else TextRenderer.DrawText(g,WaveformStatus??"Waveform",Font,new Point(MarginX,94),Color.Silver);
+            g.Restore(contentClip);
+            contentClip = g.Save();
+            g.SetClip(new Rectangle(MarginX, 20, Math.Max(1, Width - 2 * MarginX), 165), CombineMode.Intersect);
             foreach(var cue in Accents) {
                 var time=_dragAccent!=null && cue.Row==_dragAccent.Row?_dragAccent.Seconds:cue.Seconds;
                 if(time<ViewStart || time>ViewStart+Span)continue;
@@ -194,8 +204,11 @@ namespace MusicBeePlugin
                 foreach(var time in new[]{points[0],points[2],points[3]}){
                     float x=X(time);if(x>=MarginX&&x<=Width-MarginX)g.FillRectangle(Brushes.White,x-3,172,6,12);
                 }
+                g.Restore(contentClip);
+                contentClip = g.Save();
                 TextRenderer.DrawText(g,"Selected accent: purple = preparation, gold = hold, green = recovery. Drag white handles.",Font,new Point(MarginX,190),Color.Silver);
             }
+            g.Restore(contentClip);
             if (Focused) ControlPaint.DrawFocusRectangle(g, new Rectangle(2, 2, Width - 4, Height - 4));
         }
         protected override void OnMouseDown(MouseEventArgs e)

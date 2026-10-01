@@ -171,7 +171,7 @@ namespace MusicBeePlugin
                             sequenceEnd = next < Sections.Count && !Sections[next].AlignBeat ? Sections[next].StartSeconds : -1;
                         }
                     }
-                    else if (cue.TimeSeconds <= seconds) lastSequenceCue = null;
+
                 }
                 if (pose.Held && side != 0 && cue.TimeSeconds >= heldStart && cue.TimeSeconds <= seconds)
                     pose.Frame = side < 0 ? 6 : 0;
@@ -186,18 +186,9 @@ namespace MusicBeePlugin
             }
             if (FlowAccentSequences && !pose.Held && lastSequenceCue != null && sequenceEnd >= 0 && seconds >= sequenceEnd)
             {
-                // Bridge only the release slot, never change the beat clock or later poses.
-                double release = Math.Max(sequenceEnd, lastSequenceCue.TimeSeconds + lastSequenceCue.HoldSeconds + lastSequenceCue.EffectiveRecovery);
-                if (seconds >= release && seconds < release + 2)
-                {
-                    var start = CoreAt(release);
-                    bool sameSection = true;
-                    foreach (var s in Sections) if (s.StartSeconds > sequenceEnd && s.StartSeconds <= seconds) { sameSection = false; break; }
-                    if (sameSection && pose.Frame == start.Frame && pose.Beat - start.Beat < 1 &&
-                        (start.Frame == 0 || start.Frame == 6) && start.Frame != lastSequenceFrame)
-                        pose.Frame = lastSequenceFrame == 6 ? 9 : 3;
-                }
+                ApplyFlowReturn(ref pose, seconds, sequenceEnd, lastSequenceCue, lastSequenceFrame);
             }
+
             if (strongest != null)
             {
                 pose.Impact = (float)(pose.Impact * (1 - weight) + amount);
@@ -232,6 +223,36 @@ namespace MusicBeePlugin
             }
             if (!FlowAccentSequences && strongest == null && !pose.Held) EaseRestExit(ref pose, seconds);
             return pose;
+        }
+
+        private void ApplyFlowReturn(ref PartyMapPose pose, double seconds, double returnTime, PartyAccentCue cue, int lastFrame)
+        {
+            if (lastFrame != 0 && lastFrame != 6) return;
+            double release = Math.Max(returnTime, cue.TimeSeconds + cue.HoldSeconds + cue.EffectiveRecovery);
+            if (seconds < release) return;
+            PartyTempoSection entry = null;
+            foreach (var section in Sections)
+            {
+                if (section.StartSeconds > seconds) break;
+                if (section.StartSeconds == returnTime) entry = section;
+                else if (entry != null && (section.AlignBeat || section.Style == PartyDanceStyle.Hold ||
+                    section.Style == PartyDanceStyle.Rest || section.Rhythm != entry.Rhythm || section.Style != entry.Style)) return;
+            }
+            if (entry == null) return;
+            var start = CoreAt(release);
+            // Find the next scheduled side landing in beat space. Only the
+            // drawing's handedness changes; tempo, beat positions and accents do not.
+            double nextBeat = Math.Floor(start.Beat + 1e-9) + 1;
+            int nextFrame = 0;
+            for (int n = 0; n < 8; n++, nextBeat++)
+            {
+                nextFrame = MakePose(nextBeat, start.Bpm, entry.Style, entry.Rhythm, entry.SwingPercent, entry.EffectiveSpeed, false).Frame;
+                if (nextFrame == 0 || nextFrame == 6) break;
+            }
+            if (pose.Beat + 1e-9 < nextBeat)
+                pose.Frame = entry.Style == PartyDanceStyle.SideToSide ? lastFrame : lastFrame == 6 ? 9 : 3;
+            else if (nextFrame == lastFrame)
+                pose.Frame = (pose.Frame + 6) % 12;
         }
 
         private void EaseRestExit(ref PartyMapPose pose, double seconds)

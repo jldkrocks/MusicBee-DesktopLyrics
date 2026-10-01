@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Reflection;
+using System.Threading;
 using System.Windows.Forms;
 using MusicBeePlugin;
 
@@ -98,6 +99,34 @@ internal static class TimelineChecks
             Call(t,"OnKeyDown",new KeyEventArgs(Keys.Escape));
             if(cue.Prepare!=.5 || changes!=1)throw new Exception("Escape must restore duration without committing.");
         }
+        using(var t=new PartyTimeline {Width=236,Height=220,Duration=100,ViewStart=10,ViewLength=1,LoopStart=0,LoopEnd=100,Position=9.99})
+        using(var bitmap=new Bitmap(236,220)) {
+            t.DrawToBitmap(bitmap,new Rectangle(0,0,236,220));
+            if(bitmap.GetPixel(5,40).ToArgb()!=t.BackColor.ToArgb() || bitmap.GetPixel(231,40).ToArgb()!=t.BackColor.ToArgb())
+                throw new Exception("Zoomed loop and playhead must not paint into timeline margins.");
+        }
+        int decodes=0;
+        using(var waveformCache=new TimelineWaveform((path,start,length,token)=>{Interlocked.Increment(ref decodes);return new TimelineWaveform.Range {Start=start,Length=length,Peaks=new float[100],Rms=new float[100],Attacks=new float[100]};})) {
+            string path=typeof(TimelineChecks).Assembly.Location;
+            Action<double,double> update=(start,length)=>{waveformCache.Update(path,start,length);waveformCache.GetType().GetField("_changed",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(waveformCache,DateTime.UtcNow.AddSeconds(-1));waveformCache.Update(path,start,length);};
+            update(10,2);
+            if(!SpinWait.SpinUntil(()=>{waveformCache.Update(path,10,2);return waveformCache.Data!=null;},2000))throw new Exception("Buffered waveform failed to finish.");
+            var cached=waveformCache.Data;
+            if(!cached.Covers(9,4) || cached.Length>60)throw new Exception("Waveform must include bounded pan headroom.");
+            update(10.5,2);update(9.5,2);
+            if(decodes!=1 || !ReferenceEquals(cached,waveformCache.Data))throw new Exception("Panning inside buffer must reuse identical waveform without decoding.");
+            waveformCache.Update(path,13,2);
+            if(!ReferenceEquals(cached,waveformCache.Data))throw new Exception("Partially exposed pan must keep the existing waveform while loading.");
+            update(13,2);
+            if(!SpinWait.SpinUntil(()=>{waveformCache.Update(path,13,2);return !ReferenceEquals(cached,waveformCache.Data);},2000))throw new Exception("Panning beyond buffer must load the next range.");
+            if(decodes!=2)throw new Exception("Pan extension should decode only once.");
+            int first,lastBin;
+            if(!cached.PixelBins(10,10.06,out first,out lastBin) || first!=33 || lastBin!=35)throw new Exception("Cached bins must map to absolute song time.");
+            if(cached.PixelBins(30,31,out first,out lastBin))throw new Exception("Out-of-buffer pixels must not repeat the final sample.");
+            waveformCache.Update(path+"missing",13,2);
+            if(waveformCache.Data!=null)throw new Exception("Changing songs must clear old waveform data.");
+        }
+        if(TimelineWaveform.BufferedRange(0,.5).Start!=0 || TimelineWaveform.BufferedRange(100,40).Length!=60)throw new Exception("Pan headroom must respect start and decode cap.");
         var bandFixture=new float[3000];
         for(int i=0;i<1000;i++)bandFixture[(i<500?0:1000)+i]=.3f;
         var attacks=TimelineWaveform.BuildAttacks(bandFixture,1);
@@ -117,6 +146,8 @@ internal static class TimelineChecks
         using (var editor = new FrmPartyTempoMap(map, "Test song", () => position,
             p => requestedSeek = p, m => { saved++; last = m; }, 100, () => {}, () => false))
         {
+            var tips=(ToolTip)Field(editor,"_tips");
+            if(!string.IsNullOrEmpty(tips.GetToolTip((Control)Field(editor,"_timeline"))) || !string.IsNullOrEmpty(tips.GetToolTip((Control)Field(editor,"_overview"))))throw new Exception("Editing surfaces must not show distracting tooltips.");
             Call(editor,"RefreshMarkers");
             if(((PartyTimeline)Field(editor,"_timeline")).Accents[0].Recovery!=.22)throw new Exception("Timeline must show legacy Bop recovery as 0.22 seconds.");
             Call(editor, "SaveMap");

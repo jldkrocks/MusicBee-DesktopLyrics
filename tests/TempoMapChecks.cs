@@ -139,8 +139,25 @@ internal static class TempoMapChecks
             throw new Exception("Flow must start on held side and alternate every landing.");
         flow.Accents[0].Pose=PartyAccentPose.Current;
         if(flow.At(1.2).Frame!=6 || flow.At(2.05).Frame!=6)throw new Exception("Current first cue must not flip later alternation.");
-        if(flow.At(2.26).Frame!=6 || flow.At(2.28).Frame!=9 || flow.At(2.51).Frame!=3)
-            throw new Exception("Opposite release must bridge through centre then rejoin the next scheduled pose.");
+        if(flow.At(2.26).Frame!=6 || flow.At(2.28).Frame!=9 || flow.At(2.51).Frame!=9 || flow.At(3.01).Frame!=0 || flow.At(4.01).Frame!=6)
+            throw new Exception("Release must bridge through centre then alternate opposite the final accent on scheduled beats.");
+        var opening=new PartyTempoMap {Version=8,TrackUrl="99.9 fixture",FlowAccentSequences=true,InitialBeat=-3.4721666666666668,Sections={
+            new PartyTempoSection {Bpm=166,Style=PartyDanceStyle.Rest},new PartyTempoSection {StartSeconds=3.458,Bpm=166}}};
+        foreach(double t in new[]{2.456,2.529,2.716,2.896,3.441})opening.Accents.Add(new PartyAccentCue {TimeSeconds=t,Pose=PartyAccentPose.Alternate,NewHitPriority=true});
+        if(opening.At(3.441).Frame!=0 || opening.At(3.8).Frame!=3 || opening.At(4.15).Frame!=6 || opening.At(4.88).Frame!=0)
+            throw new Exception("Recorded five-hit opening must not repeat final accent side after centre.");
+        opening.Sections.Add(new PartyTempoSection {StartSeconds=4.5,Bpm=166});
+        if(opening.At(4.88).Frame!=0)throw new Exception("BPM points must not reset flow handedness.");
+        foreach(PartyRhythm rhythm in Enum.GetValues(typeof(PartyRhythm))) {
+            opening.Sections.RemoveAt(opening.Sections.Count-1);opening.Sections[1].Rhythm=rhythm;
+            int last=opening.At(3.441).Frame;int sides=0;
+            for(double t=3.67;t<10;t+=.002){int f=opening.At(t).Frame;if(f!=0&&f!=6)continue;
+                if(sides==0 && f==last)throw new Exception("First dance side must oppose final accent for "+rhythm);
+                if(f!=last){sides++;last=f;}
+            }
+            if(sides<2)throw new Exception("Flow must continue alternating for "+rhythm);
+            opening.Sections.Add(new PartyTempoSection {StartSeconds=11,Bpm=166});
+        }
         var reproduced=JsonConvert.DeserializeObject<PartyTempoMap>(JsonConvert.SerializeObject(flow));
         if(!reproduced.FlowAccentSequences || reproduced.At(2.28).Frame!=9)throw new Exception("Flow must persist and work when seeking directly.");
         flow.FlowAccentSequences=false;
