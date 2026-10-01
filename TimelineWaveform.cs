@@ -14,6 +14,7 @@ namespace MusicBeePlugin
         {
             internal double Start, Length;
             internal float[] Peaks, Rms, Attacks;
+            internal float AttackDisplayMaximum=1;
             internal string Error;
             internal double Snap(double time)
             {
@@ -22,7 +23,7 @@ namespace MusicBeePlugin
                 for (int i=1;i<Attacks.Length-1;i++)
                 {
                     var candidate=Start+i*step; var distance=Math.Abs(candidate-time);
-                    if(distance>bestDistance || Attacks[i]<.15f)continue;
+                    if(distance>bestDistance || Attacks[i]<AttackDisplayMaximum*.15f)continue;
                     if(Attacks[i]>=Attacks[i-1] && Attacks[i]>Attacks[i+1]){best=candidate;bestDistance=distance;}
                 }
                 return Math.Round(best,3);
@@ -79,10 +80,19 @@ namespace MusicBeePlugin
                 var rms=new float[peaks.Length];var bands=new float[peaks.Length*3];
                 var hr=decode(path,start,length,peaks,rms,bands,peaks.Length,cancel);GC.KeepAlive(cancel);
                 if(hr<0)throw new InvalidOperationException("Windows could not decode this audio range ("+hr.ToString("X8")+").");
-                result.Peaks=peaks;result.Rms=rms;result.Attacks=BuildAttacks(bands,length);
+                result.Peaks=peaks;result.Rms=rms;result.Attacks=BuildAttacks(bands,length);result.AttackDisplayMaximum=AttackScale(result.Attacks);
             }catch(Exception ex){result.Error="Waveform unavailable: "+ex.Message;}
             finally{if(library!=IntPtr.Zero)FreeLibrary(library);}
             return result;
+        }
+        internal static float AttackScale(float[] attacks)
+        {
+            var nonzero=Array.FindAll(attacks,value=>value>0);
+            if(nonzero.Length==0)return 1;
+            Array.Sort(nonzero);
+            // Clip only the display of the strongest outliers. Keep raw
+            // relative values for local-maximum timing and snapping.
+            return Math.Max(.05f,nonzero[(int)Math.Floor((nonzero.Length-1)*.98)]);
         }
         // Positive energy changes in low/mid/high bands. A centred 8ms
         // window separates sustained loudness from attacks without estimating BPM.

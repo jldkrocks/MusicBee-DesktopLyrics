@@ -150,7 +150,7 @@ namespace MusicBeePlugin
                 using(var body=new Pen(Color.FromArgb(80,134,166)))
                 using(var attacks=new Pen(Color.FromArgb(250,187,86)))
                 {
-                    int pixels=Math.Max(1,Width-MarginX*2);var peaks=Waveform.Peaks;
+                    int pixels=Math.Max(1,Width-MarginX*2);var peaks=Waveform.Peaks;float previousPeak=0;
                     for(int px=0;px<pixels;px++){
                         int first=px*peaks.Length/pixels,last=Math.Max(first+1,(px+1)*peaks.Length/pixels);float peak=0,attack=0;double energy=0;int bins=0;
                         for(int n=first;n<Math.Min(last,peaks.Length);n++){
@@ -160,9 +160,9 @@ namespace MusicBeePlugin
                         }
                         float level=(float)Math.Sqrt(energy/Math.Max(1,bins));
                         g.DrawLine(body,MarginX+px,108-level*19,MarginX+px,108+level*19);
-                        g.DrawLine(outline,MarginX+px,108-peak*19,MarginX+px+1,108-peak*19);
-                        g.DrawLine(outline,MarginX+px,108+peak*19,MarginX+px+1,108+peak*19);
-                        if(attack>0)g.DrawLine(attacks,MarginX+px,166,MarginX+px,166-attack*28);
+                        g.DrawLine(outline,MarginX+Math.Max(0,px-1),108-(px==0?peak:previousPeak)*19,MarginX+px,108-peak*19);
+                        g.DrawLine(outline,MarginX+Math.Max(0,px-1),108+(px==0?peak:previousPeak)*19,MarginX+px,108+peak*19);previousPeak=peak;
+                        if(attack>0)g.DrawLine(attacks,MarginX+px,169,MarginX+px,169-Math.Min(1,attack/Waveform.AttackDisplayMaximum)*25);
                     }
                 }
                 TextRenderer.DrawText(g,"ATTACK STRENGTH (relative)",Font,new Point(MarginX,127),Color.FromArgb(250,187,86));

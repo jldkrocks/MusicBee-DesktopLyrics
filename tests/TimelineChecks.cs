@@ -86,6 +86,8 @@ internal static class TimelineChecks
         if(Math.Abs(strongest-500)>8)throw new Exception("Band change must expose an attack even when total energy stays constant.");
         var waveform=new TimelineWaveform.Range {Start=0,Length=1,Attacks=attacks};
         if(Math.Abs(waveform.Snap(.51)-.5)>.008 || waveform.Snap(.8)!=.8)throw new Exception("Snapping must target nearby attacks only.");
+        var contrast=new float[1000];for(int i=0;i<999;i++)contrast[i]=.1f;contrast[999]=1;
+        if(TimelineWaveform.AttackScale(contrast)!=.1f)throw new Exception("One outlier must not flatten the attack display.");
         var silence=TimelineWaveform.BuildAttacks(new float[3000],1);
         foreach(var v in silence)if(v!=0)throw new Exception("Silence must have no attack spikes.");
         var map = new PartyTempoMap { TrackUrl = "original" };
