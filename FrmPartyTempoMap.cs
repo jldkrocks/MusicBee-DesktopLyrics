@@ -296,7 +296,9 @@ namespace MusicBeePlugin
             _timer.Tick += (sender, args) => PollPlayback();
             _cursorTimer.Tick += (sender,args)=>UpdateCursor();
             Shown += (sender,args)=>{
-                RefreshMarkers();PollPlayback();_timer.Start();
+                RefreshMarkers();PollPlayback();
+                if(IsDisposed)return; // Song following may replace this editor during the poll.
+                _timer.Start();
                 var handle=Handle;string failure;
                 _cursorPacer=RenderFramePacer.TryCreate(token=>PostMessage(handle,CursorMessage,new IntPtr(token),IntPtr.Zero),out failure);
                 if(_cursorPacer!=null)_cursorPacer.Start(120);else _cursorTimer.Start();
